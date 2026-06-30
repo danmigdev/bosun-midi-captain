@@ -1,0 +1,4 @@
+[
+  {"do":"shot","path":"23_onboarding.png"},
+  {"do":"eval","expr":"const o=document.querySelector('[class*=onboard],[class*=wizard]'); return {onboardClass:o?o.className:null, h:[...document.querySelectorAll('h1,h2,h3')].map(e=>e.textContent.trim()).slice(0,8), btns:[...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(Boolean).slice(0,12)};"}
+]

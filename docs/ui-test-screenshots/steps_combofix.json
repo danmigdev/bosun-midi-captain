@@ -1,0 +1,14 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Patches"},
+  {"do":"wait","ms":500},
+  {"do":"clickText","tag":".tile","text":"CLEAN"},
+  {"do":"wait","ms":1200},
+  {"do":"clickText","tag":"button","text":"On enter"},
+  {"do":"wait","ms":500},
+  {"do":"eval","expr":"const s=document.querySelector('#oe-add'); s.scrollIntoView({block:'center'}); const cs=getComputedStyle(s); return {beforeBorder:cs.borderColor, beforeBg:cs.backgroundColor, beforePad:cs.padding, beforeFont:cs.fontSize};"},
+  {"do":"shot","path":"14_combo_before.png"},
+  {"do":"eval","expr":"const st=document.createElement('style'); st.id='combofix'; st.textContent='.addmsg select{background:var(--bg);color:var(--text);border:1px solid var(--border-strong);padding:0.25rem 0.4rem;border-radius:3px;font-size:0.8rem;}'; document.head.appendChild(st); return {injected:true};"},
+  {"do":"wait","ms":300},
+  {"do":"eval","expr":"const s=document.querySelector('#oe-add'); const cs=getComputedStyle(s); return {afterBorder:cs.borderColor, afterBg:cs.backgroundColor, afterPad:cs.padding, afterFont:cs.fontSize};"},
+  {"do":"shot","path":"15_combo_after.png"}
+]

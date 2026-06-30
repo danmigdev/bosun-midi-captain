@@ -1,0 +1,12 @@
+[
+  {"do":"key","key":"Escape"},
+  {"do":"clickText","tag":".navitem","text":"MIDI Learn"},
+  {"do":"wait","ms":500},
+  {"do":"clickText","tag":".pageHead button","text":"Start learn"},
+  {"do":"wait","ms":700},
+  {"do":"shot","path":"22_midilearn_active.png"},
+  {"do":"eval","expr":"const a=window.__app; return {learning:a.learning, navPulse:!!document.querySelector('.pulse-dot'), badge:(document.querySelector('.pageHead button')||{}).textContent};"},
+  {"do":"clickText","tag":".pageHead button","text":"Stop learn"},
+  {"do":"wait","ms":600},
+  {"do":"eval","expr":"const a=window.__app; return {learning:a.learning};"}
+]

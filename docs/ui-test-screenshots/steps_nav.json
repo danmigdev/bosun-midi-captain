@@ -1,0 +1,22 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Patches"},
+  {"do":"wait","ms":900},
+  {"do":"shot","path":"02_patches.png"},
+  {"do":"eval","expr":"const a=window.__app; return {page:a.page, patches:a.patches.map(p=>p.bank+'/'+p.slot+' '+(p.name||'')), dirty:a.dirtyIds.length};"},
+  {"do":"clickText","tag":".navitem","text":"MIDI Learn"},
+  {"do":"wait","ms":700},
+  {"do":"shot","path":"03_midilearn.png"},
+  {"do":"clickText","tag":".navitem","text":"Screen layout"},
+  {"do":"wait","ms":700},
+  {"do":"shot","path":"04_screenlayout.png"},
+  {"do":"clickText","tag":".navitem","text":"Settings"},
+  {"do":"wait","ms":900},
+  {"do":"shot","path":"05_settings.png"},
+  {"do":"clickText","tag":".navitem","text":"Maintenance"},
+  {"do":"wait","ms":700},
+  {"do":"shot","path":"06_maintenance.png"},
+  {"do":"clickText","tag":".navitem","text":"Log"},
+  {"do":"wait","ms":700},
+  {"do":"shot","path":"07_log.png"},
+  {"do":"state"}
+]

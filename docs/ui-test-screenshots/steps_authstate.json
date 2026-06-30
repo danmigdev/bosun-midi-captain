@@ -1,0 +1,3 @@
+[
+  {"do":"eval","expr":"(async () => { const s = await window.__invoke('midi_bridge_status'); const a = window.__app; return { backendBridge: s, learning: a.learning, captures: a.captures.length }; })()"}
+]

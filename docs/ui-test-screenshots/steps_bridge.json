@@ -1,0 +1,10 @@
+[
+  {"do":"wait","ms":4000},
+  {"do":"clickText","tag":".navitem","text":"MIDI Learn"},
+  {"do":"wait","ms":800},
+  {"do":"shot","path":"30_bridge_off.png"},
+  {"do":"clickText","tag":".bridge button","text":"Start bridge"},
+  {"do":"wait","ms":1500},
+  {"do":"shot","path":"31_bridge_on.png"},
+  {"do":"eval","expr":"const a=window.__app; const b=document.querySelector('.bridge'); return {bridgeText:b?b.textContent.replace(/\\s+/g,' ').trim():null, on:b?b.classList.contains('on'):null};"}
+]

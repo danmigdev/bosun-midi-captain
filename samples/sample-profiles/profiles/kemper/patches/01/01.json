@@ -1,0 +1,47 @@
+{
+  "name": "ACOUSTIC",
+  "tft_color": "#3a8eff",
+  "on_enter": {
+    "messages": [
+      {"type": "kemper_rig", "bank": 1, "rig": 1, "channel": 1}
+    ]
+  },
+  "bindings": [
+    {
+      "switch": "4",
+      "mode": "latched",
+      "label": "C",
+      "led": {"on": "#ff8a00"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "C", "value": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "C", "value": "off", "channel": 1}
+          ]
+        }
+      }
+    },
+    {
+      "switch": "up",
+      "mode": "latched",
+      "label": "DLY",
+      "led": {"on": "#00bcd4"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "Delay", "value": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "Delay", "value": "off", "channel": 1}
+          ]
+        }
+      }
+    }
+  ]
+}

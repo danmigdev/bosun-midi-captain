@@ -1,0 +1,10 @@
+[
+  {"do":"clickText","tag":".tile","text":"ACOUSTIC"},
+  {"do":"wait","ms":1200},
+  {"do":"shot","path":"08_editor_acoustic.png"},
+  {"do":"eval","expr":"const a=window.__app; return {page:a.page, currentPatch:a.currentPatch?(a.currentPatch.bank+'/'+a.currentPatch.slot+' '+a.currentPatch.patch.name):null, bindings:a.currentPatch?a.currentPatch.patch.bindings.length:0};"},
+  {"do":"clickText","tag":"button","text":"›"},
+  {"do":"wait","ms":1000},
+  {"do":"shot","path":"09_editor_next.png"},
+  {"do":"eval","expr":"const a=window.__app; return {currentPatch:a.currentPatch?(a.currentPatch.bank+'/'+a.currentPatch.slot+' '+a.currentPatch.patch.name):null};"}
+]

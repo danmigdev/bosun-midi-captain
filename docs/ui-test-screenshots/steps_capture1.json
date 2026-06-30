@@ -1,0 +1,7 @@
+[
+  {"do":"clickText","tag":".pageHead button","text":"Start learn"},
+  {"do":"wait","ms":1500},
+  {"do":"clickText","tag":".bridge button","text":"Stop bridge"},
+  {"do":"wait","ms":800},
+  {"do":"eval","expr":"const a=window.__app; const b=document.querySelector('.bridge'); return {learning:a.learning, bridgeOn:b?b.classList.contains('on'):null, captures:a.captures.length};"}
+]

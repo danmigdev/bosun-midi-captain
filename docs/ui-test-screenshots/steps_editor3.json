@@ -1,0 +1,8 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Editor"},
+  {"do":"wait","ms":400},
+  {"do":"eval","expr":"const rows=[...document.querySelectorAll('button, .row, .binding, summary, [role=button]')].filter(e=>/FLANGER|HARMONIZER/.test(e.textContent||'')); return rows.map(e=>({tag:e.tagName,cls:e.className,txt:(e.textContent||'').trim().slice(0,40)}));"},
+  {"do":"clickText","tag":".row","text":"FLANGER"},
+  {"do":"wait","ms":500},
+  {"do":"shot","path":"10_editor_binding_expanded.png"}
+]

@@ -1,0 +1,2240 @@
+===== PAGE 1 =====
+ 
+ 
+ 
+ 
+KEMPER PROFILER 
+MIDI Parameter Documentation 14.1 
+
+===== PAGE 2 =====
+ 
+ 
+Legal Notice      2          
+Legal Notice 
+This manual, as well as the software and hardware described in it, is furnished under license and may be used or 
+copied only in accordance with the terms of such license. The content of this manual is furnished for informational 
+use only, is subject to change without notice and should not be construed as a commitment by Kemper GmbH. 
+Kemper GmbH assumes no responsibility or liability for any errors or inaccuracies that may appear in this book. 
+Except as permitted by such license, no part of this publication may be reproduced, stored in a retrieval system, or 
+transmitted in any form or by any means, electronic, mechanical, recording, by smoke signals or otherwise without 
+the prior written permission of Kemper GmbH. 
+KEMPER™, PROFILER™, PROFILE™, PROFILING™, PROFILER PowerHead™, PROFILER PowerRack™, 
+PROFILER Stage™, PROFILER Player™, PROFILER Remote™, KEMPER Kabinet™, KEMPER Power Kabinet™, 
+KEMPER Kone™, KEMPER Rig Exchange™, KEMPER Rig Manager™, PURE CABINET™, CabDriver™, and 
+KEMPER Liquid Profile™ are trademarks of Kemper GmbH. All features and specifications are subject to change 
+without notice. 
+(Rev. May 2026) 
+© Copyright 2026 Kemper GmbH. All rights reserved. 
+www.kemper-amps.com/contact 
+
+===== PAGE 3 =====
+ 
+ 
+Table of Content      3          
+Table of Content 
+Continuous Controllers 
+8 
+Switches 
+9 
+Examples 
+13 
+Continuous Parameters (e.g. Gain, Volume) 
+15 
+Switch or Section Parameters (e.g. Type, On/Off Switches) 
+15 
+Rig Settings (Address Page 4 ($04 hex)) 
+16 
+Fixed FX (Address Page 5 ($05 hex)) 
+17 
+Input Section (Address Page 9 ($09 hex)) 
+19 
+Amplifier (Address Page 10 ($0A hex)) 
+20 
+Amplifier Equalizer (Address Page 11 ($0B hex)) 
+20 
+Legal Notice 
+2 
+Table of Content 
+3 
+List of Tables 
+6 
+Introduction 
+7 
+MIDI Commands 
+8 
+NRPN Definition 
+12 
+MIDI Channel vs. Instance 
+14 
+Parameter Types 
+15 
+Parameter List 
+16 
+
+===== PAGE 4 =====
+ 
+ 
+Table of Content      4          
+Cabinet (Address Page 12 ($0C hex)) 
+21 
+Effect Module A (Address Page 50 ($32 hex)) 
+22 
+Effect Module B (Address Page 51 ($33 hex)) 
+27 
+Effect Module C (Address Page 52 ($34 hex)) 
+27 
+Effect Module D (Address Page 53 ($35 hex)) 
+27 
+Effect Module X (Address Page 56 ($38 hex)) 
+27 
+Effect Module MOD (Address Page 58 ($3A hex)) 
+27 
+Effect Module DLY (Address Page 60 ($3C hex)) 
+27 
+Effect Module REV (Address Page 61 ($3D hex)) 
+27 
+User Scales (Address Page 118 ($76 hex) 
+28 
+Looper and Effect Module Freeze (Address Page 125 ($7D hex)) 
+29 
+System / Global (Address Page 127 ($7F hex)) 
+30 
+General Message Layout 
+32 
+Single Parameter Change 
+34 
+Multi Parameter Change 
+35 
+Morphed Multi Parameter Change 
+36 
+String Parameter Change 
+37 
+BLOB Parameter Change 
+38 
+Extended Parameter/Extended String Parameter Change 
+39 
+Request Single Parameter 
+40 
+Request Multi Parameter 
+41 
+Request String Parameter 
+42 
+Request Extended String Parameter 
+42 
+SYSEX Definition 
+32 
+
+===== PAGE 5 =====
+ 
+ 
+Table of Content      5          
+Request Parameter Value as Rendered String 
+43 
+Tags (Address Page 0 ($00 hex)) 
+48 
+ 
+Appendix A (valid ASCII characters) 
+44 
+Appendix B (list of Effect Types) 
+45 
+Appendix C (string list) 
+48 
+
+===== PAGE 6 =====
+ 
+ 
+List of Tables      6          
+List of Tables 
+Table 1: MIDI CC continuous controllers ................................................................................8 
+Table 2: MIDI CC switches .....................................................................................................9 
+Table 3: NRPN controller assignments .................................................................................12 
+Table 4: structure of a KEMPER PROFILER SYSEX message ............................................32 
+Table 5: function codes for KEMPER PROFILER SYSEX messages ...................................33 
+Table 6: message part for single parameter change .............................................................34 
+Table 7: message part for a multi parameter change ............................................................35 
+Table 8: message part for a morphed multi parameter change .............................................36 
+Table 9: message part for a string parameter change...........................................................37 
+Table 10: message part for a BLOB parameter ....................................................................38 
+Table 11: message part for a single parameter request ........................................................40 
+Table 12: message part for a multi parameter request ..........................................................41 
+Table 13: message part for a string parameter request ........................................................42 
+Table 14: message part for a string render request ..............................................................43 
+Table 15: ASCII characters allowed in tags ..........................................................................44 
+ 
+ 
+
+===== PAGE 7 =====
+ 
+ 
+Introduction      7          
+Introduction 
+This document reflects the state of KEMPER PROFILER™ OS version 12 or higher. 
+The PROFILER features more than 800 parameters – far more than can be addressed by a standard MIDI controller 
+message, where only 128 parameters can be reached. Therefore, the PROFILER supports the NRPN (Non-
+Registered Parameter Numbers) protocol in addition to the proprietary SYSEX protocol. 
+However, for the most used functions, there are also MIDI commands with the standard controller range. 
+The PROFILER Player™ supports a subset of these controllers corresponding to its upgrade level and feature set. 
+
+===== PAGE 8 =====
+ 
+ 
+MIDI Commands      8          
+MIDI Commands 
+The PROFILER supports several simple MIDI Control Change (CC) commands that can be sent from third-party 
+MIDI-devices, to control effects and load Slots in Performance Mode. 
+Continuous Controllers 
+CC # 
+Remarks 
+1 
+Wah Pedal 
+4 
+Pitch Pedal 
+7 
+Volume Pedal 
+10 
+Panorama 
+11 
+Morph Pedal 
+68 
+Delay Mix 
+69 
+Delay Feedback 
+70 
+Reverb Mix 
+71 
+Reverb Time 
+72 
+Gain 
+73 
+Monitor (Output) Volume 
+ 
+Table 1: MIDI CC continuous controllers 
+ 
+ 
+
+===== PAGE 9 =====
+ 
+ 
+MIDI Commands      9          
+Switches 
+CC # 
+Value 
+Remarks 
+16 
+any 
+toggles all modules A-REV between on and off state 
+17 
+1/0 
+1: module A on 
+0: module A off 
+18 
+1/0 
+1: module B on 
+0: module B off 
+19 
+1/0 
+1: module C on 
+0: module C off 
+20 
+1/0 
+1: module D on 
+0: module D off 
+22 
+1/0 
+1: module X on 
+0: module X off 
+24 
+1/0 
+1: module MOD on 
+0: module MOD off 
+26 
+1/0 
+1: module DLY on 
+0: module DLY off (without spillover) 
+27 
+1/0 
+1: module DLY on 
+0: module DLY off (with spillover) 
+28 
+1/0 
+1: module REV on 
+0: module REV off (without spillover) 
+29 
+1/0 
+1: module REV on 
+0: module REV off (with spillover) 
+30 
+1/0 
+any value triggers TAP tempo 
+1: activates Beat Scanner 
+0: deactivates Beat Scanner 
+If your floorboard supports separate events on “pressing” and “releasing” a button, send 1 
+when “pressing” and 0 when “releasing”. If the floorboard can only send one event, use value 
+0. 
+When value 1 has been sent and no value 0 follows for 3 seconds, the Beat Scanner gets 
+activated automatically. 
+31 
+1/0 
+1: open Tuner Mode 
+0: close Tuner Mode 
+
+===== PAGE 10 =====
+ 
+ 
+MIDI Commands      10          
+33 
+1/0 
+1: Rotary Speaker fast 
+0: Rotary Speaker slow 
+34 
+1/0 
+1: Delay Infinity on (across all effect modules) 
+0: Delay Infinity off (across all effect modules) 
+35 
+1/0 
+1: Delay and Reverb Freeze on (across all effect modules) 
+0: Delay and Reverb Freeze off (across all effect modules) 
+47 
+[0,124] 
+(Performance Mode only*) 
+Preselected Performance index; can be set directly or scrolled via CC48/CC49. The 
+Performance will be loaded as soon as a Slot selection is sent (CC50-54) 
+48 
+1/0 
+Performance Mode* 
+increases Performance index; values trigger two different modes: 
+• 
+value 0 increases Performance index by 1 
+• 
+value 1 initially increases Performance index by 1, after a timeout the PROFILER 
+starts to scroll Performances upwards. Value 0 stops scrolling. 
+Browser Mode 
+• 
+value 0 loads the next Rig 
+• 
+value 1 steps five Rigs up 
+• 
+value 2 steps to first Rig of next higher bank of five 
+Selected View and Sorting apply. 
+49 
+1/0 
+Performance Mode* 
+decreases Performance index; values trigger two different modes: 
+• 
+value 0 decreases Performance index by 1 
+• 
+value 1 initially decreases Performance index by 1, after a timeout the PROFILER 
+starts to scroll Performances downwards; value 0 stops scrolling. 
+Browser Mode 
+• 
+value 0 loads the previous Rig 
+• 
+value 1 steps five Rigs down 
+• 
+value 2 steps to last Rig of next lower bank of five 
+Selected View and Sorting apply 
+50 
+1/0 
+Performance Mode* 
+value 1 loads Slot 1 of current Performance, value 0 closes transaction 
+Browser Mode 
+value 1 loads 1st out of current 5 Rigs in list, value 0 closes transaction 
+Subsequent #50 with alternating value 1 and 0 trigger Morphing. Rise Time, Fall Time and 
+option Momentary apply. 
+
+===== PAGE 11 =====
+ 
+ 
+MIDI Commands      11          
+51 
+1/0 
+Performance Mode* 
+value 1 loads Slot 2 of current Performance, value 0 closes transaction 
+Browser Mode 
+value 1 loads 2nd out of current 5 Rigs in list, value 0 closes transaction 
+Subsequent #51 with alternating value 1 and 0 trigger Morphing. Rise Time, Fall Time and 
+option Momentary apply. 
+52 
+1/0 
+Performance Mode* 
+value 1 loads Slot 3 of current Performance, value 0 closes transaction 
+Browser Mode 
+value 1 loads 3rd out of current 5 Rigs in list, value 0 closes transaction 
+Subsequent #52 with alternating value 1 and 0 trigger Morphing. Rise Time, Fall Time and 
+option Momentary apply. 
+53 
+1/0 
+Performance Mode* 
+value 1 loads Slot 4 of current Performance, value 0 closes transaction 
+Browser Mode only 
+value 1 loads 4th out of current 5 Rigs in list, value 0 closes transaction 
+Subsequent #53 with alternating value 1 and 0 trigger Morphing. Rise Time, Fall Time and 
+option Momentary apply. 
+54 
+1/0 
+Performance Mode* 
+value 1 loads Slot 5 of current Performance, value 0 closes transaction 
+Browser Mode 
+value 1 loads 5th out of current 5 Rigs in list, value 0 closes transaction 
+Subsequent #54 with alternating value 1 and 0 trigger Morphing. Rise Time, Fall Time and 
+option Momentary apply. 
+75-78 
+1/0 
+emulate Effect Buttons I-IIII physically available at PROFLER Stage and Remote 
+80 
+1/0 
+emulates Morph button  
+1: triggers ramp to Morph Sound (Rise Time) 
+0: triggers ramp to Base Sound (Fall Time) 
+Option Momentary applies. 
+81 
+1/0 
+Looper Start - (send value 1 when button gets hit and 0 at release) 
+82 
+1/0 
+Looper Stop - (send value 1 when button gets hit and 0 at release) 
+*also applies to PROFILER Player 
+Table 2: MIDI CC switches 
+
+===== PAGE 12 =====
+ 
+ 
+NRPN Definition      12          
+NRPN Definition 
+NRPN supports 128 x 128 different parameters (which rounds up to an impressive total of 16384 parameters). 
+NRPN also supports a parameter resolution of 16384 values (14-bit) compared to only 128 values (7-bit) with regular 
+controller messages. 
+NRPN messages consist of a set of four controllers, sent in sequence. These four controllers are: 
+ 
+Decimal 
+Hex 
+Remark 
+99 
+$63 
+MSB* of the parameter number (“address page”) 
+98 
+$62 
+LSB* of the parameter number (“address number”) 
+06 
+$06 
+MSB* of the parameter value 
+38 
+$26 
+LSB* of the parameter value 
+*MSB: most significant byte, the upper 7-bit of the 14-bit number 
+*LSB: least significant byte, the lower 7-bit of the 14-bit number 
+ 
+Table 3: NRPN controller assignments 
+ 
+The MIDI specification requests that a manufacturer decides if the devices understand 7-bit or 14-bit values. All 
+NRPN controllers in the PROFILER are, by definition, 14-bit value controllers, so you’ll need to send both MSB 
+Control Change (or CC) 06 and CC38, in that order, to apply a change. The actual value will be set once CC38 has 
+been received. The PROFILER keeps the address selection present. So, if a pair of CC98+CC99 has been 
+transmitted, it does not need to be sent again for a further value change on the same parameter. 
+To support generic, programmable floorboards/controllers that only support 7-bit values, PROFILER OS version 
+2.0.0 introduces CC119 ($77 hex) to send a simple 7-bit value change instead of CC06 and CC38 combo. In this 
+case, the values are mapped internally to the correspondent 14-bit value (e.g. value 127 is internally 16383, 64 is 
+internally 8192). 
+ 
+
+===== PAGE 13 =====
+ 
+ 
+NRPN Definition      13          
+Examples 
+The parameter “Mix” of for example a Wah Wah effect in module A is at NRPN MSB (“address page”) 50 ($32 hex) 
+and LSB (“address number”) 4 ($04 hex). 
+To send a 14-bit high resolution value to 10000 of 16383, which displays as Mix at “61 %”: 
+$B0 $63 $32 
+$B0 $62 $04 
+$B0 $06 $4E 
+$B0 $26 $10 
+ 
+So, why $4E and $10? Because 10000 is 10011100010000 bin and: 
+a. 
+the upper 7 of 14 bits 1001110 bin = $4E hex 
+b. 
+the lower 7 of 14 bits 0010000 bin = $10 hex 
+ 
+Sending a 7-bit low resolution value to 100 of 127 ($64 hex), which displays as Mix at “78 %”: 
+$B0 $63 $32 
+$B0 $62 $04 
+$B0 $77 $64 
+ 
+$B0 is the MIDI start byte for controllers at MIDI channel 1. You may use “running status” transmissions. 
+ 
+The PROFILER will listen to the MIDI channel that is set as the “MIDI Global Channel” in “System Settings”. The 
+standard setting is “OMNI”, saying it responds to every channel1. 
+ 
+1 When set to OMNI, make sure the floorboard only sends on one channel. Some floorboards send 16 program 
+changes (one to each channel) which causes 16 real Rig switches then which might lag the PROFILER a bit. 
+
+===== PAGE 14 =====
+ 
+ 
+MIDI Channel vs. Instance      14          
+MIDI Channel vs. Instance 
+The global MIDI reception channel can be set up on the “MIDI Settings” page in System Settings. Note, that the MIDI 
+channel and the instance mentioned in the SYSEX definition are not the same. The instance in the PROFILER is 
+always 0, since it has only one part (“mono timbral”). Assuming the global MIDI channel is set to 5, NRPN controller 
+messages are only received on MIDI channel 5 but processed in instance 0. 
+
+===== PAGE 15 =====
+ 
+ 
+Parameter Types      15          
+Parameter Types 
+There are two types of parameters in the PROFILER with the following properties: 
+Continuous Parameters (e.g. Gain, Volume) 
+• 
+These are fractional numbers and will always cover the whole value range. 
+• 
+These will be smoothed upon reception of multiple continuous values. Thus, high resolution (14-bit) values are 
+not necessary for a smooth parameter movement - only for accurate target values. 
+Switch or Section Parameters (e.g. Type, On/Off Switches) 
+• 
+Are integer numbers and will start counting from the least significant bit. 
+• 
+Values out of range will activate the highest value in the range but should not be used due to future 
+compatibility. 
+• 
+Switches are “off” at the value 0 (zero) and “on” at value 1 (one). 
+• 
+If a 14-bit value is being used to set a controller to “On”, then the MSB byte is $00, the LSB byte is $01. 
+
+===== PAGE 16 =====
+ 
+ 
+Parameter List      16          
+Parameter List 
+Rig Settings (Address Page 4 ($04 hex)) 
+0 Tempo bpm                          start of parameter unit Tempo bpm 
+1 Rig Volume                          start of parameter unit Rig Volume 
+2 Tempo Enable                     start of parameter unit Tempo Enable 
+3 Panorama                            start of parameter unit Panorama, Transpose Pitch 
+4 Transpose Pitch                           range 28 – 100 
+64 Stomps Section On/Off      start of parameter unit Stomps Section On/Off 
+65 Stack Section On/Off         start of parameter unit Stack Section On/Off 
+66 Effects Section On/Off       start of parameter unit Effects Section On/Off 
+68 Volume Pedal Location      values 0 - 4 in order of selection, start of parameter unit Volume Pedal 
+69 Volume Pedal Range 
+71 Parallel Path Enable           start of parameter unit Parallel Path, Rig Spillover Off, DLY+REV Routing 
+72 Parallel Path Mix 
+73 Rig Spillover Off 
+74 DLY+REV Routing 
+ 
+ 
+
+===== PAGE 17 =====
+ 
+ 
+Parameter List      17          
+Fixed FX (Address Page 5 ($05 hex)) 
+0 start of parameter unit Fixed Transpose 
+1 Fixed Transpose On/Off             parameter Pitch in address page 4 
+5 start of parameter unit Fixed Noise Gate 
+6 Fixed Noise Gate On /Off 
+7 Fixed Noise Gate Threshold 
+8 Fixed Noise Gate Decay 
+10 start of parameter unit Fixed Compressor 
+11 Fixed Compressor On/Off 
+12 Fixed Compressor Threshold 
+15 start of parameter unit Fixed Pure Booster 
+16 Fixed Pure Booster On/Off 
+17 Fixed Pure Booster Volume 
+20 start of parameter unit Fixed Wah Wah 
+21 Fixed Wah Wah On/Off 
+22 Fixed Wah Wah Pedal Mode         range 2 - 5 according to selection 
+25 start of parameter unit Fixed Vintage Chorus 
+26 Fixed Vintage Chorus On/Off 
+27 Fixed Vintage Chorus Range 
+28 Fixed Vintage Chorus Depth 
+29 Fixed Vintage Chorus Mix 
+35 start of parameter unit Fixed Air Chorus 
+36 Fixed Air Chorus On/Off 
+37 Fixed Air Chorus Depth 
+39 Fixed Air Chorus Mix 
+40 start of parameter unit Fixed Double Tracker 
+
+===== PAGE 18 =====
+ 
+ 
+Parameter List      18          
+41 Fixed Double Tracker On/Off 
+42 Fixed Double Tracker Looseness 
+44 Fixed Double Tracker Stereo 
+ 
+ 
+
+===== PAGE 19 =====
+ 
+ 
+Parameter List      19          
+Input Section (Address Page 9 ($09 hex)) 
+0 start of parameter unit Input Section 
+3 Input Noise Gate Intensity 
+4 Clean Sense 
+5 Distortion Sense 
+ 
+ 
+
+===== PAGE 20 =====
+ 
+ 
+Parameter List      20          
+Amplifier (Address Page 10 ($0A hex)) 
+0 Amp Model   1 Kemper Generic, 2 – 25 specific amp models, start of parameter unit Amplifier 
+2 On/Off 
+3 Amp Volume 
+4 Generic Gain 
+5 Clean Compensation 
+6 Definition 
+7 Clarity 
+8 Power Sagging 
+9 Pick 
+10 Compressor 
+11 Tube Shape 
+12 Tube Bias 
+13 Gain Pot Reference 
+14 Amp Model Gain 
+15 Direct Mix 
+21 BrightCap Intensity 
+Amplifier Equalizer (Address Page 11 ($0B hex)) 
+0 start of parameter unit Amplifier Equalizer 
+4 Bass 
+5 Middle 
+6 Treble 
+7 Presence 
+8 Position: Pre/Post 
+ 
+
+===== PAGE 21 =====
+ 
+ 
+Parameter List      21          
+Cabinet (Address Page 12 ($0C hex)) 
+0 start of parameter unit Cabinet 
+2 On/Off 
+4 High Shift 
+5 Low Shift 
+6 Character 
+7 Pure Cabinet 
+8 KEMPER Kone Imprint Select   values 0 - 18 Speaker Imprints™ in order of selection, 126 Full-Range, 127 Global 
+Imprint 
+9 Low Cut 
+10 High Cut 
+11 Resonance Frequency 
+12 Resonance Intensity 
+ 
+ 
+
+===== PAGE 22 =====
+ 
+ 
+Parameter List      22          
+Effect Module A (Address Page 50 ($32 hex)) 
+0 Type                                   values see Appendix B, start of parameter unit 
+3 On/Off 
+4 Mix 
+6 Volume 
+7 Stereo 
+8 Wah Manual / Frequency Shifter Delay Pitch 
+9 Wah Peak 
+10 Wah Pedal Range 
+12 Wah Pedal Mode             range 0 - 5 according to selection 
+13 Wah Touch Attack 
+14 Wah Touch Release 
+15 Wah Touch Boost / Delay Cross Feedback  
+16 Distortion Drive / Reverb Formant Mix 
+17 Distortion Tone / Reverb Mid Frequency 
+18 KEMPER Fuzz Octa / Compressor Intensity / Noise Gate Threshold / Auto Swell Compressor 
+19 Compressor Attack / Legacy Delay Bandwidth / Legacy Reverb Bandwidth / 
+     KEMPER Fuzz Impedance LP at PROFILER Stage and Player 
+20 KEMPER Fuzz Transistor Shape / Modulation Rate / Auto Swell / Widener Tune 
+21 KEMPER Drive Definition / KEMPER Fuzz Transistor Tone / Modulation Depth / Micro Pitch Detune / Double 
+Tracker Looseness / Widener Intensity 
+22 Modulation Feedback / Formant Reverb Vowel 
+23 KEMPER Drive Slim Down / KEMPER Fuzz Definition / Modulation Crossover / Octaver Low Cut 
+24 Modulation Hyper Chorus Amount / Slicer and Autopanner Edge 
+25 Modulation Manual / Reverb Formant Offset / Spring Reverb Spectral Balance / Slicer and Autopanner Skew 
+26 Modulation Peak Spread / Wah Phaser Peak Spread / Reverb Formant Peak 
+
+===== PAGE 23 =====
+ 
+ 
+Parameter List      23          
+27 Modulation Stages / Wah Phaser Stages / Legacy Reverb Room Size 
+30 Rotary Speed (Slow/Fast) 
+31 Rotary Distance 
+32 Rotary Low-High-Balance 
+33 Compressor Squash / Legacy Delay Frequency / Legacy Reverb Mid Frequency 
+34 Graphic EQ Gain 63 Hz 
+35 Graphic EQ Gain 115 Hz 
+36 Graphic EQ Gain 250 Hz 
+37 Graphic EQ Gain 500 Hz 
+38 Graphic EQ Gain 1000 Hz 
+39 Graphic EQ Gain 2000 Hz 
+40 Graphic EQ Gain 4000 Hz 
+41 Graphic EQ Gain 8000 Hz 
+42 Studio EQ / Metal EQ / Metal DS Low Gain / Acoustic Simulator Body 
+43 Studio EQ Low Frequency 
+44 Studio EQ / Metal EQ / Metal DS High Gain / Acoustic Simulator Sparkle 
+45 Studio EQ High Frequency 
+46 Studio EQ Mid1 / Metal EQ / Metal DS Middle Gain / Acoustic Simulator Bronze 
+47 Studio EQ Mid1 / Metal EQ / Metal DS Middle Frequency 
+48 Studio EQ Mid1 Q-Factor 
+49 Studio EQ Mid2 Gain / Acoustic Simulator Pickup 
+50 Studio EQ Mid2 Frequency 
+51 Studio EQ Mid2 Q-Factor 
+52 Wah Peak Range 
+53 Ducking 
+54 Mix 2 (Pitch Mix / Octaver Mix / Delay Mix Serial / Crystal Mix / Space Intensity) 
+
+===== PAGE 24 =====
+ 
+ 
+Parameter List      24          
+55 Voice Balance / Delay Balance 
+56 Voice 1 Pitch / Toe Pitch / Transpose Pitch / Quad Delay Voice Pitch 4 / Delay Crystal 1 Pitch 
+57 Voice 2 Pitch / Heel Pitch / Quad Delay Voice Pitch 3 / Wah Formant Pitch Shift / Delay Crystal 2 Pitch 
+58 Pitch Detune / Detune except Micro Pitch 
+60 Smooth Chords 
+61 Pure Tuning 
+62 Voice 1 Interval / Quad Delay Voice 4 Interval          range 42 - 95 according to selection 
+63 Voice 2 Interval / Quad Delay Voice 3 Interval          range 42 - 95 according to selection 
+64 Key                                                                            range 0 - 11 according to selection 
+65 Formant Shift Freeze 
+66 Formant Shift Offset 
+67 Equalizer Low Cut 
+68 Equalizer High Cut / Reverb High Cut 
+69 Mix 3 (delay and reverb effects) 
+70 Mix Pre/Post (delay / reverb effects and effect loop) 
+71 Delay Time / Delay 1 Time / Reverb Room Size / Reverb Attack Time / Spring Reverb Spring Size 
+72 Delay 2 Time / Reverb Predelay Time 
+73 Delay 2 Ratio / Quad Delay Delay 3 Ratio / Rate Flanger Oneway / Phaser Oneway 
+74 Quad Delay 2 Ratio / Delay Ratio Serial 
+75 Quad Delay 1 Ratio 
+76 Delay Note Value 1 / Quad Delay Note Value 4 
+77 Delay Note Value 2 / Quad Delay Note Value 3 / Reverb Predelay Note Value 
+78 Quad Delay Note Value 2 / Note Value Serial 
+79 Quad Delay Note Value 1 
+80 To Tempo (delay and reverb effects) / Equalizer Steep Low 
+81 Delay Volume 4 
+
+===== PAGE 25 =====
+ 
+ 
+Parameter List      25          
+82 Delay Volume 3 
+83 Delay Volume 2 
+84 Delay Volume 1 
+85 Delay Panorama 4 
+86 Delay Panorama 3 
+87 Delay Panorama 2 
+88 Delay Panorama 1 
+89 Voice Pitch 2 / Crystal Pitch 
+90 Voice Pitch 1 
+91 Quad Delay Voice 2 Interval               range 42 - 95 according to selection 
+92 Quad Delay Voice 1 Interval               range 42 - 95 according to selection 
+93 Delay Feedback / Delay Feedback 1 / Reverb Decay Time  
+94 Infinity Feedback 
+95 Infinity 
+96 Feedback 2 / Feedback Serial / Reverb Low Boost / Echo Reverb Feedback / Ionosphere Reverb Buildup 
+97 Delay Feedback Sync 
+98 Delay Low Cut / Reverb Low Decay / Reverb Low Damp 
+99 Delay High Cut / Reverb High Decay / Reverb High Damp 
+100 Delay Cut More / Equalizer Steep High / Full OC HP/LP / upper and lower effect loop at PROFILER Stage /  
+       KEMPER Fuzz True Impedance at PROFILER Stage and Player 
+101 Modulation (delay and reverb effects) 
+102 Delay Chorus 
+103 Delay Flutter Intensity / Reverb Modulation (standard reverbs) 
+104 Delay Flutter Rate / Reverb Early Diffusion / Spring Reverb Dripstone 
+105 Delay Grit / Reverb Brass / Spring Reverb Distortion (Dwell) 
+106 Reverse Mix 
+107 Input Swell (delay and reverb effects) 
+
+===== PAGE 26 =====
+ 
+ 
+Parameter List      26          
+108 Smear 
+109 Ducking Pre/Post 
+ 
+ 
+
+===== PAGE 27 =====
+ 
+ 
+Parameter List      27          
+Effect Module B (Address Page 51 ($33 hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module C (Address Page 52 ($34 hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module D (Address Page 53 ($35 hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module X (Address Page 56 ($38 hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module MOD (Address Page 58 ($3A hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module DLY (Address Page 60 ($3C hex)) 
+Same parameters and address numbers as effect module A 
+Effect Module REV (Address Page 61 ($3D hex)) 
+Same parameters and address numbers as effect module A 
+ 
+
+===== PAGE 28 =====
+ 
+ 
+Parameter List      28          
+User Scales (Address Page 118 ($76 hex) 
+0 User Scale 1 Step 0*                          start of parameter unit User Scale 1 
+1 User Scale 1 Step 1* 
+2 User Scale 1 Step 2* 
+3 User Scale 1 Step 3* 
+4 User Scale 1 Step 4* 
+5 User Scale 1 Step 5* 
+6 User Scale 1 Step 6* 
+7 User Scale 1 Step 7* 
+8 User Scale 1 Step 8* 
+9 User Scale 1 Step 9* 
+10 User Scale 1 Step 10* 
+11 User Scale 1 Step 11* 
+12 User Scale 2 Step 0*                          start of parameter unit User Scale 2 
+13 User Scale 2 Step 1* 
+14 User Scale 2 Step 2* 
+15 User Scale 2 Step 3* 
+16 User Scale 2 Step 4* 
+17 User Scale 2 Step 5* 
+18 User Scale 2 Step 6* 
+19 User Scale 2 Step 7* 
+20 User Scale 2 Step 8* 
+21 User Scale 2 Step 9* 
+22 User Scale 2 Step 10* 
+23 User Scale 2 Step 11* 
+*All User Scale steps have value range 26 – 99. 
+ 
+
+===== PAGE 29 =====
+ 
+ 
+Parameter List      29          
+Looper and Effect Module Freeze (Address Page 125 ($7D hex)) 
+88 Looper Record / Playback / Overdub            start of parameter unit Looper 
+89 Looper Stop* 
+90 Looper Trigger* 
+91 Looper Reverse* 
+92 Looper Half Speed* 
+93 Looper Cancel/Reactivate Overdub* 
+94 Looper Erase Loop* 
+ 
+*To simulate functionality of Remote/Stage Looper buttons correctly, send value 1 for push button and value 0 for 
+release button. 
+ 
+107 Effect Module A Freeze                              start of parameter unit Freeze 
+108 Effect Module B Freeze 
+109 Effect Module C Freeze 
+110 Effect Module D Freeze 
+111 Effect Module X Freeze 
+113 Effect Module MOD Freeze 
+114 Effect Module DLY Freeze 
+115 Effect Module REV Freeze 
+ 
+ 
+
+===== PAGE 30 =====
+ 
+ 
+Parameter List      30          
+System / Global (Address Page 127 ($7F hex)) 
+0 Main Output Volume                                   start of parameter unit Output Volumes 
+1 Headphone Output Volume 
+2 Monitor Output Volume 
+3 Direct Output / Send 1 Volume 
+4 S/PDIF Output Volume 
+8 Monitor Cab. Off                                         start of parameter unit Monitor Cab. Off 
+12 Main Output EQ Bass                               start of parameter unit Output Equalizer and Filter 
+13 Main Output EQ Middle 
+14 Main Output EQ Treble 
+15 Main Output EQ Presence 
+16 Output Filer Low Cut 
+17 Monitor Output EQ Bass 
+18 Monitor Output EQ Middle 
+19 Monitor Output EQ Treble 
+20 Monitor Output EQ Presence 
+21 Output Filter High Cut  
+32 Aux In >Main                                             start of parameter unit Aux In Mixes 
+33 Aux In >Monitor 
+34 Aux In >Headph. 
+36 Space Intensity                                         start of parameter unit Space 
+37 Space Routing 
+38 KEMPER Kone Mode                               start of parameter unit KEMEPR Kone 
+39 KEMPER Kone Bass Boost 
+40 KEMPER Kone Imprint Select                  range 0 - 18 according to collection 
+41 KEMPER Kone Directivity 
+
+===== PAGE 31 =====
+ 
+ 
+Parameter List      31          
+42 KEMPER Kone Sweetening 
+44 Input Source                                             range 0 - 3 according to selection, start of parameter unit Input Source 
+50 Pure Cabinet Enable                                start of parameter unit Pure Cabinet 
+51 Pure Cabinet Level (Global) 
+52 Looper Volume                                         start of parameter unit Looper Volume 
+53 Looper Location                                        start of parameter unit Looper Location 
+58 start of parameter unit Aux >Mono 
+59 Aux >Mono 
+ 
+ 
+
+===== PAGE 32 =====
+ 
+ 
+SYSEX Definition      32          
+SYSEX Definition 
+General Message Layout 
+The KEMPER PROFILER can also be addressed via MIDI SYSEX. A PROFILER SYSEX message comprises the 
+following parts: 
+ 
+$F0 
+$00 $20 $33 
+$00 
+$7F 
+Message 
+$F7 
+SYX 
+ACCESS/KEMPER 
+Manufacturer ID 
+Product Type 
+$00 = KEMPER 
+PROFILER 
+Device ID 
+$7F = OMNI 
+(See System page) 
+the actual 
+message 
+EOX 
+ 
+Table 4: structure of a KEMPER PROFILER SYSEX message 
+ 
+ 
+
+===== PAGE 33 =====
+ 
+ 
+SYSEX Definition      33          
+The message itself starts with a function code plus additional bytes, depending on the given function code. 
+ 
+Function 
+Code 
+Functionality 
+$01 
+Single Parameter Change 
+$02 
+Multi Parameter Change 
+$03 
+String Parameter 
+$04 
+BLOB 
+$05 
+*reserved* 
+$06 
+Extended Parameter Change 
+$07 
+Extended String Parameter Change 
+$08 
+Morphed Multi Parameter Changed 
+$41 
+Request Single Parameter Value 
+$42 
+Request Multi Parameter Values 
+$43 
+Request String Parameter 
+$47 
+Request Extended String Parameter 
+$7C 
+Request Parameter Value as Rendered String 
+$7E 
+*reserved* 
+$7F 
+*reserved* 
+ 
+Table 5: function codes for KEMPER PROFILER SYSEX messages 
+ 
+ 
+
+===== PAGE 34 =====
+ 
+ 
+SYSEX Definition      34          
+Single Parameter Change 
+The “message” part for a single parameter change for parameter with 14bit NRPN address: 
+ 
+Function 
+Code 
+Instance 
+Controller 
+MSB 
+Controller 
+LSB 
+Value 
+MSB 
+Value 
+LSB 
+*Value2 
+MSB 
+*Value2 
+MSB 
+The 
+function 
+code is 
+$01. 
+Addresses the 
+instance of the 
+parameter. The 
+PROFILER only 
+supports one instance 
+which is always 0. 
+The upper 
+7-bit of the 
+14-bit 
+NRPN 
+address.  
+The lower 
+7-bit of the 
+14-bit 
+NRPN 
+address. 
+The 
+upper 7-
+bit of 
+the 14-
+bit 
+value. 
+The 
+lower 
+7-bit 
+of the 
+14-bit 
+value. 
+The 
+upper 7-
+bit of 
+morphed 
+value. 
+The 
+lower 7-
+bit of 
+morphed 
+value. 
+ 
+Table 6: message part for single parameter change 
+ 
+Example: To set the value of Mix of a Wah Wah in effect module A to 50% the controller NRPN MSB $32 hex 
+(address page of module A) and LSB $04 hex (address number of Mix parameter) needs to be set to a value of 
+8192. According to the explanation on page 13, the upper 7 bit of the value are $40 hex and the lower 7 bit are $00 
+hex: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+01 
+00 
+32 
+04 
+40 
+00 
+F7 
+ 
+Since the introduction of the Morphing feature, there is a second value (called “B Value”) that spans a range within 
+which a controller can morph. So, the message can be optionally extended by another 14 bit value. This example 
+sets the parameter to be morphable from center value to maximum. 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+01 
+00 
+32 
+04 
+40 
+00 
+7F 
+7F 
+F7 
+ 
+ 
+
+===== PAGE 35 =====
+ 
+ 
+SYSEX Definition      35          
+Multi Parameter Change 
+To change multiple parameters of one address page, you can use function code $02 and send a list of parameter 
+value MSB/LSB bytes in one message: 
+ 
+Function 
+Code 
+Instance 
+Controller 
+MSB 
+Controller 
+LSB 
+Value MSB 
+Value LSB 
+Value MSB* 
+Value LSB* 
+The function 
+code for a 
+multi 
+parameter 
+change is 
+$02. 
+Addresses 
+the instance 
+of the 
+parameter. 
+The 
+PROFILER 
+only supports 
+one instance 
+which is 
+always 0. 
+The upper 
+7-bit of the 
+14-bit 
+NRPN 
+address.  
+The lower 
+7-bit of the 
+14-bit 
+NRPN 
+address. 
+The upper 
+7-bit of the 
+14-bit value 
+of the first 
+parameter. 
+The lower 
+7-bit of the 
+14-bit value 
+of the first 
+parameter. 
+The upper 
+7-bit of the 
+14-bit value 
+of the next 
+NRPN 
+address. 
+The lower 
+7-bit of the 
+14-bit value 
+of the next 
+NRPN 
+address. 
+Select the 
+first 
+parameter 
+of the list. 
+Repeat with Value 
+MSB/LSB for each 
+parameter of address page 
+(up to 128 values). 
+ 
+Table 7: message part for a multi parameter change 
+ 
+You can select the first parameter and skip parameters at the beginning of the list. You can also leave out 
+parameters at the end of the list. Values of parameters left out at beginning or end of list stay as is. 
+However, you cannot skip parameters in the middle of the parameter list. The list of values inside the range needs to 
+be complete. 
+For most internal parameters that are not documented, send value 0. Exception: Send value 1 for parameter 2 of 
+effect modules. 
+Example: The following message loads a Pure Booster into module C, switches it on, and sets its Volume to 3.4: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+02 
+00 
+34 
+00 
+00 
+73 
+00 
+00 
+00 
+01 
+00 
+01 
+7F 
+7F 
+00 
+00 
+6B 
+00 
+F7 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+===== PAGE 36 =====
+ 
+ 
+SYSEX Definition      36          
+Morphed Multi Parameter Change 
+To change a whole bunch of parameters you can send multiple values for a whole range of parameters by using 
+function code $08 and repeating the value MSB/LSB bytes in a message: 
+ 
+Function 
+Code 
+is $08. 
+Instance 
+always 0 
+Controller 
+MSB 
+Controller 
+LSB 
+Value MSB 
+Value LSB 
+Morphed MSB* 
+Morphed LSB* 
+Repeat until block is 
+complete. 
+Repeat until block is complete. 
+Must be the same number of units 
+as before in “Value” 
+ 
+Table 8: message part for a morphed multi parameter change 
+ 
+ 
+
+===== PAGE 37 =====
+ 
+ 
+SYSEX Definition      37          
+String Parameter Change 
+A number of parameters present text (“string”) values. These string parameters have their own batch of controller 
+numbers, which are listed on Appendix C. 
+The string controllers can be encoded using function code $03 and character bytes using ASCII encoding: 
+ 
+Function Code 
+Instance 
+Controller MSB 
+Controller LSB 
+Characters… 
+$00 
+The function 
+code for text 
+value: $03 
+Addresses 
+the instance 
+of the 
+parameter. 
+The 
+PROFILER 
+only supports 
+one instance 
+which is 
+always 0. 
+The upper 7-bit of 
+the 14-bit NRPN 
+address (string 
+controller) 
+The lower 7-bit of 
+the 14-bit NRPN 
+address. 
+A 7-bit value 
+representing an 
+ASCII character. 
+Concatenate as 
+many characters 
+being necessary. 
+Use only valid 
+characters (see 
+Appendix A (valid 
+ASCII 
+characters)) 
+A null byte ($00) 
+terminating the 
+string.  
+ 
+Table 9: message part for a string parameter change 
+ 
+Example: to set the string “Hello” as current Rig Name (string #0001) send: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+03 
+00 
+00 
+01 
+48 
+65 
+6C 
+6C 
+6F 
+00 
+F7 
+ 
+ 
+
+===== PAGE 38 =====
+ 
+ 
+SYSEX Definition      38          
+BLOB Parameter Change 
+A number of parameters present binary objects (“BLOBs”). These BLOB parameters have their own batch of 
+controller numbers. They exist in parallel to the numeric and string parameters. 
+The content of a BLOB is, by definition, “hands off” and should not be altered. 
+ 
+Function 
+Code 
+Instance 
+Controller 
+MSB 
+Controller 
+LSB 
+Start 
+MSB 
+Start 
+LSB 
+Size 
+MSB 
+Size 
+LSB 
+Content 
+The 
+function 
+code for 
+text 
+value: 
+$04 
+Addresses the 
+instance of the 
+parameter. The 
+PROFILER only 
+supports one 
+instance which is 
+always 0. 
+The upper 
+7-bit of the 
+14-bit 
+NRPN 
+address 
+(BLOB 
+controller) 
+The lower 
+7-bit of the 
+14-bit 
+NRPN 
+address. 
+The 
+upper 7-
+bit of 
+the 14-
+bit start 
+offset 
+The 
+lower 7-
+bit of 
+the 14-
+bit start 
+offset 
+The 
+upper 7-
+bit of 
+the 14-
+bit size 
+The 
+lower 7-
+bit of 
+the 14-
+bit size 
+N times a 7-
+bit value 
+where N is 
+the number 
+given in the 
+size 
+attribute. 
+ 
+Table 10: message part for a BLOB parameter 
+ 
+Currently, only a start offset of 0 (null) is supported. If the content size doesn’t match the announced size, the 
+message will be ignored. 
+ 
+ 
+
+===== PAGE 39 =====
+ 
+ 
+SYSEX Definition      39          
+Extended Parameter/Extended String Parameter Change 
+The “extended” function codes $06/$07 are equal to those for $02/$03, except that the controller number and value 
+are not encoded in 2, but in 5 bytes – this allows an address range of 231 and a value range of 232 for numeric 
+controllers. The encoding is Big Endian, and additional bits are ignored. The encoding looks like this: 
+Given a 32-bit value: 
+ 
+Bits 24-31 
+Bit 16-23 
+Bit 8-15 
+Bit 0-7 
+MSB 
+ 
+LSB 
+ 
+Figure 1: 32 bit values and their bytes 
+ 
+Will be encoded to 5 bytes: 
+ 
+ 
+ 
+MSB 
+ 
+LSB 
+ 
+ 
+7 
+6 
+5 
+4 
+3 
+2 
+1 
+0 
+Byte 0: 
+ 
+_ 
+_ 
+_ 
+_ 
+7 
+6 
+5 
+4 
+Byte 1: 
+ 
+_ 
+3 
+2 
+1 
+0 
+7 
+6 
+5 
+Byte 2: 
+ 
+_ 
+4 
+3 
+2 
+1 
+0 
+7 
+6 
+Byte 3: 
+ 
+_ 
+5 
+4 
+3 
+2 
+1 
+0 
+7 
+Byte 4: 
+ 
+_ 
+6 
+5 
+4 
+3 
+2 
+1 
+0 
+ 
+Figure 2: 32 bit numbers encoded to 5 MIDI data bytes 
+ 
+This way, bit 7 (MSB) is kept clear for MIDI transmission. 
+ 
+ 
+
+===== PAGE 40 =====
+ 
+ 
+SYSEX Definition      40          
+Request Single Parameter 
+The function code $41 can be used to request a single numeric value for an NRPN parameter. The requested value 
+will be returned with function code $01. 
+ 
+Function Code 
+Instance 
+Controller MSB 
+Controller LSB 
+The function code for a 
+single parameter request is 
+$41 
+Addresses the instance of 
+the parameter. The 
+PROFILER only supports 
+one instance which is 
+always 0. 
+The upper 7-bit of the 
+14-bit NRPN address.  
+The lower 7-bit of the 
+14-bit NRPN address. 
+ 
+Table 11: message part for a single parameter request 
+ 
+Example: Request the value of the effect type currently residing in module C. The address page is $34 hex (effect 
+module C) and the address number is $00 hex (effect type): 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+41 
+00 
+34 
+00 
+F7 
+ 
+If a parameter is requested that does not exist, the request will be ignored, and nothing will be returned. 
+ 
+ 
+
+===== PAGE 41 =====
+ 
+ 
+SYSEX Definition      41          
+Request Multi Parameter 
+The function code $42 can be used to request a number of numeric values for an NRPN parameter unit. The 
+requested value will be returned with function code $02. You might notice that there is no size attribute defined. The 
+response covers all parameters of the requested unit. Expect up to 128 values. 
+ 
+Function Code 
+Instance 
+Controller MSB 
+Controller LSB 
+The function code for a 
+single parameter request 
+is $42 
+Addresses the instance of the 
+parameter. The PROFILER 
+only supports one instance 
+which is always 0. 
+The upper 7-bit of the 
+14-bit NRPN address.  
+The lower 7-bit of the 
+14-bit NRPN address. 
+ 
+Table 12: message part for a multi parameter request 
+ 
+Example: Request the current values of all parameters in effect module MOD (address page $3A hex) starting with 
+first address number $00 hex: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7Ff 
+42 
+00 
+3A 
+00 
+F7 
+ 
+If the controller does not exist, or the request does not address the first controller number in a unit, the request will 
+be ignored. No data will be returned. 
+ 
+ 
+
+===== PAGE 42 =====
+ 
+ 
+SYSEX Definition      42          
+Request String Parameter 
+The function code $43 can be used to request a textual value for a string parameter. The requested text value will be 
+returned with function code $03. 
+ 
+Function Code 
+Instance 
+Controller MSB 
+Controller LSB 
+The function code for a 
+single parameter request 
+is $43 
+Addresses the instance of the 
+parameter. The PROFILER 
+only supports one instance 
+which is always 0. 
+The upper 7-bit of the 
+14-bit NRPN address.  
+The lower 7-bit of the 
+14-bit NRPN address. 
+ 
+Table 13: message part for a string parameter request 
+ 
+Example: Request the current values for the current Rig Name: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+43 
+00 
+00 
+01 
+F7 
+ 
+See Appendix C for tag addresses. 
+Request Extended String Parameter 
+The function code $47 can also be used to request a textual value for a string parameter. The requested text value 
+will be returned with function code $07 or $032. The controller number needs to be encoded with 5 bytes (instead of 
+2). Encoding can be found on page 39. 
+ 
+ 
+ 
+2 If the encoded controller number is lower than 16384 (the range of 14-bit) the response might use function code $03. 
+
+===== PAGE 43 =====
+ 
+ 
+SYSEX Definition      43          
+Request Parameter Value as Rendered String 
+Function code $7C is a bit special, as it allows you to retrieve the string representation for a specific value of a 
+parameter. 
+Caution: this function can be costly in terms of CPU time. 
+ 
+Function Code 
+Flags 
+Controller MSB 
+Controller LSB 
+Value MSB 
+Value LSB 
+The function 
+code $7C 
+*reserved* 
+The upper 7-bit of 
+the 14-bit NRPN 
+address.  
+The lower 7-bit of 
+the 14-bit NRPN 
+address. 
+The upper 7-bit 
+of the 14-bit 
+value. 
+The lower 7-bit 
+of the 14-bit 
+value. 
+ 
+Table 14: message part for a string render request 
+Example: To request the character string for a value of 8192 for the parameter Ducking in module DLY, send: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+7C 
+00 
+3C 
+35 
+40 
+00 
+F7 
+ 
+The response will look like this: 
+ 
+F0 
+00 
+20 
+33 
+02 
+7F 
+3C 
+00 
+3C 
+35 
+40 
+00 
+3C 
+30 
+2E 
+30 
+3E 
+00 
+F7 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+< 
+0 
+. 
+0 
+> 
+ 
+ 
+ 
+Function code of the response is $3C. After the flags, the controller MSB/LSB and value MSB/LSB, the actual string 
+is then available, terminated by a zero-byte. In this case, the rendered string is “<0.0>”. 
+ 
+ 
+
+===== PAGE 44 =====
+ 
+ 
+Appendix A (valid ASCII characters)      44          
+Appendix A (valid ASCII characters) 
+Valid characters for strings parameters (“tags”). For Rig and Author Names no space shall be followed by another 
+space. 
+ 
+Character 
+ASCII Code 
+ 
+Character 
+ASCII Code 
+ 
+Character 
+ASCII Code 
+A-Z 
+$41-$5A 
+ 
+( 
+$28 
+ 
+\ 
+$5C 
+a-z 
+$61-$7A 
+ 
+) 
+$29 
+ 
+= 
+$3D 
+0-9 
+$30-$39 
+ 
+* 
+$2A 
+ 
+: 
+$3A 
+! 
+$21 
+ 
++ 
+$2B 
+ 
+; 
+$3B 
+$ 
+$24 
+ 
+- 
+$2D 
+ 
+_ 
+$5F 
+& 
+$26 
+ 
+. 
+$2E 
+ 
+# 
+$23 
+‘ 
+$27 
+ 
+/ 
+$2F 
+ 
+? 
+$3F 
+(SPACE) 
+$20 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Table 15: ASCII characters allowed in tags 
+
+===== PAGE 45 =====
+ 
+ 
+Appendix B (list of Effect Types)      45          
+Appendix B (list of Effect Types) 
+Effect Type 
+Value MSB 
+Value LSB 
+combined 
+empty 
+0 
+0 
+0 
+Wah Wah 
+0 
+1 
+1 
+Wah Low Pass 
+0 
+2 
+2 
+Wah High Pass 
+0 
+3 
+3 
+Wah Vowel Filter 
+0 
+4 
+4 
+Wah Phaser 
+0 
+6 
+6 
+Wah Flanger 
+0 
+7 
+7 
+Wah Rate Reducer 
+0 
+8 
+8 
+Wah Ring Modulator 
+0 
+9 
+9 
+Wah Freq Shifter 
+0 
+10 
+10 
+Pedal Pitch 
+0 
+11 
+11 
+Wah Formant Shifter 
+0 
+12 
+12 
+Pedal Vinyl Stop 
+0 
+13 
+13 
+Bit Shaper 
+0 
+17 
+17 
+Octa Shaper 
+0 
+18 
+18 
+Soft Shaper 
+0 
+19 
+19 
+Hard Shaper 
+0 
+20 
+20 
+Wave Shaper 
+0 
+21 
+21 
+Kemper Drive 
+0 
+32 
+32 
+Green Scream 
+0 
+33 
+33 
+Plus DS 
+0 
+34 
+34 
+One DS 
+0 
+35 
+35 
+Muffin 
+0 
+36 
+36 
+Mouse 
+0 
+37 
+37 
+Kemper Fuzz 
+0 
+38 
+38 
+Metal DS 
+0 
+39 
+39 
+Full OC 
+0 
+42 
+42 
+Compressor 
+0 
+49 
+49 
+Auto Swell 
+0 
+50 
+50 
+Noise Gate 2:1 
+0 
+57 
+57 
+Noise Gate 4:1 
+0 
+58 
+58 
+Space 
+0 
+64 
+64 
+
+===== PAGE 46 =====
+ 
+ 
+Appendix B (list of Effect Types)      46          
+Vintage Chorus 
+0 
+65 
+65 
+Hyper Chorus 
+0 
+66 
+66 
+Air Chorus 
+0 
+67 
+67 
+Vibrato 
+0 
+68 
+68 
+Rotary Speaker 
+0 
+69 
+69 
+Tube Bias Tremolo 
+0 
+70 
+70 
+Micro Pitch 
+0 
+71 
+71 
+Photocell Tremolo 
+0 
+75 
+75 
+Harmonic Tremolo 
+0 
+76 
+76 
+Pulse Sliver 
+0 
+77 
+77 
+Saw Slicer 
+0 
+78 
+78 
+Pulse Autopanner 
+0 
+79 
+79 
+Saw Autopanner 
+0 
+80 
+80 
+Phaser 
+0 
+81 
+81 
+Phaser Vibe 
+0 
+82 
+82 
+Phaser Oneway 
+0 
+83 
+83 
+Flanger 
+0 
+89 
+89 
+Flanger Oneway 
+0 
+91 
+91 
+Graphic Equalizer 
+0 
+97 
+97 
+Studio Equalizer 
+0 
+98 
+98 
+Metal Equalizer 
+0 
+99 
+99 
+Acoustic Simulator 
+0 
+100 
+100 
+Stereo Widener 
+0 
+101 
+101 
+Phase Widener 
+0 
+102 
+102 
+Delay Widener 
+0 
+103 
+103 
+Double Tracker 
+0 
+104 
+104 
+Treble Booster 
+0 
+113 
+113 
+Lead Booster 
+0 
+114 
+114 
+Pure Booster 
+0 
+115 
+115 
+Wah Pedal Booster 
+0 
+116 
+116 
+Loop Mono 
+0 
+121 
+121 
+Loop Stereo 
+0 
+122 
+122 
+Loop Distortion 
+0 
+123 
+123 
+Transpose 
+1 
+1 
+129 
+Chromatic Pitch 
+1 
+2 
+130 
+Harmonic Pitch 
+1 
+3 
+131 
+Analog Octaver 
+1 
+4 
+132 
+Dual Chromatic 
+1 
+9 
+137 
+
+===== PAGE 47 =====
+ 
+ 
+Appendix B (list of Effect Types)      47          
+Dual Harmonic 
+1 
+10 
+138 
+Dual Crystal 
+1 
+11 
+139 
+Dual Loop Pitch 
+1 
+12 
+140 
+Legacy Delay 
+1 
+17 
+145 
+Single Delay 
+1 
+18 
+146 
+Dual Delay 
+1 
+19 
+147 
+Two Tap Delay 
+1 
+20 
+148 
+Serial TwoTap Delay 
+1 
+21 
+149 
+Crystal Delay 
+1 
+22 
+150 
+Loop Pitch Delay 
+1 
+23 
+151 
+Freq Shifter Delay 
+1 
+24 
+152 
+Rhythm Delay 
+1 
+33 
+161 
+Melody Chromatic 
+1 
+34 
+162 
+Melody Harmonic 
+1 
+35 
+163 
+Quad Delay 
+1 
+36 
+164 
+Quad Chromatic 
+1 
+37 
+165 
+Quad Harmonic 
+1 
+38 
+166 
+Legacy Reverb 
+1 
+49 
+177 
+Natural Reverb 
+1 
+50 
+178 
+Easy Reverb 
+1 
+51 
+179 
+Echo Reverb 
+1 
+52 
+180 
+Cirrus Reverb 
+1 
+53 
+181 
+Formant Reverb 
+1 
+54 
+182 
+Ionosphere Reverb 
+1 
+55 
+183 
+Spring Reverb 
+1 
+65 
+193 
+ 
+Table 16: Effect Type values 
+
+===== PAGE 48 =====
+ 
+ 
+Appendix C (string list)      48          
+Appendix C (string list) 
+Tags (Address Page 0 ($00 hex)) 
+1 Rig Name 
+2 Rig Author 
+3 Rig Creation Date 
+4 Rig Comment 
+10 Amp Name 
+11 Amp Author 
+14 Amp Location 
+15 Amp Manufacturer 
+16 Amp Comment 
+18 Amp Model 
+19 Amp Channel 
+20 Pickup Type 
+21 Year of Production 
+32 Cabinet Name 
+33 Cabinet Author 
+36 Cabinet Location 
+37 Cabinet Manufacturer 
+38 Microphone Model 
+
+===== PAGE 49 =====
+ 
+ 
+Appendix C (string list)      49          
+39 Cabinet Comment 
+40 Microphone Position 
+41 Speaker Configuration 
+42 Cabinet Model 
+44 Speaker Manufacturer 
+45 Speaker Model 
+

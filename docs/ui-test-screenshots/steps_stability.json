@@ -1,0 +1,8 @@
+[
+  {"do":"clickText","tag":".navitem","text":"MIDI Learn"},
+  {"do":"wait","ms":600},
+  {"do":"eval","expr":"(async()=>{const a=window.__app; const before={connected:a.connected,err:a.error}; await window.__invoke('midi_bridge_start',{kemper:null,pedal:null}); return before;})()"},
+  {"do":"wait","ms":4000},
+  {"do":"eval","expr":"const a=window.__app; return {connectedAfter:a.connected, error:a.error, pill:(document.querySelector('.connpill')||{}).textContent};"},
+  {"do":"eval","expr":"(async()=>{await window.__invoke('midi_bridge_stop'); return {stopped:true};})()"}
+]

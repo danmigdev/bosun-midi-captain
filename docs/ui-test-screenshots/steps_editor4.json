@@ -1,0 +1,8 @@
+[
+  {"do":"clickText","tag":".bindinghead","text":"FLANGER"},
+  {"do":"wait","ms":600},
+  {"do":"shot","path":"10_editor_binding_expanded.png"},
+  {"do":"clickText","tag":"button","text":"On enter"},
+  {"do":"wait","ms":500},
+  {"do":"shot","path":"11_editor_onenter_expanded.png"}
+]

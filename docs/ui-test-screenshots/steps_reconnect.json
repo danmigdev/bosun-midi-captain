@@ -1,0 +1,19 @@
+[
+  {"do":"click","sel":".advanced summary"},
+  {"do":"wait","ms":300},
+  {"do":"click","sel":".advanced input[type=checkbox]"},
+  {"do":"wait","ms":300},
+  {"do":"shot","path":"26_welcome_advanced.png"},
+  {"do":"click","sel":".advanced input[type=checkbox]"},
+  {"do":"wait","ms":200},
+  {"do":"clickText","tag":"button","text":"Connect"},
+  {"do":"wait","ms":6000},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"wait","ms":500},
+  {"do":"shot","path":"27_reconnected.png"},
+  {"do":"state"}
+]

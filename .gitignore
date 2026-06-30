@@ -1,0 +1,29 @@
+# Node / editor frontend
+editor/node_modules/
+editor/dist/
+editor/.svelte-kit/
+
+# Rust / Tauri build output
+editor/src-tauri/target/
+
+# Packaged release artifacts (attached to GitHub Releases, not committed)
+dist/
+
+# Downloaded / generated installer assets (recreate with tools/download-assets.ps1)
+editor/src-tauri/resources/
+
+# Logs
+*.log
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Claude Code local settings (personal, machine-specific)
+.claude/settings.local.json
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

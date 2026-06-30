@@ -1,0 +1,7 @@
+[
+  {"do":"wait","ms":4000},
+  {"do":"clickText","tag":".navitem","text":"MIDI Learn"},
+  {"do":"wait","ms":800},
+  {"do":"shot","path":"33_bridge_copy.png"},
+  {"do":"eval","expr":"const h=document.querySelector('.bridge-hint'); return {hint:h?h.textContent.replace(/\\s+/g,' ').trim():null};"}
+]

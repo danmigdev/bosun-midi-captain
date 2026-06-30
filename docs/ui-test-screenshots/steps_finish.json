@@ -1,0 +1,15 @@
+[
+  {"do":"clickText","tag":"button","text":"Open Bosun"},
+  {"do":"wait","ms":500},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"click","sel":".scalebtn:nth-child(3)"},
+  {"do":"wait","ms":300},
+  {"do":"eval","expr":"return {scale:document.querySelector('.scalebtn:nth-child(2)').textContent.trim(), onboarded:localStorage.getItem('BOSUN_ONBOARDED')};"},
+  {"do":"clickText","tag":".navitem","text":"Disconnect"},
+  {"do":"wait","ms":1500},
+  {"do":"shot","path":"25_disconnected_welcome.png"},
+  {"do":"eval","expr":"const a=window.__app; return {connected:a.connected, welcome:!!document.querySelector('.welcome')};"}
+]

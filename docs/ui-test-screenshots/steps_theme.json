@@ -1,0 +1,15 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Home"},
+  {"do":"wait","ms":400},
+  {"do":"click","sel":".themetoggle"},
+  {"do":"wait","ms":500},
+  {"do":"shot","path":"16_theme_dark.png"},
+  {"do":"eval","expr":"return {theme:document.documentElement.getAttribute('data-theme')};"},
+  {"do":"click","sel":".scalebtn:nth-child(2)"},
+  {"do":"wait","ms":300},
+  {"do":"shot","path":"17_scale_reset100.png"},
+  {"do":"eval","expr":"return {fontSize:document.documentElement.style.fontSize, scaleLabel:document.querySelector('.scalebtn:nth-child(2)').textContent.trim()};"},
+  {"do":"click","sel":".themetoggle"},
+  {"do":"wait","ms":400},
+  {"do":"eval","expr":"return {theme:document.documentElement.getAttribute('data-theme')};"}
+]

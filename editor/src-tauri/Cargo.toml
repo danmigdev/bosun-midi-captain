@@ -1,0 +1,34 @@
+[package]
+name = "bosun-editor"
+version = "0.3.26"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", default-features = false, features = [] }
+
+[dependencies]
+tauri = { version = "2", default-features = false, features = ["wry"] }
+tauri-plugin-shell = "2"
+serial2 = "0.2"
+# Enumeration only (USB VID/PID of COM ports), to spot a pedal-class device
+# that isn't running bosun. serial2 stays the live connection layer.
+serialport = { version = "4", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
+base64 = "0.22"
+rfd = "0.15"
+dirs = "5"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# USB-MIDI relay between the Kemper (Player) and the pedal. The Player is
+# USB-MIDI only and the pedal is a USB device (not a host), so the PC has to
+# bridge them - this replaces running tools/midi_bridge.py by hand. Uses the
+# winmm backend on Windows (no extra system deps).
+midir = "0.10"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

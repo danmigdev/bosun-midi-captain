@@ -1,0 +1,6 @@
+[
+  {"do":"click","sel":".overlay"},
+  {"do":"wait","ms":300},
+  {"do":"eval","expr":"try{localStorage.removeItem('BOSUN_ONBOARDED');}catch(e){} return {cleared:true};"},
+  {"do":"eval","expr":"location.reload(); return {reloading:true};"}
+]

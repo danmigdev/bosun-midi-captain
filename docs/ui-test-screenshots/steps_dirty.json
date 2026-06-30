@@ -1,0 +1,9 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Editor"},
+  {"do":"wait","ms":400},
+  {"do":"eval","expr":"const ins=[...document.querySelectorAll('input')].filter(e=>e.value==='CLEAN'); return ins.map(e=>({cls:e.className,type:e.type,val:e.value}));"},
+  {"do":"type","sel":"input.pname-input","text":"CLEAN_TEST"},
+  {"do":"wait","ms":900},
+  {"do":"shot","path":"12_editor_dirty.png"},
+  {"do":"eval","expr":"const a=window.__app; const save=[...document.querySelectorAll('.pageHead button')].map(b=>({t:b.textContent.trim(),dis:b.disabled})); return {dirty:a.dirtyIds, headBtns:save};"}
+]

@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "device_name": "MIDI Captain",
+  "long_press_ms": 600,
+  "double_tap_window_ms": 250,
+  "auto_momentary_on_hold": true,
+  "auto_momentary_ms": 500,
+  "autosave": {"enabled": false, "debounce_ms": 2000},
+  "leds": {"brightness": 64},
+  "tft": {
+    "brightness": 80,
+    "theme_color": "#6fd99b",
+    "rotation": 180,
+    "rowstart": 80,
+    "colstart": 0,
+    "layout": [
+      {"field": "patch_name", "halign": "left", "valign": "top", "x": 0, "y": 0,   "size": 5, "color": "#ffffff", "font": "system"},
+      {"field": "bank",       "halign": "left", "valign": "top", "x": 0, "y": 60,  "size": 5, "color": "#9aa1ad", "font": "system", "prefix": "BANK ", "suffix": ""},
+      {"field": "kemper_rig_in_bank", "halign": "left", "valign": "top", "x": 0, "y": 120, "size": 5, "color": "#6fd99b", "font": "system", "prefix": "RIG ", "suffix": ""}
+    ]
+  },
+  "expression": [
+    {"jack": 1, "calibration": {"min": 0, "max": 1023}},
+    {"jack": 2, "calibration": {"min": 0, "max": 1023}}
+  ],
+  "kemper": {
+    "enabled": true,
+    "midi_channel": 1,
+    "auto_follow_rig": true,
+    "auto_follow_effects": true
+  },
+  "long_press_actions": {
+    "A":    [{"type": "captain_bank_step", "delta": 1}],
+    "down": [{"type": "captain_bank_step", "delta": -1}]
+  },
+  "preset_navigation": {
+    "switches": {"A": 1, "B": 2, "C": 3, "D": 4, "down": 5},
+    "dim_factor": 4,
+    "bank_colors": {
+      "1":  "#3a8eff",
+      "2":  "#f5dc34",
+      "3":  "#e54848",
+      "4":  "#2a2a2a",
+      "5":  "#3ecb6e",
+      "6":  "#c08aff",
+      "7":  "#3a8eff",
+      "8":  "#f5dc34",
+      "9":  "#e54848",
+      "10": "#3ecb6e",
+      "11": "#c08aff",
+      "12": "#f5dc34",
+      "13": "#e54848",
+      "14": "#3ecb6e",
+      "15": "#c08aff",
+      "16": "#3a8eff",
+      "17": "#f5dc34",
+      "18": "#e54848",
+      "19": "#3ecb6e",
+      "20": "#c08aff",
+      "21": "#3a8eff",
+      "22": "#f5dc34",
+      "23": "#e54848",
+      "24": "#3ecb6e",
+      "25": "#c08aff"
+    }
+  }
+}

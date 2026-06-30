@@ -1,0 +1,62 @@
+"""Schemas for core message types. Universal MIDI primitives the firmware
+always handles regardless of which plugins are loaded."""
+
+CORE_MESSAGE_TYPES = {
+    "cc": {
+        "label": "Control Change",
+        "params": {
+            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            "cc":      {"type": "int", "min": 0, "max": 127, "default": 0, "label": "CC #"},
+            "value":   {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Value"},
+        },
+        "summary": "CC {cc}={value} ch {channel}",
+    },
+    "pc": {
+        "label": "Program Change",
+        "params": {
+            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            "program": {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Program"},
+        },
+        "summary": "PC {program} ch {channel}",
+    },
+    "note_on": {
+        "label": "Note On",
+        "params": {
+            "channel":  {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            "note":     {"type": "int", "min": 0, "max": 127, "default": 60, "label": "Note"},
+            "velocity": {"type": "int", "min": 0, "max": 127, "default": 100, "label": "Velocity"},
+        },
+        "summary": "Note On {note} v{velocity} ch {channel}",
+    },
+    "note_off": {
+        "label": "Note Off",
+        "params": {
+            "channel":  {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            "note":     {"type": "int", "min": 0, "max": 127, "default": 60, "label": "Note"},
+            "velocity": {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Velocity"},
+        },
+        "summary": "Note Off {note} ch {channel}",
+    },
+    "delay": {
+        "label": "Delay",
+        "params": {
+            "ms": {"type": "int", "min": 0, "max": 5000, "default": 100, "label": "Milliseconds"},
+        },
+        "summary": "Wait {ms}ms",
+    },
+    "captain_patch": {
+        "label": "Switch Captain Patch",
+        "params": {
+            "bank": {"type": "int", "min": 1, "max": 99, "default": 1, "label": "Bank"},
+            "slot": {"type": "int", "min": 1, "max": 10, "default": 1, "label": "Slot"},
+        },
+        "summary": "→ Captain {bank}/{slot}",
+    },
+    "captain_bank_step": {
+        "label": "Step Captain Bank",
+        "params": {
+            "delta": {"type": "int", "min": -10, "max": 10, "default": 1, "label": "Delta (banks)"},
+        },
+        "summary": "Bank step {delta}",
+    },
+}

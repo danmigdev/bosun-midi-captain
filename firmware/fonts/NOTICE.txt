@@ -1,0 +1,24 @@
+Bitmap fonts bundled with the Bosun firmware.
+All fonts here are open source. PCF binaries were generated from the
+upstream sources via FontForge.
+
+  IL9.pcf                  Inter Light                       SIL OFL 1.1
+                           https://rsms.me/inter/
+  L100.pcf                 League Gothic                     SIL OFL 1.1
+                           https://www.theleagueofmoveabletype.com/league-gothic
+  OS8.pcf  OS9.pcf  OS10.pcf
+                           Open Sans Medium                  Apache 2.0
+                           https://fonts.google.com/specimen/Open+Sans
+  PT40.pcf PT60.pcf PT75.pcf
+                           PT Sans Narrow Bold               SIL OFL 1.1
+                           https://www.paratype.com/fonts/pt/pt-sans
+  R25.pcf                  Rubik ExtraBold                   SIL OFL 1.1
+                           https://fonts.google.com/specimen/Rubik
+  RB80.pcf                 Roboto Condensed                  Apache 2.0
+                           https://fonts.google.com/specimen/Roboto+Condensed
+  VM9.pcf                  Victor Mono                       SIL OFL 1.1
+                           https://rubjo.github.io/victor-mono/
+
+The SIL Open Font License (OFL) and Apache 2.0 License are reproduced at:
+  https://openfontlicense.org/
+  https://www.apache.org/licenses/LICENSE-2.0

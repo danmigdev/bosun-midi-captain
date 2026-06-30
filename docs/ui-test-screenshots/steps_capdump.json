@@ -1,0 +1,4 @@
+[
+  {"do":"shot","path":"32_captures.png"},
+  {"do":"eval","expr":"const a=window.__app; return {learning:a.learning, headBtn:(document.querySelector('.pageHead button')||{}).textContent, captures:a.captures.map(c=>({ch:c.channel,bank:c.bank_msb,pc:c.pc,port:c.port}))};"}
+]

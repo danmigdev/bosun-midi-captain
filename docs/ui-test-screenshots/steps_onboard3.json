@@ -1,0 +1,6 @@
+[
+  {"do":"clickText","tag":"button","text":"Get started"},
+  {"do":"wait","ms":500},
+  {"do":"shot","path":"24_onboarding_step2.png"},
+  {"do":"eval","expr":"const m=document.querySelector('.modal,[class*=card],[role=dialog]'); return {btns:[...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(t=>/Next|Continue|Done|Finish|Got it|Create|Skip|Back/.test(t))};"}
+]

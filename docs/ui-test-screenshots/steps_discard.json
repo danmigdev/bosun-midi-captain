@@ -1,0 +1,6 @@
+[
+  {"do":"clickText","tag":".pageHead button","text":"Discard"},
+  {"do":"wait","ms":1500},
+  {"do":"shot","path":"13_editor_discarded.png"},
+  {"do":"eval","expr":"const a=window.__app; const e=[...document.querySelectorAll('input')].find(x=>x.value&&/CLEAN/.test(x.value)); return {dirtyCount:a.dirtyIds.length, nameVal:e?e.value:null, dirtyTag:!!document.querySelector('.dirty-tag')};"}
+]

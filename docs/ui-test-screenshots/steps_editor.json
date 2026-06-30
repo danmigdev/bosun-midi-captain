@@ -1,0 +1,5 @@
+[
+  {"do":"clickText","tag":".navitem","text":"Patches"},
+  {"do":"wait","ms":600},
+  {"do":"eval","expr":"const cells=[...document.querySelectorAll('button, [role=button], .cell, .patchcell, .patch')].filter(e=>/ACOUSTIC/.test(e.textContent||'')); return cells.map(e=>({tag:e.tagName, cls:e.className, txt:(e.textContent||'').trim().slice(0,30)}));"}
+]

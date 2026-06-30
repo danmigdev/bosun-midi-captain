@@ -1,0 +1,6 @@
+[
+  {"do":"eval","expr":"const e=[...document.querySelectorAll('input[type=text]')].find(x=>x.value==='CLEAN'); if(!e) return {ok:false}; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; setter.call(e,'CLEAN_TEST'); e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true,val:e.value};"},
+  {"do":"wait","ms":1000},
+  {"do":"shot","path":"12_editor_dirty.png"},
+  {"do":"eval","expr":"const a=window.__app; const head=[...document.querySelectorAll('.pageHead button')].map(b=>({t:b.textContent.trim(),dis:b.disabled})); return {dirtyCount:a.dirtyIds.length, headBtns:head, dirtyTag:!!document.querySelector('.dirty-tag')};"}
+]

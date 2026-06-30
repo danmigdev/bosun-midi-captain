@@ -1,0 +1,5 @@
+[
+  {"do":"eval","expr":"window.__cmd.switchPatch(1,1); return {switched:true};"},
+  {"do":"wait","ms":1000},
+  {"do":"eval","expr":"const a=window.__app; return {bank:a.deviceInfo&&a.deviceInfo.bank, slot:a.deviceInfo&&a.deviceInfo.slot, dirty:a.dirtyIds.length, patches:a.patches.length};"}
+]

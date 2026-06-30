@@ -1,0 +1,29 @@
+{
+  "name": "LEAD",
+  "tft_color": "#3ecb6e",
+  "on_enter": {
+    "messages": [
+      {"type": "kemper_rig", "bank": 1, "rig": 5, "channel": 1}
+    ]
+  },
+  "bindings": [
+    {
+      "switch": "3",
+      "mode": "latched",
+      "label": "X",
+      "led": {"on": "#e8c84f"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "X", "value": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "kemper_effect_toggle", "slot": "X", "value": "off", "channel": 1}
+          ]
+        }
+      }
+    }
+  ]
+}
