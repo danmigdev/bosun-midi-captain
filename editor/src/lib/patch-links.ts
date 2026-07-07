@@ -3,17 +3,24 @@
 // Linking is driven entirely by a per-column lock: when a slot is locked
 // (device.patch_link.locked_slots), every patch at that slot number is
 // linked across banks, so editing one propagates to all the others in the
-// same column. The legacy `implicit_by_position` global toggle is still
-// honoured (treated as "every slot locked") and migrated to an explicit
-// locked_slots list on the first lock toggle. Explicit per-patch `linked_to`
+// same column. The default is UNLINKED: with no explicit `locked_slots`,
+// nothing is locked.
+//
+// The legacy `implicit_by_position` global toggle (treated as "every slot
+// locked") is NO LONGER honoured - it was never settable from the current UI,
+// so the only way it could appear was inside an old backup, where it silently
+// linked every bank. Reading it is harmless (the field is kept in the type so
+// old configs still parse) but it no longer locks anything; a config carrying
+// it now starts unlinked, and the first lock toggle migrates it away by
+// writing an explicit `locked_slots` list. Explicit per-patch `linked_to`
 // links were removed.
 
 import { type Patch, type PatchSummary } from "./protocol";
 
 export interface LinkConfig {
-  /** Legacy global toggle: when true, every slot column is locked. Kept for
-   *  backward compat; the lock UI migrates it to explicit `locked_slots` on
-   *  the first toggle. */
+  /** Legacy global toggle. No longer honoured (see file header): kept only so
+   *  old configs that still carry it parse without error. It never locks a
+   *  column and is dropped on the first lock toggle. */
   implicit_by_position?: boolean;
   /** Per-column lock: slot numbers whose patches are linked across banks
    *  (a closed padlock in the grid header / editor). */
@@ -21,14 +28,15 @@ export interface LinkConfig {
 }
 
 /** The set of slot numbers whose columns are locked (linked across banks).
- *  Explicit `locked_slots` wins; a legacy `implicit_by_position` means every
- *  slot that currently has a patch is locked. */
+ *  Only explicit `locked_slots` lock a column; the default is unlinked. The
+ *  legacy `implicit_by_position` flag is ignored (`patches` is unused now but
+ *  kept for a stable signature). */
 export function lockedSlots(
   linkConfig: LinkConfig | undefined,
   patches: PatchSummary[],
 ): Set<number> {
+  void patches;
   if (linkConfig?.locked_slots) return new Set(linkConfig.locked_slots);
-  if (linkConfig?.implicit_by_position) return new Set(patches.map(p => p.slot));
   return new Set();
 }
 

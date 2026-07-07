@@ -8,6 +8,7 @@ mod serial;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(serial::AppState::default())
         .manage(midi::MidiState::default())
         .invoke_handler(tauri::generate_handler![

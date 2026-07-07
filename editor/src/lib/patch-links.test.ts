@@ -29,14 +29,14 @@ describe("lockedSlots / isSlotLocked", () => {
     expect(isSlotLocked(3, cfg, all)).toBe(true);
   });
 
-  it("legacy implicit_by_position locks every slot that has a patch", () => {
+  it("legacy implicit_by_position is ignored - the default is unlinked", () => {
     const cfg = { implicit_by_position: true };
-    expect(isSlotLocked(1, cfg, all)).toBe(true);
-    expect(isSlotLocked(2, cfg, all)).toBe(true);
-    expect(isSlotLocked(3, cfg, all)).toBe(false); // no patch at slot 3
+    expect([...lockedSlots(cfg, all)]).toEqual([]);
+    expect(isSlotLocked(1, cfg, all)).toBe(false);
+    expect(isSlotLocked(2, cfg, all)).toBe(false);
   });
 
-  it("explicit locked_slots wins over implicit_by_position", () => {
+  it("only explicit locked_slots lock, even alongside legacy implicit_by_position", () => {
     const cfg = { implicit_by_position: true, locked_slots: [2] };
     expect(isSlotLocked(1, cfg, all)).toBe(false);
     expect(isSlotLocked(2, cfg, all)).toBe(true);
@@ -54,9 +54,9 @@ describe("toggledLock", () => {
     expect(toggledLock({ locked_slots: [1, 2] }, all, 1)).toEqual({ locked_slots: [2] });
   });
 
-  it("migrates implicit_by_position to explicit, then applies the toggle", () => {
-    // implicit means slots 1 and 2 are locked; toggling 1 off leaves [2].
-    expect(toggledLock({ implicit_by_position: true }, all, 1)).toEqual({ locked_slots: [2] });
+  it("drops legacy implicit_by_position: toggling starts from an unlocked base", () => {
+    // implicit is ignored, so the base is empty; toggling slot 1 locks just it.
+    expect(toggledLock({ implicit_by_position: true }, all, 1)).toEqual({ locked_slots: [1] });
   });
 
   it("returns a sorted list", () => {
@@ -82,10 +82,10 @@ describe("resolveLinkedPatches (lock-driven)", () => {
     expect(out).not.toContainEqual({ bank: 1, slot: 1 });
   });
 
-  it("legacy implicit_by_position behaves like every slot locked", () => {
+  it("legacy implicit_by_position no longer links anything", () => {
     const all = [summary(1, 1), summary(2, 1)];
     const out = resolveLinkedPatches({ bank: 1, slot: 1 }, patch(), all, { implicit_by_position: true });
-    expect(out).toEqual([{ bank: 2, slot: 1 }]);
+    expect(out).toEqual([]);
   });
 
   it("ignores any legacy explicit linked_to on the patch", () => {

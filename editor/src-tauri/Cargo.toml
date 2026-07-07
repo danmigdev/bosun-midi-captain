@@ -1,6 +1,6 @@
 [package]
 name = "bosun-editor"
-version = "0.3.26"
+version = "0.3.27"
 edition = "2021"
 
 [build-dependencies]
@@ -9,6 +9,8 @@ tauri-build = { version = "2", default-features = false, features = [] }
 [dependencies]
 tauri = { version = "2", default-features = false, features = ["wry"] }
 tauri-plugin-shell = "2"
+# Persist and restore the main window size/position across launches.
+tauri-plugin-window-state = "2"
 serial2 = "0.2"
 # Enumeration only (USB VID/PID of COM ports), to spot a pedal-class device
 # that isn't running bosun. serial2 stays the live connection layer.

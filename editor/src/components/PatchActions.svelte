@@ -128,13 +128,23 @@
   <div class="modal" role="dialog">
     {#if dialog === "new" || dialog === "clone"}
       <h3>{dialog === "new" ? "New patch" : "Clone patch"}</h3>
-      <div class="row">
-        <label>Bank<input type="number" min="1" max="99" bind:value={targetBank} /></label>
-        <label>Slot<input type="number" min="1" max="99" bind:value={targetSlot} /></label>
-      </div>
-      <label class="full">Name
-        <input bind:value={targetName} />
-      </label>
+      {#if dialog === "clone" && currentPatchEnvelope}
+        <p class="from">
+          Copy from
+          <code>{patchIdOf(currentPatchEnvelope.bank, currentPatchEnvelope.slot)}</code>
+          · {currentPatchEnvelope.patch.name || "(unnamed)"}
+        </p>
+      {/if}
+      <fieldset class="dest">
+        <legend>{dialog === "clone" ? "Copy to" : "Location"}</legend>
+        <div class="row">
+          <label>Bank<input type="number" min="1" max="99" bind:value={targetBank} /></label>
+          <label>Slot<input type="number" min="1" max="99" bind:value={targetSlot} /></label>
+        </div>
+        <label class="full">Name
+          <input bind:value={targetName} />
+        </label>
+      </fieldset>
       {#if targetIsUsed}
         <p class="warn">⚠ Slot {patchIdOf(targetBank, targetSlot)} is already used - it will be overwritten.</p>
       {/if}
@@ -184,6 +194,9 @@
   label.full input { width: 100%; box-sizing: border-box; margin-top: 0.2rem; }
   input { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 0.35rem 0.5rem; border-radius: 3px; font-size: 0.85rem; }
   input[type="number"] { width: 4rem; }
+  .from { font-size: 0.85rem; color: var(--text-muted); margin: 0 0 0.6rem; }
+  .dest { border: 1px solid var(--border); border-radius: 5px; padding: 0.6rem 0.7rem 0.3rem; margin: 0 0 0.6rem; }
+  .dest legend { padding: 0 0.35rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }
   .warn { background: var(--warn-bg); color: var(--warn-text); padding: 0.4rem 0.55rem; border-radius: 3px; font-size: 0.8rem; }
   .muted { color: var(--text-muted); font-size: 0.85rem; }
   code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px; color: var(--warn-text); font-family: ui-monospace, Consolas, monospace; }
