@@ -598,11 +598,19 @@ class Captain:
                     fsm.auto_momentary_on_hold = b.get("auto_momentary", global_am)
                     break
         # Overlay device.preset_navigation: a "preset row" of switches that
-        # always select a slot inside the current bank. Per-patch wins if
-        # the patch declares its own binding for that switch.
+        # select a slot inside the current bank. Per-patch wins if the patch
+        # declares its own binding for that switch. Only slots that actually
+        # hold a patch are wired up - an unbound switch pointing at an empty
+        # rig must do nothing (its LED is already off, see
+        # _paint_preset_nav_leds), otherwise pressing it would still tell the
+        # Kemper to load a rig that has no patch behind it.
         nav_switches = (self.device.get("preset_navigation") or {}).get("switches") or {}
+        available_slots = {p["slot"] for p in self.patches.list()
+                           if p["bank"] == self.current_bank}
         for sw_name, target_slot in nav_switches.items():
             if sw_name in self._binding_index:
+                continue
+            if int(target_slot) not in available_slots:
                 continue
             self._binding_index[sw_name] = {
                 "switch": sw_name,
