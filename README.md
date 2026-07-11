@@ -17,6 +17,8 @@ It is built for guitarists who drive a modeller or multi-effect (Kemper Player, 
   - [Home](#home)
   - [Patches](#patches)
   - [Patch editor](#patch-editor)
+  - [Quick setup](#quick-setup)
+  - [Setlist](#setlist)
   - [MIDI Learn](#midi-learn)
   - [Screen layout](#screen-layout)
   - [Settings](#settings)
@@ -97,13 +99,14 @@ When the pedal is flashed and plugged in, the top bar shows **Connected** and th
 
 ### Home
 
-![Home screen](docs/ui-test-screenshots/01_initial_launch.png)
+![Home screen](docs/ui-test-screenshots/43_home_livemirror.png)
 
 The Home screen is a dashboard:
 
 - **Connection**: the serial port, firmware version, the current patch (bank/slot), and uptime.
 - **Active profile**: which plugin profile is loaded, plus how many patches and banks you have.
 - **Current patch**: the name and slot of the patch the pedal is on right now.
+- **Live mirror**: a compact readout that follows the pedal in real time. When you step a switch on the hardware (or the connected device changes preset), the current bank/slot and patch name update here without a manual refresh, and an activity dot shows the last time the pedal sent anything. It is the fastest way to confirm the editor and pedal are in sync while you work.
 - **Quick actions**: shortcuts to Patches, the Editor and the Screen layout.
 
 The left sidebar is the main navigation for everything below. **Disconnect** at the bottom releases the serial port.
@@ -135,9 +138,50 @@ Expand a row to configure it in full:
 - **Label** is the text shown for the switch.
 - **LED on / LED off** pick the colours for each state, and **auto-momentary on hold** lets a latched switch act momentarily while held.
 - For a latched switch you build two macros, **toggle_on** and **toggle_off**; for a tap switch you build one. Each macro is a list of messages.
-- Add a message with the dropdown. The dropdown is populated from the manifest: **core** messages (`cc`, `pc`, `note_on`, `note_off`, `delay`, `captain_patch`, `captain_bank_step`) are always available, and every message type your plugin declares appears alongside them (for example "Kemper Player - Effect Slot On/Off" for the A-D / X / Mod / Delay / Reverb blocks, or "Kemper Player - Fixed Block On/Off" for the input-section compressor, noise gate, pure booster, wah and transpose). The plugin-specific fields (Slot, Value, Channel, ...) come straight from the plugin's schema.
+- Add a message with the dropdown. The dropdown is populated from the manifest: **core** messages (`cc`, `pc`, `note_on`, `note_off`, `delay`, `captain_patch`, `captain_bank_step`, and the preset-preview / setlist steps) are always available, and every message type your plugin declares appears alongside them (for example "Kemper Player - Effect Slot On/Off" for the A-D / X / Mod / Delay / Reverb blocks, or "Kemper Player - Fixed Block On/Off" for the input-section compressor, noise gate, pure booster, wah and transpose). The plugin-specific fields (Slot, Value, Channel, ...) come straight from the plugin's schema.
 
 This is the heart of Bosun: a switch press runs a macro, and a macro is just an ordered list of MIDI messages, some core and some expanded by a plugin.
+
+![Patch editor, pedal map and switch rows](docs/ui-test-screenshots/42_editor_pedalmap.png)
+
+Three editor conveniences sit on top of the switch rows:
+
+- **Pedal map.** A schematic of the ten switches gives you a physical, at-a-glance view of the patch: each switch shows its label and LED colour where it actually sits under your foot, and clicking one jumps to that switch's row. The map is **free-layout**: drag the switches to match how your own pedal is arranged (or how you think about it) rather than a fixed "five on top, five on the bottom" grid. Your arrangement is remembered between sessions.
+- **Undo / redo.** Every edit to the open patch (label, mode, LED, messages, colour) is tracked. `Ctrl+Z` undoes and `Ctrl+Y` (or `Ctrl+Shift+Z`) redoes, so you can experiment freely and back out without reloading from the pedal.
+- **Snippets.** Configured one switch exactly how you like it? Save it as a reusable snippet, then paste it onto another switch, in this patch or any other, to copy its whole configuration (mode, label, LEDs and macros) in one click. Handy for repeating a "tuner" or "tap tempo" switch across many patches.
+
+Small **help tips** (a `?` next to controls such as Mode) explain the less obvious options inline, so you rarely need to leave the editor to remember what `long_press_alt` or auto-momentary does.
+
+### Quick setup
+
+![Quick setup](docs/ui-test-screenshots/40_quicksetup.png)
+
+Quick setup writes common switch configurations for you, so you do not have to know the underlying MIDI. Open a patch, go to **Quick setup**, pick a recipe, choose which physical switches it should use, and the bindings are generated and written straight to the patch.
+
+The built-in recipes include:
+
+- **Preset preview.** Scroll through your patches on the pedal's screen *without loading them*, then confirm the one you land on (or cancel back to where you were). No MIDI fires for the patches you skip past, so the audience never hears you hunting for the right sound. You assign a scroll-up, scroll-down and confirm switch (and optionally a cancel switch).
+- **Bank up / down.** Two switches that step through banks.
+- **Setlist next / previous.** Two switches that walk your [setlist](#setlist) in song order (see below).
+- **Toggle tuner.** One latching switch that opens and closes the tuner. On the pedal, the same tuner also exits the moment you press *any* switch, so a tap of the switch you were reaching for both leaves the tuner and does its job.
+- **Tap tempo.** Tap a switch in time to set the tempo.
+
+Recipes that need a plugin feature (tuner, tap tempo) only appear when the active profile's device actually exposes it, so the list you see matches your gear.
+
+### Setlist
+
+![Setlist](docs/ui-test-screenshots/41_setlist.png)
+
+A setlist is an ordered list of patches for a gig, walked one song at a time from a footswitch. It is **non-destructive**: it never moves or renumbers your patches. The order lives alongside them, so the same patch can appear in different setlists in different positions.
+
+Build one on this page:
+
+- Create and name as many setlists as you like (they are saved on your computer).
+- Search your patches by name or `BB/SS` id and **Add** them to the current setlist.
+- Reorder by dragging, or with the up/down arrows; remove with the `×`.
+- **Send to pedal** writes the ordered list to the pedal. An **on pedal** badge shows when the setlist you are viewing matches the one currently loaded on the hardware.
+
+On stage, set up a **Setlist next / previous** pair in [Quick setup](#quick-setup). *Next* loads the following song in the list, *previous* the one before, wherever those patches physically live in the grid, wrapping around at the ends. You can also show your place in the set on the TFT: add the **Setlist position** field (for example `4/12`) in the [Screen layout](#screen-layout) editor.
 
 ### MIDI Learn
 
@@ -155,7 +199,7 @@ MIDI Learn maps an incoming Program Change (plus bank MSB) to a Bosun patch, so 
 
 The 240x240 TFT is fully user-defined. Each row here is one label drawn on the screen:
 
-- **Field** pulls a live value. The list mixes **core** fields (patch name, bank) with the fields your plugin exposes (for example "Kemper Player - Rig within bank (1-5)").
+- **Field** pulls a live value. The list mixes **core** fields (patch name, bank, slot, and the [setlist](#setlist) position such as `4/12`) with the fields your plugin exposes (for example "Kemper Player - Rig within bank (1-5)").
 - **text** is a static literal, and **prefix** / **suffix** wrap the value (so a `BANK` prefix renders `BANK 1`).
 - **H-align / V-align / X offset / Y offset / Size / Color / Font** position and style the label.
 - **Scroll** turns a label into a marquee: when its text is wider than the screen it scrolls back and forth instead of being clipped, with an optional **Speed** (pixels per second). Short text that already fits stays still.
