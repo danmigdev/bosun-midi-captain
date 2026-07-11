@@ -185,6 +185,16 @@ def _logo_tilegrid():
     return displayio.TileGrid(bmp, pixel_shader=pal, x=(_SCREEN_W - W) // 2, y=24)
 
 
+def _preview_badge():
+    """Small 'PREVIEW' tag drawn over the layout while the preset-preview cursor
+    is active, so the user knows the shown patch is not yet loaded."""
+    return label.Label(
+        terminalio.FONT, text="PREVIEW", color=_LOGO_COLOR, scale=2,
+        anchor_point=(0.5, 1.0),
+        anchored_position=(_SCREEN_W // 2, _SCREEN_H - 4),
+    )
+
+
 def _anchor_point(spec):
     return (
         _HALIGN.get(spec.get("halign", "left"),  0.0),
@@ -294,9 +304,13 @@ class Display:
         self._tuner_active = False
         group = displayio.Group()
 
+        previewing = context.get("preview") == "on"
+
         if not layout:
             name = context.get("patch_name") or "(unnamed)"
             group.append(label.Label(terminalio.FONT, text=str(name), x=20, y=120))
+            if previewing:
+                group.append(_preview_badge())
             self.display.root_group = group
             return
 
@@ -355,6 +369,9 @@ class Display:
             except Exception as e:
                 # Bad layout entry should never crash the display.
                 print("display: bad layout entry", spec, "->", e)
+
+        if previewing:
+            group.append(_preview_badge())
 
         self.display.root_group = group
 

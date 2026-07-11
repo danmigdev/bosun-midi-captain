@@ -59,4 +59,27 @@ CORE_MESSAGE_TYPES = {
         },
         "summary": "Bank step {delta}",
     },
+    # Preset preview: scroll a cursor across patches WITHOUT loading any of them
+    # (no on_enter/on_exit, no device MIDI). Commit jumps for real; cancel (or an
+    # inactivity timeout) returns to the current patch. Lets a player browse
+    # banks like presets on an FX pedal and pick one, instead of firing MIDI for
+    # every bank stepped through.
+    "captain_preview_step": {
+        "label": "Preview Step",
+        "params": {
+            "delta": {"type": "int", "min": -10, "max": 10, "default": 1, "label": "Delta"},
+            "scope": {"type": "enum", "values": ["patch", "bank"], "default": "patch", "label": "Scope"},
+        },
+        "summary": "Preview {scope} {delta}",
+    },
+    "captain_preview_commit": {
+        "label": "Preview Commit",
+        "params": {},
+        "summary": "Preview commit",
+    },
+    "captain_preview_cancel": {
+        "label": "Preview Cancel",
+        "params": {},
+        "summary": "Preview cancel",
+    },
 }

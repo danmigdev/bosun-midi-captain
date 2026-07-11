@@ -13,7 +13,9 @@ describe("fallbackManifest", () => {
     const m = fallbackManifest();
     expect(Object.keys(m.plugins)).toEqual([]);
     expect(Object.keys(m.core_messages).sort()).toEqual(
-      ["captain_bank_step", "captain_patch", "cc", "delay", "note_off", "note_on", "pc"],
+      ["captain_bank_step", "captain_patch", "captain_preview_cancel",
+       "captain_preview_commit", "captain_preview_step",
+       "cc", "delay", "note_off", "note_on", "pc"],
     );
   });
 
@@ -33,7 +35,7 @@ describe("fallbackManifest", () => {
 
   it("is flattenable into the editor's picker list, all sourced from core", () => {
     const flat = flattenManifest(fallbackManifest());
-    expect(flat).toHaveLength(7);
+    expect(flat).toHaveLength(10);
     expect(flat.every(f => f.source === "core")).toBe(true);
     expect(flat.map(f => f.type)).toContain("cc");
   });

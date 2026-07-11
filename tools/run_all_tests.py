@@ -17,6 +17,8 @@ TOOLS = Path(__file__).resolve().parent
 
 SUITES = [
     "fsm_test.py",                  # switch FSM (debounce / long-press / double-tap)
+    "nav_preview_test.py",          # preset-preview navigation cursor math
+    "preview_tuner_test.py",        # app-level preset preview + tuner exit-on-press
     "midi_parser_test.py",          # MIDI stream parser (running status, realtime, SYSEX)
     "protocol_test.py",             # USB CDC protocol handlers + partial-write streaming
     "expression_test.py",           # expression-pedal calibration / curves / deadband

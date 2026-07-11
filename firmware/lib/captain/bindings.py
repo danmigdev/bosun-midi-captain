@@ -210,6 +210,25 @@ class BindingRunner:
                     self.app.bank_step(int(msg.get("delta", 1)))
                 except Exception as e:
                     print("captain_bank_step failed:", e)
+        elif t == "captain_preview_step":
+            if self.app is not None:
+                try:
+                    self.app.preview_step(int(msg.get("delta", 1)),
+                                          msg.get("scope", "patch"))
+                except Exception as e:
+                    print("captain_preview_step failed:", e)
+        elif t == "captain_preview_commit":
+            if self.app is not None:
+                try:
+                    self.app.preview_commit()
+                except Exception as e:
+                    print("captain_preview_commit failed:", e)
+        elif t == "captain_preview_cancel":
+            if self.app is not None:
+                try:
+                    self.app.preview_cancel()
+                except Exception as e:
+                    print("captain_preview_cancel failed:", e)
         elif self.plugins is not None and self.plugins.handles(t):
             self.plugins.dispatch(msg, self.midi)
             # Let the plugin update the TFT display context - but skip the

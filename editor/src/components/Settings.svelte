@@ -12,6 +12,8 @@
     auto_momentary_on_hold?: boolean;
     auto_momentary_ms?: number;
     long_press_actions?: Record<string, Array<{ type: string; [k: string]: unknown }>>;
+    tuner_exit_on_press?: boolean;
+    preview?: { timeout_ms?: number; on_timeout?: "commit" | "cancel" };
     patch_link?: { implicit_by_position?: boolean; locked_slots?: number[] };
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number };
@@ -72,6 +74,8 @@
       w.expression = w.expression.map(e => withExpressionDefaults(e));
     }
     if (!w.long_press_actions) w.long_press_actions = {};
+    if (w.tuner_exit_on_press === undefined) w.tuner_exit_on_press = true;
+    if (!w.preview) w.preview = { timeout_ms: 1500, on_timeout: "commit" };
     if (!w.patch_link) w.patch_link = {};
     return w;
   }
@@ -234,6 +238,43 @@
           </select>
         </label>
       </div>
+    </section>
+
+    <section class="block">
+      <h3>Preset preview</h3>
+      <p class="hint">
+        Browse patches on the screen without loading them, then jump to the one
+        you pick - no MIDI fires for the patches you scroll past. Bind
+        <code>Preview Step</code> to a switch to scroll, and
+        <code>Preview Commit</code> / <code>Preview Cancel</code> to confirm or
+        back out (in the patch editor's message list).
+      </p>
+      <div class="grid">
+        <label>Auto-resolve after (ms)
+          <input type="number" min="0" max="10000" bind:value={working.preview!.timeout_ms} />
+        </label>
+        <label>When it auto-resolves
+          <select bind:value={working.preview!.on_timeout}>
+            <option value="commit">Load the previewed patch</option>
+            <option value="cancel">Return to current patch</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint small">
+        If you stop scrolling for this long, the preview resolves on its own.
+      </p>
+    </section>
+
+    <section class="block">
+      <h3>Tuner</h3>
+      <label class="cb">
+        <input type="checkbox" bind:checked={working.tuner_exit_on_press} />
+        Exit the tuner on the next footswitch press
+      </label>
+      <p class="hint small">
+        When the tuner screen is up, the next stomp dismisses it and still
+        performs that switch's action in one press.
+      </p>
     </section>
 
     <section class="block">

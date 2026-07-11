@@ -158,6 +158,17 @@ def dispatch(msg, midi):
             midi.send_cc(ch, _QA_SELECT_CC[idx], int(msg["value"]))
 
 
+def tuner_off(app):
+    """Leave tuner mode on the Ampero (CC 60 = 0) when the user stomps a
+    footswitch while the tuner splash is up. Only acts for an Ampero profile
+    (device.ampero present)."""
+    cfg = (app.device or {}).get("ampero")
+    if cfg is None:
+        return
+    ch = int((app.device or {}).get("midi_channel") or 16)
+    app.midi.send_cc(ch, 60, 0)
+
+
 def _ampero_patch(midi, channel, patch):
     try:
         bank = int(patch[1:3])

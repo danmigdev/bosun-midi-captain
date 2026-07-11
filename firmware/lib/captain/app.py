@@ -67,12 +67,22 @@ class Captain:
         )
         self.plugins = PluginRegistry()
         self.plugins.discover()
+        # Kind of the active profile (e.g. "kemper_player"). Plugins without a
+        # device.json config section (Helix) gate their global hooks on this.
+        self.active_kind = self._compute_active_kind()
         self.runner = BindingRunner(self.midi, self.plugins, app=self)
         # Expression jacks (GP27/GP28). Idle unless a jack is enabled with a
         # message in device.json; a board with nothing plugged in costs nothing.
         self.expression = ExpressionArray(self.device.get("expression"))
         self.protocol = Protocol(self)
         self.midi_learn = False
+
+        # Preset-preview cursor. None = not previewing. Active shape:
+        #   {"bank":b, "slot":s, "until_ms":t, "saved_context":{...}}
+        # While active the user is scrolling patches on the TFT WITHOUT loading
+        # any (no on_enter/on_exit, no device MIDI); commit jumps for real,
+        # cancel/timeout returns to the current patch. See preview_* methods.
+        self._preview = None
 
         self.current_bank = 1
         self.current_slot = 1
@@ -106,12 +116,7 @@ class Captain:
         # from. The editor's TFT Layout page lets them customize later.
         if not self.display_layout:
             try:
-                kind = (config.list_profiles() or [{}])[0].get("kind", "")
-                for p in config.list_profiles():
-                    if p.get("active"):
-                        kind = p.get("kind", "")
-                        break
-                layout = self.plugins.default_layout(kind)
+                layout = self.plugins.default_layout(self.active_kind)
                 if layout:
                     self.display_layout = layout
                     self.device.setdefault("tft", {})["layout"] = layout
@@ -197,6 +202,13 @@ class Captain:
             self._splash_until_ms = 0
             self._refresh_display()
         self.patches.tick(now_ms)
+        # Tuner exit-on-press: snapshot whether the tuner splash is up BEFORE any
+        # switch fires. On the first press edge this tick, dismiss the tuner
+        # (device + local) so one stomp both leaves the tuner AND does the
+        # switch's own action (pass-through). Gated by device.tuner_exit_on_press.
+        tuner_on = self._tuner_is_on()
+        tuner_exit_enabled = self.device.get("tuner_exit_on_press", True)
+        exited_tuner = False
         for sw in self.switches.switches:
             mode = self._mode_index.get(sw.name, "tap")
             raw_edge, triggers = sw.poll(now_ms, mode)
@@ -205,6 +217,10 @@ class Captain:
                     "switch_pressed" if raw_edge == "press" else "switch_released",
                     switch=sw.name,
                 )
+            if (raw_edge == "press" and tuner_on and tuner_exit_enabled
+                    and not exited_tuner):
+                self._exit_tuner()
+                exited_tuner = True
             for action_key in triggers:
                 self._fire(sw.name, action_key)
         for port, channel, status, data in self.midi.poll():
@@ -222,6 +238,11 @@ class Captain:
             m = dict(message)
             m["value"] = value
             self.runner.run_message(m)
+        # Preset-preview auto-resolve: the user stopped scrolling past the
+        # timeout, so commit (or cancel) the previewed patch. Commit runs a full
+        # switch_patch, which marks the display dirty for the deferred render.
+        if self._preview is not None and now_ms >= self._preview["until_ms"]:
+            self._resolve_preview_timeout()
         # Deferred TFT render: fire the one slow render only after the inbound
         # MIDI burst has gone quiet (no message for _REFRESH_QUIET_MS), or at
         # the hard cap. The fast ticks until then keep draining USB-MIDI, so the
@@ -263,6 +284,12 @@ class Captain:
     def switch_patch(self, bank, slot, source="editor", fire_on_enter=True):
         if not self.patches.has(bank, slot):
             return False
+        # Any real patch load ends an in-progress preset preview: the commit
+        # path, or the device changing rig underneath a preview (inbound echo).
+        # Clear the cursor and the PREVIEW badge so a stale preview can't linger
+        # or auto-commit over this load. No-op in the common (non-preview) case.
+        self._preview = None
+        self.display_context.pop("preview", None)
         # Echo suppression: a plugin reacting to inbound MIDI may call
         # switch_patch(source="midi_in") for the same patch we just loaded
         # ourselves. Within ~1.2 s of our own load the inbound is just the
@@ -439,6 +466,101 @@ class Captain:
         slots = sorted(s for (b, s) in pairs if b == new_bank)
         target_slot = self.current_slot if self.current_slot in slots else slots[0]
         return self.switch_patch(new_bank, target_slot, source="binding")
+
+    def _compute_active_kind(self):
+        """Kind of the active profile (falls back to the first profile, then
+        empty). Best-effort - a bad profile store must not crash boot."""
+        try:
+            profiles = config.list_profiles() or []
+            for p in profiles:
+                if p.get("active"):
+                    return p.get("kind", "")
+            if profiles:
+                return profiles[0].get("kind", "")
+        except Exception as e:
+            print("active kind lookup failed:", e)
+        return ""
+
+    # ---------- preset preview (called from BindingRunner) ----------
+
+    def preview_step(self, delta, scope="patch"):
+        """Move the preview cursor by `delta` (scope "patch" or "bank") and show
+        the target patch on the TFT WITHOUT loading it - no on_enter/on_exit, no
+        device MIDI, no LED/current-patch change. First call snapshots the live
+        display context so cancel/timeout can restore it. Returns False when
+        there is nothing to preview."""
+        from . import navigation
+        order = navigation.patch_order(self.patches.list())
+        if not order:
+            return False
+        if self._preview is not None:
+            start = (self._preview["bank"], self._preview["slot"])
+            saved = self._preview["saved_context"]
+        else:
+            start = (self.current_bank, self.current_slot)
+            saved = dict(self.display_context)
+        bank, slot = navigation.step_index(order, start, delta, scope)
+        try:
+            patch = self.patches.get(bank, slot)
+        except OSError:
+            patch = None
+        timeout = int((self.device.get("preview") or {}).get("timeout_ms", 1500))
+        self._preview = {
+            "bank": bank, "slot": slot,
+            "until_ms": self._now_ms() + timeout,
+            "saved_context": saved,
+        }
+        # Show the previewed patch's core fields plus a PREVIEW marker the
+        # display badges. Plugins fill their own fields (e.g. Kemper rig).
+        self.display_context["patch_name"] = (patch or {}).get("name", "")
+        self.display_context["bank"] = bank
+        self.display_context["slot"] = slot
+        self.display_context["preview"] = "on"
+        self.plugins.on_preview(self, bank, slot)
+        self._mark_display_dirty()
+        return True
+
+    def preview_commit(self):
+        """Load the previewed patch for real (fires on_exit -> on_enter, sends
+        device MIDI). No-op when not previewing."""
+        if self._preview is None:
+            return False
+        bank, slot = self._preview["bank"], self._preview["slot"]
+        self._preview = None
+        return self.switch_patch(bank, slot, source="binding")
+
+    def preview_cancel(self):
+        """Discard the preview and restore the pre-preview display. No-op when
+        not previewing."""
+        if self._preview is None:
+            return False
+        self.display_context = self._preview["saved_context"]
+        self._preview = None
+        self._mark_display_dirty()
+        return True
+
+    def _resolve_preview_timeout(self):
+        """Auto-resolve a preview that the user stopped scrolling. Commit or
+        cancel per device.preview.on_timeout (default commit - the FX-pedal
+        'stop and it loads' behavior)."""
+        on_timeout = (self.device.get("preview") or {}).get("on_timeout", "commit")
+        if on_timeout == "cancel":
+            self.preview_cancel()
+        else:
+            self.preview_commit()
+
+    # ---------- tuner exit-on-press ----------
+
+    def _tuner_is_on(self):
+        ctx = self.display_context
+        return ctx.get("tuner") == "on" or ctx.get("kemper_tuner") == "on"
+
+    def _exit_tuner(self):
+        """Leave the tuner: tell the target device (plugin hook) and clear the
+        local tuner context so the TFT returns to the patch view immediately,
+        without waiting for the device to echo tuner-off."""
+        self.plugins.tuner_off(self)
+        self.update_context({"tuner": "off", "kemper_tuner": "off"})
 
     def reload_current_patch(self):
         try:

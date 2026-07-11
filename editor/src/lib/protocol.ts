@@ -214,6 +214,24 @@ export const CORE_MESSAGE_TYPES: Record<string, MessageSchema> = {
     },
     summary: "Bank step {delta}",
   },
+  captain_preview_step: {
+    label: "Preview Step",
+    params: {
+      delta: { type: "int", min: -10, max: 10, default: 1, label: "Delta" },
+      scope: { type: "enum", values: ["patch", "bank"], default: "patch", label: "Scope" },
+    },
+    summary: "Preview {scope} {delta}",
+  },
+  captain_preview_commit: {
+    label: "Preview Commit",
+    params: {},
+    summary: "Preview commit",
+  },
+  captain_preview_cancel: {
+    label: "Preview Cancel",
+    params: {},
+    summary: "Preview cancel",
+  },
 };
 
 /** Build a minimal manifest from the known core message types, with no

@@ -89,6 +89,33 @@ class PluginRegistry:
                 except Exception as e:
                     print("plugin on_navigate failed:", getattr(m, "NAME", "?"), "-", e)
 
+    def on_preview(self, app, bank, slot):
+        """The preset-preview cursor moved to (bank, slot) but nothing was
+        loaded (no MIDI sent). Let plugins write their own display fields for
+        the previewed target - e.g. the Kemper rig number - so the TFT preview
+        reflects the device-specific value too, WITHOUT touching the device.
+        Opt in by declaring `on_preview(app, bank, slot)`. Must not send MIDI.
+        A throwing plugin doesn't block the others."""
+        for m in self._plugins.values():
+            if hasattr(m, "on_preview"):
+                try:
+                    m.on_preview(app, bank, slot)
+                except Exception as e:
+                    print("plugin on_preview failed:", getattr(m, "NAME", "?"), "-", e)
+
+    def tuner_off(self, app):
+        """Ask every plugin that has a tuner to leave tuner mode on the target
+        device. Called when the user presses a footswitch while the tuner
+        splash is up (see app._exit_tuner), so one stomp both dismisses the
+        tuner and performs the switch's own action. Opt in by declaring
+        `tuner_off(app)`. A throwing plugin doesn't block the others."""
+        for m in self._plugins.values():
+            if hasattr(m, "tuner_off"):
+                try:
+                    m.tuner_off(app)
+                except Exception as e:
+                    print("plugin tuner_off failed:", getattr(m, "NAME", "?"), "-", e)
+
     def tick(self, app, now_ms):
         """Per-loop tick hook for plugins that need periodic work - for
         example, sending a keep-alive beacon to a target device that

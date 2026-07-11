@@ -144,6 +144,17 @@ def dispatch(msg, midi):
         midi.send_cc(ch, cc, value)
 
 
+def tuner_off(app):
+    """Hide the tuner on the Helix (CC 68 = 0) when the user stomps a footswitch
+    while the tuner splash is up. Helix has no device.json config section, so we
+    gate on the active profile kind to avoid sending CC 68 when a different
+    device is the active target."""
+    if getattr(app, "active_kind", None) != NAME:
+        return
+    ch = int((app.device or {}).get("midi_channel") or 1)
+    app.midi.send_cc(ch, 68, 0)
+
+
 def update_context(msg, ctx):
     """Drive the shared tuner screen and mirror snapshot/preset state on
     the TFT. The core reads a generic `tuner` context field (on/off)."""

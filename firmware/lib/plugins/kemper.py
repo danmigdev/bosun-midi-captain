@@ -578,6 +578,34 @@ def on_patch_loaded(app):
     _apply_cache(app)
 
 
+def on_preview(app, bank, slot):
+    """Preset-preview cursor moved to (bank, slot) - the core loaded nothing and
+    sent no MIDI. Fill the Kemper display fields for the previewed target so the
+    TFT preview shows the rig number too. MUST NOT send MIDI (that would change
+    the Player). Mirrors update_context's rig math; the cursor's (bank, slot) is
+    bosun's bank + rig-in-bank, which map straight to the Kemper rig index."""
+    cfg = (app.device or {}).get("kemper")
+    if cfg is None:
+        return
+    app.update_context({
+        "kemper_bank":        bank,
+        "kemper_rig_in_bank": slot,
+        "kemper_rig":         (bank - 1) * 5 + slot,
+    })
+
+
+def tuner_off(app):
+    """Leave tuner mode on the Player. Called when the user stomps a footswitch
+    while the tuner splash is up so one press both dismisses the tuner and does
+    the switch's own job. Only acts for a Kemper profile (device.kemper present).
+    CC 31 = 0 is the tuner-off the Player already responds to (see dispatch)."""
+    cfg = (app.device or {}).get("kemper")
+    if cfg is None:
+        return
+    ch = int((app.device or {}).get("midi_channel") or 1)
+    app.midi.send_cc(ch, 31, 0)
+
+
 def on_navigate(app, bank, slot):
     """A preset switch selected (bank, slot) but the core has no bosun patch
     there. Navigate the Player straight to that rig so every rig in the bank
