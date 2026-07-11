@@ -284,10 +284,17 @@
   .quickactions button:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
 
   .actiongrid {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;
+    /* auto-fit + minmax keeps every column the SAME width and reflows the
+       column count to the available space, so the grid stays even at any zoom.
+       A plain repeat(3, 1fr) let the longest label ("Maintenance") push its
+       column wider than the others. */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+    gap: 0.5rem;
   }
   .actiongrid button {
     display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+    min-width: 0;
     background: var(--bg-hover); color: var(--text); border: 1px solid var(--border-strong);
     padding: 0.7rem 0.5rem; border-radius: 6px; cursor: pointer;
     font-family: inherit; transition: all 0.12s ease;
@@ -296,7 +303,9 @@
     background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent);
   }
   .actiongrid .ico { font-size: 1.05rem; opacity: 0.8; }
-  .actiongrid .lbl { font-size: 0.74rem; }
+  .actiongrid .lbl {
+    font-size: 0.74rem; text-align: center; line-height: 1.15; overflow-wrap: anywhere;
+  }
 
   .dirty { color: var(--warn); }
   .muted { color: var(--text-muted); }
