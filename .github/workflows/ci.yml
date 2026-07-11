@@ -9,7 +9,11 @@
 name: CI
 
 on:
+  # Branch pushes only. Tag pushes (v*) are handled by release.yml, so without
+  # this filter every tagged release triggered CI twice (once for the branch
+  # commit, once for the tag on the same commit).
   push:
+    branches: ["**"]
   pull_request:
 
 jobs:
