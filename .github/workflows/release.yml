@@ -1,0 +1,132 @@
+# Cross-platform release builds: Windows (portable zip), macOS (dmg) and
+# Linux (AppImage). Runs on each OS's native runner (Tauri links the OS-native
+# webview and cannot cross-compile) and attaches the artifact to the GitHub
+# release for the tag.
+#
+# Triggers on a v* tag push, or manually via workflow_dispatch with a tag input
+# (build/attach an existing release without moving its tag). The bundled
+# firmware/UF2/Adafruit assets are gitignored, so each job provisions them
+# before building (a cross-platform port of tools/download-assets.ps1).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach (e.g. v0.4.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-22.04
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Tauri v2 Linux build + AppImage (linuxdeploy needs FUSE) dependencies.
+      - name: Linux build deps
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libfuse2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/src-tauri
+
+      # The bundle assets (firmware tree, CircuitPython UF2, Adafruit libs) are
+      # gitignored, so recreate them here. Single bash step for all three OSes
+      # (every runner, including Windows, provides bash + curl + unzip).
+      - name: Provision bundled resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          RES=editor/src-tauri/resources
+          TMP=.assets_tmp
+          rm -rf "$TMP" "$RES/firmware" "$RES/lib"; mkdir -p "$TMP" "$RES/lib"
+          # 1. firmware tree
+          cp -r firmware "$RES/firmware"
+          find "$RES/firmware" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          # 2. CircuitPython UF2 (matches tools/download-assets.ps1 default)
+          curl -fL -o "$RES/circuitpython.uf2" \
+            "https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2"
+          # 3. Adafruit CircuitPython Bundle (9.x mpy) -> the four libs we import
+          BURL=$(curl -fsSL https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest \
+            | grep -oE 'https://[^"]*adafruit-circuitpython-bundle-9\.x-mpy-[0-9]+\.zip' | head -1)
+          curl -fL -o "$TMP/bundle.zip" "$BURL"
+          unzip -q "$TMP/bundle.zip" -d "$TMP/bundle"
+          BLIB=$(find "$TMP/bundle" -type d -name lib | head -1)
+          cp -r "$BLIB/adafruit_display_text" "$RES/lib/"
+          cp "$BLIB/adafruit_st7789.mpy" "$RES/lib/"
+          cp "$BLIB/neopixel.mpy" "$RES/lib/"
+          cp "$BLIB/adafruit_pixelbuf.mpy" "$RES/lib/"
+          rm -rf "$TMP"
+          echo "resources:"; ls -la "$RES"; echo "lib:"; ls -la "$RES/lib"
+
+      - name: Install node deps
+        working-directory: editor
+        run: npm install --no-audit --no-fund
+
+      # Windows keeps the project's portable (no-installer) format.
+      - name: Build - Windows portable zip
+        if: matrix.name == 'windows'
+        shell: pwsh
+        working-directory: editor
+        run: npm run package:portable
+
+      - name: Build - macOS dmg
+        if: matrix.name == 'macos'
+        working-directory: editor
+        run: npx tauri build --bundles dmg
+
+      - name: Build - Linux AppImage
+        if: matrix.name == 'linux'
+        working-directory: editor
+        run: npx tauri build --bundles appimage
+
+      - name: Locate artifact
+        id: art
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.name }}" in
+            windows) f=$(ls dist/Bosun-*-portable-x64.zip | head -1) ;;
+            macos)   f=$(ls editor/src-tauri/target/release/bundle/dmg/*.dmg | head -1) ;;
+            linux)   f=$(ls editor/src-tauri/target/release/bundle/appimage/*.AppImage | head -1) ;;
+          esac
+          echo "file=$f" >> "$GITHUB_OUTPUT"
+          echo "artifact -> $f"
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "$TAG" "${{ steps.art.outputs.file }}" --clobber
