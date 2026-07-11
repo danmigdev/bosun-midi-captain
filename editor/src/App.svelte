@@ -21,6 +21,8 @@
   import ProfilePicker from "./components/ProfilePicker.svelte";
   import TftLayout from "./components/TftLayout.svelte";
   import QuickSetup from "./components/QuickSetup.svelte";
+  import SetlistView from "./components/SetlistView.svelte";
+  import type { SetlistItem } from "./lib/setlists";
   import {
     autoConnect,
     cmd,
@@ -1005,11 +1007,39 @@
     }));
   }
 
+  // Persist a setlist onto the pedal. The ordered (bank, slot) list lives under
+  // device.json's "setlist" key; the firmware's captain_setlist_step walks it.
+  // We merge into the current globalDevice (never clobbering other keys) and
+  // push it with PUT_GLOBAL, updating the local copy optimistically so the
+  // "on pedal" badge flips once the write lands.
+  async function sendSetlistToPedal(payload: { name: string; items: SetlistItem[] }) {
+    if (!globalDevice) return;
+    const next = { ...globalDevice, setlist: { name: payload.name, items: payload.items } };
+    busy = true;
+    try {
+      await cmd.putGlobal(next);
+      globalDevice = next;
+      window.dispatchEvent(new CustomEvent("bosun-toast", {
+        detail: { level: "ok", message: `Setlist "${payload.name}" sent (${payload.items.length} patch${payload.items.length === 1 ? "" : "es"})` },
+      }));
+    } catch (e) {
+      const msg = String(e);
+      if (msg.toLowerCase().includes("not connected")) {
+        window.dispatchEvent(new CustomEvent("rust-disconnected", { detail: "setlist send: not connected" }));
+      } else {
+        showToast("error", "Setlist send failed: " + msg);
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
   const CORE_NAV: Array<{ id: Page; label: string; icon: string; kind?: string }> = [
     { id: "home",     label: "Home",        icon: "⌂" },
     { id: "patches",  label: "Patches",     icon: "▣" },
     { id: "editor",   label: "Editor",      icon: "✎" },
     { id: "quicksetup", label: "Quick setup", icon: "✦" },
+    { id: "setlist",  label: "Setlist",     icon: "≣" },
     { id: "learn",    label: "MIDI Learn",  icon: "↻" },
     { id: "tft",      label: "Screen layout",  icon: "▭" },
     { id: "settings", label: "Settings",    icon: "⚙" },
@@ -1345,6 +1375,19 @@
             <p class="muted">Open a patch first (from the Patches tab) to run a quick setup on it.</p>
             <div class="row toolbar"><button class="primary" onclick={() => page = "patches"}>Open Patches</button></div>
           {/if}
+
+        {:else if page === "setlist"}
+          <header class="pageHead">
+            <h2>Setlist</h2>
+          </header>
+          <p class="muted" style="margin:0 0 0.75rem">
+            Build a gig in song order, then send it to the pedal. On stage, a "Setlist next / previous" switch (set it up in Quick setup) walks the list one song at a time, wherever those patches live in the grid. It never moves your patches.
+          </p>
+          <SetlistView
+            {patches}
+            deviceSetlist={(globalDevice?.setlist as { name?: string; items: SetlistItem[] } | undefined) ?? null}
+            onSend={(payload) => { void sendSetlistToPedal(payload); }}
+          />
 
         {:else if page === "learn"}
           <header class="pageHead">

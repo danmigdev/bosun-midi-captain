@@ -82,4 +82,15 @@ CORE_MESSAGE_TYPES = {
         "params": {},
         "summary": "Preview cancel",
     },
+    # Setlist navigation: step through the on-device setlist (an ordered list of
+    # patches stored in device.json) and load the next/previous entry
+    # immediately. Lets a player walk a gig in song order with one footswitch,
+    # regardless of where each patch lives in the bank/slot grid.
+    "captain_setlist_step": {
+        "label": "Setlist Step",
+        "params": {
+            "delta": {"type": "int", "min": -10, "max": 10, "default": 1, "label": "Delta"},
+        },
+        "summary": "Setlist step {delta}",
+    },
 }

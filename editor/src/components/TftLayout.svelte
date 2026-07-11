@@ -53,9 +53,10 @@
   // whether a field is universal (core) or specific to a target device.
   type FieldOpt = { id: string; label: string; source: string };
   const CORE_FIELDS: FieldOpt[] = [
-    { id: "patch_name", label: "Patch name",   source: "core" },
-    { id: "bank",       label: "Captain bank", source: "core" },
-    { id: "slot",       label: "Captain slot", source: "core" },
+    { id: "patch_name",  label: "Patch name",       source: "core" },
+    { id: "bank",        label: "Captain bank",     source: "core" },
+    { id: "slot",        label: "Captain slot",     source: "core" },
+    { id: "setlist_pos", label: "Setlist position", source: "core" },
   ];
   let pluginFields = $derived.by<FieldOpt[]>(() => {
     if (!manifest) return [];
@@ -203,6 +204,7 @@
       patch_name: "Heavy",
       bank: 1,
       slot: 4,
+      setlist_pos: "3/12",
     };
     if (manifest) {
       for (const [, plug] of Object.entries(manifest.plugins)) {

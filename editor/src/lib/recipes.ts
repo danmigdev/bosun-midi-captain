@@ -178,6 +178,33 @@ export const RECIPES: Recipe[] = [
   },
 
   {
+    id: "setlist_nav",
+    label: "Setlist next / previous",
+    description:
+      "Walk your gig in song order with two switches. Next loads the following patch in the setlist, previous the one before - wherever those patches live in the grid. Build the setlist on the Setlist page and send it to the pedal.",
+    icon: "≣",
+    roles: [
+      { key: "next", label: "Next song", hint: "Loads the next patch in the setlist" },
+      { key: "prev", label: "Previous song", hint: "Loads the previous patch in the setlist" },
+    ],
+    available: () => true,
+    build(assign) {
+      const out: Binding[] = [];
+      if (assign.next) {
+        out.push(
+          tapBinding(assign.next, "Next", { type: "captain_setlist_step", delta: 1 }),
+        );
+      }
+      if (assign.prev) {
+        out.push(
+          tapBinding(assign.prev, "Prev", { type: "captain_setlist_step", delta: -1 }),
+        );
+      }
+      return out;
+    },
+  },
+
+  {
     id: "tuner",
     label: "Toggle tuner",
     description:

@@ -132,6 +132,35 @@ describe("bank_nav recipe", () => {
   });
 });
 
+// --------------------- setlist_nav ---------------------
+
+describe("setlist_nav recipe", () => {
+  it("builds two captain_setlist_step bindings with delta +1/-1", () => {
+    const bindings = recipe("setlist_nav").build(
+      { next: "up", prev: "down" },
+      kemperCtx(),
+    );
+    expect(bindings).toHaveLength(2);
+
+    const next = bindings.find((b) => b.switch === "up")!;
+    expect(next.mode).toBe("tap");
+    expect(next.actions.press.messages[0]).toMatchObject({
+      type: "captain_setlist_step",
+      delta: 1,
+    });
+
+    const prev = bindings.find((b) => b.switch === "down")!;
+    expect(prev.actions.press.messages[0]).toMatchObject({
+      type: "captain_setlist_step",
+      delta: -1,
+    });
+  });
+
+  it("is always available", () => {
+    expect(recipe("setlist_nav").available(emptyPluginCtx())).toBe(true);
+  });
+});
+
 // --------------------- tuner ---------------------
 
 describe("tuner recipe", () => {

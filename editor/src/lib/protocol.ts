@@ -232,6 +232,13 @@ export const CORE_MESSAGE_TYPES: Record<string, MessageSchema> = {
     params: {},
     summary: "Preview cancel",
   },
+  captain_setlist_step: {
+    label: "Setlist Step",
+    params: {
+      delta: { type: "int", min: -10, max: 10, default: 1, label: "Delta" },
+    },
+    summary: "Setlist step {delta}",
+  },
 };
 
 /** Build a minimal manifest from the known core message types, with no

@@ -105,6 +105,9 @@ class Captain:
         self.display_context = {
             "patch_name": "",
             "bank": 1, "slot": 1,
+            # Position within the active setlist (e.g. "4/12"), "" when the
+            # current patch isn't in the setlist. A TFT layout can show it.
+            "setlist_pos": "",
         }
         # Cached layout from device.json (tft.layout). Render falls back to
         # a centered patch name if this is empty.
@@ -347,6 +350,7 @@ class Captain:
         self.display_context["patch_name"] = (self.current_patch or {}).get("name", "")
         self.display_context["bank"] = bank
         self.display_context["slot"] = slot
+        self._update_setlist_pos(bank, slot)
         # Order matters for perceived latency: fire on_enter (which dispatches
         # kemper_rig and any other plugin MIDI) BEFORE rendering the TFT, so
         # the target device receives the rig change as fast as possible and
@@ -548,6 +552,66 @@ class Captain:
             self.preview_cancel()
         else:
             self.preview_commit()
+
+    # ---------- setlist navigation (called from BindingRunner) ----------
+
+    def _setlist_items(self):
+        """The active setlist as an ordered list of (bank, slot) tuples, kept to
+        only the entries that actually have a patch on disk. Read from
+        device.setlist.items; each item may be a dict {bank,slot} or a [bank,slot]
+        pair. Malformed entries are skipped, never raised."""
+        sl = self.device.get("setlist") or {}
+        raw = sl.get("items") or []
+        out = []
+        for it in raw:
+            try:
+                if isinstance(it, dict):
+                    b, s = int(it["bank"]), int(it["slot"])
+                else:
+                    b, s = int(it[0]), int(it[1])
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+            if self.patches.has(b, s):
+                out.append((b, s))
+        return out
+
+    def setlist_step(self, delta):
+        """Load the next/previous patch in the active setlist (wraps around).
+        If the current patch isn't in the setlist, the first step enters at the
+        start (delta > 0) or the end (delta < 0). No-op when the setlist is
+        empty. This loads immediately - it's the live 'next song' control."""
+        try:
+            d = int(delta)
+        except (TypeError, ValueError):
+            return False
+        if d == 0:
+            return False
+        items = self._setlist_items()
+        if not items:
+            return False
+        cur = (self.current_bank, self.current_slot)
+        idx = -1
+        for i, it in enumerate(items):
+            if it == cur:
+                idx = i
+                break
+        if idx < 0:
+            new = 0 if d > 0 else len(items) - 1
+        else:
+            new = (idx + d) % len(items)
+        b, s = items[new]
+        return self.switch_patch(b, s, source="binding")
+
+    def _update_setlist_pos(self, bank, slot):
+        """Refresh the setlist_pos display field for the patch being loaded."""
+        items = self._setlist_items()
+        pos = ""
+        if items:
+            for i, it in enumerate(items):
+                if it == (bank, slot):
+                    pos = "%d/%d" % (i + 1, len(items))
+                    break
+        self.display_context["setlist_pos"] = pos
 
     # ---------- tuner exit-on-press ----------
 

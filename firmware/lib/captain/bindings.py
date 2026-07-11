@@ -229,6 +229,12 @@ class BindingRunner:
                     self.app.preview_cancel()
                 except Exception as e:
                     print("captain_preview_cancel failed:", e)
+        elif t == "captain_setlist_step":
+            if self.app is not None:
+                try:
+                    self.app.setlist_step(int(msg.get("delta", 1)))
+                except Exception as e:
+                    print("captain_setlist_step failed:", e)
         elif self.plugins is not None and self.plugins.handles(t):
             self.plugins.dispatch(msg, self.midi)
             # Let the plugin update the TFT display context - but skip the
