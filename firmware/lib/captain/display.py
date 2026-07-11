@@ -72,6 +72,18 @@ _VALIGN = {"top":  0.0, "center": 0.5, "bottom": 1.0}
 _SCREEN_W = 240
 _SCREEN_H = 240
 
+# ---- tuner splash geometry + colours (shared by build + in-place update) ----
+_TUNER_IN_TUNE  = 0x3ECB6E       # green when within the calibration window
+_TUNER_OFF_HUE  = 0xE54848       # red when out of tune
+_TUNER_NEUTRAL  = 0x40484F       # bar background
+_TUNER_CENTER   = 0xFFFFFF       # vertical center reference
+_TUNER_NOTE_OFF = 0xE4E6EB       # note colour when not in tune
+_TUNER_BAR_W = 200
+_TUNER_BAR_H = 6
+_TUNER_IND_W = 4
+_TUNER_IND_H = 18
+_TUNER_BAR_Y = 140
+
 # ---- horizontal scrolling (marquee) for overflowing labels ----
 # When a label opts in (spec["scroll"]) and its text is wider than the space
 # from the left margin to the right screen edge, it is re-anchored left and
@@ -229,10 +241,20 @@ class Display:
         self._scroll = []
         self._scroll_start_ms = None
         self._last_scroll_ms = None
+        # Persistent tuner splash. Built once when the tuner turns on, then
+        # updated in place (only the indicator moves) so it can refresh near
+        # real time. Reset to inactive whenever a non-tuner frame is drawn.
+        self._tuner_active = False
+        self._tuner_note_lbl = None
+        self._tuner_ind = None
+        self._tuner_ind_pal = None
+        self._tuner_footer = None
+        self._tuner_last = None
 
     def show_splash(self):
         self._scroll = []
         self._scroll_start_ms = None
+        self._tuner_active = False
         group = displayio.Group()
         try:
             group.append(_logo_tilegrid())
@@ -267,6 +289,9 @@ class Display:
             self._render_tuner(context)
             return
 
+        # Leaving the tuner: the persistent tuner group is about to be replaced,
+        # so the next time the tuner turns on it must rebuild from scratch.
+        self._tuner_active = False
         group = displayio.Group()
 
         if not layout:
@@ -364,17 +389,17 @@ class Display:
         gracefully when a plugin has no pitch feedback (e.g. Ampero only sends
         a tuner on/off toggle): note shows "-" and the needle stays centred.
 
-        Geometry (240x240 screen):
-          y  ~70  : note name, scale 6, centered
-          y 140   : 200-wide background bar (grey) centered horizontally
-          y 134-152: 4-wide indicator (green/red) tracking deviance
-          y 195   : optional "TUNER" + cents-ish numeric below
-        """
-        IN_TUNE  = 0x3ECB6E          # green when within calibration window
-        OFF_HUE  = 0xE54848          # red when out of tune
-        NEUTRAL  = 0x40484F          # bar background
-        CENTER   = 0xFFFFFF          # vertical center reference
+        Built once on entry, then updated in place: subsequent frames only move
+        the indicator (and touch the note/footer when they actually change), a
+        small dirty region, so the needle tracks near real time instead of
+        rebuilding and full-refreshing the whole 240x240 screen every frame.
 
+        Geometry (240x240 screen):
+          y  ~75  : note name, scale 6, centered
+          y 140   : 200-wide background bar (grey) centered horizontally
+          y 131-149: 4-wide indicator (green/red) tracking deviance
+          y 195   : "TUNER" + cents-ish numeric below
+        """
         # Deviance: 0..16383, 8192 = in tune. Show a usable window of
         # 8192 +/- 2000 so the indicator has meaningful travel; clamp
         # outside that to the edges so the user still sees direction.
@@ -387,69 +412,89 @@ class Display:
             deviance = 8192
         in_tune = abs(deviance - 8192) <= 350
 
-        bar_w = 200
-        bar_h = 6
-        bar_x = (_SCREEN_W - bar_w) // 2
-        bar_y = 140
+        bar_x = (_SCREEN_W - _TUNER_BAR_W) // 2
+        rel = max(-2000, min(2000, deviance - 8192))       # window +/- 2000
+        travel = _TUNER_BAR_W - _TUNER_IND_W
+        ind_x = bar_x + (rel + 2000) * travel // 4000
+        cents = rel // 8
+        note = context.get("tuner_note") or context.get("kemper_tuner_note") or "-"
 
-        ind_w = 4
-        ind_h = 18
-        # Window: 8192 +/- 2000 mapped to [0, bar_w - ind_w]
-        rel = max(-2000, min(2000, deviance - 8192))
-        travel = bar_w - ind_w
-        ind_x = bar_x + int((rel + 2000) * travel / 4000)
-        ind_y = bar_y - (ind_h - bar_h) // 2
+        if self._tuner_active and self._tuner_note_lbl is not None:
+            self._update_tuner(note, in_tune, ind_x, cents)
+        else:
+            self._build_tuner(note, in_tune, ind_x, bar_x, cents)
 
+    def _footer_text(self, cents):
+        sign = "+" if cents > 0 else ("" if cents == 0 else "-")
+        return "TUNER  {}{}".format(sign, abs(cents))
+
+    def _build_tuner(self, note, in_tune, ind_x, bar_x, cents):
+        """First tuner frame: build the persistent group and cache the parts
+        that move so later frames can update them without a full rebuild."""
+        ind_y = _TUNER_BAR_Y - (_TUNER_IND_H - _TUNER_BAR_H) // 2
         group = displayio.Group()
 
-        # Note name (big). Falls back to "-" if we never received one yet.
-        note = context.get("tuner_note") or context.get("kemper_tuner_note") or "-"
         note_lbl = label.Label(
-            terminalio.FONT,
-            text=str(note),
-            color=IN_TUNE if in_tune else 0xE4E6EB,
-            scale=6,
-            anchor_point=(0.5, 0.5),
+            terminalio.FONT, text=str(note),
+            color=_TUNER_IN_TUNE if in_tune else _TUNER_NOTE_OFF,
+            scale=6, anchor_point=(0.5, 0.5),
             anchored_position=(_SCREEN_W // 2, 75),
         )
         group.append(note_lbl)
 
-        # Bar background.
-        bar_bmp = displayio.Bitmap(bar_w, bar_h, 1)
+        bar_bmp = displayio.Bitmap(_TUNER_BAR_W, _TUNER_BAR_H, 1)
         bar_pal = displayio.Palette(1)
-        bar_pal[0] = NEUTRAL
-        group.append(displayio.TileGrid(bar_bmp, pixel_shader=bar_pal, x=bar_x, y=bar_y))
+        bar_pal[0] = _TUNER_NEUTRAL
+        group.append(displayio.TileGrid(bar_bmp, pixel_shader=bar_pal, x=bar_x, y=_TUNER_BAR_Y))
 
-        # Center reference: 2-pixel vertical line at the bar midpoint.
-        center_bmp = displayio.Bitmap(2, bar_h + 6, 1)
+        center_bmp = displayio.Bitmap(2, _TUNER_BAR_H + 6, 1)
         center_pal = displayio.Palette(1)
-        center_pal[0] = CENTER
+        center_pal[0] = _TUNER_CENTER
         group.append(displayio.TileGrid(
             center_bmp, pixel_shader=center_pal,
-            x=bar_x + bar_w // 2 - 1, y=bar_y - 3,
+            x=bar_x + _TUNER_BAR_W // 2 - 1, y=_TUNER_BAR_Y - 3,
         ))
 
-        # Moving indicator.
-        ind_bmp = displayio.Bitmap(ind_w, ind_h, 1)
+        ind_bmp = displayio.Bitmap(_TUNER_IND_W, _TUNER_IND_H, 1)
         ind_pal = displayio.Palette(1)
-        ind_pal[0] = IN_TUNE if in_tune else OFF_HUE
-        group.append(displayio.TileGrid(ind_bmp, pixel_shader=ind_pal, x=ind_x, y=ind_y))
+        ind_pal[0] = _TUNER_IN_TUNE if in_tune else _TUNER_OFF_HUE
+        ind_tg = displayio.TileGrid(ind_bmp, pixel_shader=ind_pal, x=ind_x, y=ind_y)
+        group.append(ind_tg)
 
-        # Footer: "TUNER" + signed cents-like offset (rel/8 keeps the
-        # number small and roughly readable; the bar is the real signal).
-        cents = rel // 8
-        sign = "+" if cents > 0 else ("" if cents == 0 else "-")
         footer = label.Label(
-            terminalio.FONT,
-            text="TUNER  {}{}".format(sign, abs(cents)),
-            color=0x9AA1AD,
-            scale=2,
-            anchor_point=(0.5, 0.5),
+            terminalio.FONT, text=self._footer_text(cents),
+            color=0x9AA1AD, scale=2, anchor_point=(0.5, 0.5),
             anchored_position=(_SCREEN_W // 2, 195),
         )
         group.append(footer)
 
         self.display.root_group = group
+        self._tuner_note_lbl = note_lbl
+        self._tuner_ind = ind_tg
+        self._tuner_ind_pal = ind_pal
+        self._tuner_footer = footer
+        self._tuner_active = True
+        self._tuner_last = {"note": note, "in_tune": in_tune,
+                            "ind_x": ind_x, "cents": cents}
+
+    def _update_tuner(self, note, in_tune, ind_x, cents):
+        """Cheap in-place update: only touch the displayio objects whose value
+        actually changed. Moving the indicator is a tiny dirty region; the note
+        and footer rarely change, so their (glyph re-render) cost is rare."""
+        last = self._tuner_last
+        if ind_x != last["ind_x"]:
+            self._tuner_ind.x = ind_x
+            last["ind_x"] = ind_x
+        if in_tune != last["in_tune"]:
+            self._tuner_ind_pal[0] = _TUNER_IN_TUNE if in_tune else _TUNER_OFF_HUE
+            self._tuner_note_lbl.color = _TUNER_IN_TUNE if in_tune else _TUNER_NOTE_OFF
+            last["in_tune"] = in_tune
+        if note != last["note"]:
+            self._tuner_note_lbl.text = str(note)
+            last["note"] = note
+        if cents != last["cents"]:
+            self._tuner_footer.text = self._footer_text(cents)
+            last["cents"] = cents
 
     # ---- legacy single-string helpers, kept for non-rendered states ----
 
@@ -457,6 +502,7 @@ class Display:
         """Fallback when no layout is configured."""
         self._scroll = []
         self._scroll_start_ms = None
+        self._tuner_active = False
         group = displayio.Group()
         group.append(label.Label(terminalio.FONT, text=name or "(unnamed)", x=20, y=120))
         self.display.root_group = group

@@ -23,6 +23,12 @@ from .store import PatchStore
 # immediately regardless; only the TFT text waits.
 _REFRESH_QUIET_MS = 40
 _REFRESH_MAX_DEFER_MS = 250
+# While the tuner splash is up the render is cheap (the display updates the
+# tuner in place - only the indicator moves), so we don't need the big defer
+# cap that protects rig-change bursts: refresh it at ~30 fps for a near
+# real-time needle. The Kemper streams deviance continuously, so this is the
+# gate that actually paces the tuner.
+_TUNER_REFRESH_MS = 30
 
 _MIDI_TYPE_NAME = {
     0x80: "note_off",
@@ -552,7 +558,10 @@ class Captain:
         Already-pending renders keep their original cap so a steady update
         stream still refreshes at a bounded rate."""
         if not self._refresh_due_ms:
-            self._refresh_due_ms = self._now_ms() + _REFRESH_MAX_DEFER_MS
+            ctx = self.display_context
+            tuner_on = ctx.get("tuner") == "on" or ctx.get("kemper_tuner") == "on"
+            cap = _TUNER_REFRESH_MS if tuner_on else _REFRESH_MAX_DEFER_MS
+            self._refresh_due_ms = self._now_ms() + cap
 
     def find_binding(self, switch_name):
         """Return the current patch's binding for the given switch, or
