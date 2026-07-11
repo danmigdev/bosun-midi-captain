@@ -73,9 +73,10 @@ Priority order:
 4. Patch search/filter box in PatchesGrid.
 5. Profile colour chip (set on create, show in ProfilePicker/grid).
 6. Strip leftover temporary `debug_log` instrumentation in installer.rs.
-7. Stretch: offline/disconnected editing (in-memory config from an imported
-   backup, "push to device" on connect). Land only if it does NOT regress the
-   connected path; otherwise scaffold + document as follow-up.
+7. ~~Stretch: offline/disconnected editing (in-memory config from an imported
+   backup, "push to device" on connect).~~ DROPPED (2026-07-11): won't-do,
+   scaffold removed (offline-config.ts + test deleted). Not a feature we plan
+   to ship.
 Keep `npm run check` and `npm test` green.
 
 ## Stream 6 - Firmware tests + CI [AGENT C / new files only]
