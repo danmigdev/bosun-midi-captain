@@ -29,26 +29,50 @@ for _i in range(30):
     setattr(board, "GP%d" % _i, "GP%d" % _i)
 
 analogio = _mod("analogio")
+digitalio = _mod("digitalio")
+
+# Pin-centric electrical model so a DigitalInOut charge and an AnalogIn read
+# share state (the real presence probe deinits/recreates the ADC each time).
+# mode: "manual" - .value returns whatever the test set (pedal position sim);
+#       "pedal"  - .value snaps to `wiper` regardless of charge (low-impedance);
+#       "float"  - .value follows the last driven `charge` (unplugged, holds).
+PIN_STATE = {}
+
+
+def _pin(pin):
+    if pin not in PIN_STATE:
+        PIN_STATE[pin] = {"mode": "manual", "value": 0, "wiper": 0, "charge": 0}
+    return PIN_STATE[pin]
 
 
 class FakeAnalogIn:
-    """Records constructed pins so a test can drive .value by pin, and tracks
-    deinit() so we can prove ExpressionArray.configure() releases pins."""
+    """Pin-centric ADC mock. Reads reflect PIN_STATE[pin], so recreating the
+    object (as the presence probe does) doesn't lose the simulated voltage."""
     registry = {}
 
     def __init__(self, pin):
         self.pin = pin
-        self._value = 0
         self.deinited = False
+        _pin(pin)
         FakeAnalogIn.registry[pin] = self
 
     @property
     def value(self):
-        return self._value
+        st = _pin(self.pin)
+        if st["mode"] == "pedal":
+            return st["wiper"]
+        if st["mode"] == "float":
+            return st["charge"]
+        return st["value"]
 
-    @value.setter
-    def value(self, v):
-        self._value = v
+    # legacy accessor: tests drive a jack's position via registry[pin]._value
+    @property
+    def _value(self):
+        return _pin(self.pin)["value"]
+
+    @_value.setter
+    def _value(self, v):
+        _pin(self.pin)["value"] = v
 
     def deinit(self):
         self.deinited = True
@@ -60,7 +84,36 @@ class RaisingAnalogIn(FakeAnalogIn):
         raise RuntimeError("ADC read blew up")
 
 
+class FakeDigitalInOut:
+    """Charges the pin node: switch_to_output drives PIN_STATE[pin]['charge'],
+    which a 'float' pin then holds (a 'pedal' pin ignores, snapping to wiper)."""
+    def __init__(self, pin):
+        self.pin = pin
+
+    def switch_to_output(self, value=False):
+        _pin(self.pin)["charge"] = 65535 if value else 0
+
+    def switch_to_input(self, pull=None):
+        pass
+
+    def deinit(self):
+        pass
+
+
+class _Pull:
+    UP = 1
+    DOWN = 0
+
+
+class _Direction:
+    INPUT = 0
+    OUTPUT = 1
+
+
 analogio.AnalogIn = FakeAnalogIn
+digitalio.DigitalInOut = FakeDigitalInOut
+digitalio.Pull = _Pull
+digitalio.Direction = _Direction
 
 
 # ---------------- import the real module under test ----------------
@@ -68,7 +121,8 @@ analogio.AnalogIn = FakeAnalogIn
 _LIB = Path(__file__).resolve().parent.parent / "firmware" / "lib"
 sys.path.insert(0, str(_LIB))
 
-from captain.expression import ExpressionArray, _Jack, _POLL_INTERVAL_MS  # noqa: E402
+from captain.expression import (  # noqa: E402
+    ExpressionArray, _Jack, _POLL_INTERVAL_MS, _PRESENCE_INTERVAL_MS)
 
 
 # ---------------- tiny harness ----------------
@@ -91,7 +145,14 @@ def check(name, ok, detail=""):
 
 def _reset_registry():
     FakeAnalogIn.registry = {}
+    PIN_STATE.clear()
     analogio.AnalogIn = FakeAnalogIn
+
+
+def _set_pin(pin, mode, value=0, wiper=0, charge=0):
+    """Force a pin's electrical model for presence-probe tests."""
+    PIN_STATE[pin] = {"mode": mode, "value": value, "wiper": wiper,
+                      "charge": charge}
 
 
 def _cfg(jack=1, enabled=True, invert=False, cal_min=1000, cal_max=5000,
@@ -334,6 +395,66 @@ def test_edited_jack_rearms_and_stays_silent():
     check("edited jack emits again once moved", len(seq) > 0, "seq=%r" % seq[:5])
 
 
+def _run_probes(arr, n, start_ms=0):
+    """Advance time so `n` presence probes fire (one per _PRESENCE_INTERVAL_MS)."""
+    t = start_ms
+    for _ in range(n):
+        arr.poll(t)
+        t += _PRESENCE_INTERVAL_MS + 5
+    return t
+
+
+def test_unplugged_jack_detected_absent():
+    # A floating (unplugged) jack holds its charge -> big probe gap -> after the
+    # debounce streak it is marked not-present and muted.
+    _reset_registry()
+    _set_pin("GP27", "float", charge=20000)
+    arr = ExpressionArray([_cfg(jack=1, cc=4, cal_min=0, cal_max=65535)])
+    j = arr._jacks[0]
+    check("jack starts present (optimistic)", j.present is True)
+    _run_probes(arr, 5)
+    check("floating jack detected as no-pedal after debounce", j.present is False)
+
+
+def test_plugged_pedal_stays_present():
+    # A pedal snaps back to its wiper -> tiny probe gap -> stays present.
+    _reset_registry()
+    _set_pin("GP27", "pedal", wiper=30000)
+    arr = ExpressionArray([_cfg(jack=1, cc=4, cal_min=0, cal_max=65535)])
+    j = arr._jacks[0]
+    _run_probes(arr, 5)
+    check("plugged pedal stays present", j.present is True)
+
+
+def test_unplug_mutes_a_running_pedal():
+    # End to end: a plugged pedal arms and emits; once unplugged, the presence
+    # probe mutes it and further float wander produces no MIDI.
+    _reset_registry()
+    _set_pin("GP27", "pedal", wiper=0)
+    arr = ExpressionArray([_cfg(jack=1, cc=4, cal_min=0, cal_max=65535)])
+    j = arr._jacks[0]
+    arr.poll(0)                                  # baseline at heel
+    _set_pin("GP27", "pedal", wiper=65535)       # sweep to arm + emit
+    t = _POLL_INTERVAL_MS + 1
+    emitted = 0
+    for _ in range(60):
+        emitted += len(arr.poll(t))
+        t += _POLL_INTERVAL_MS + 1
+    check("plugged, armed pedal emits", emitted > 0, "emitted %d" % emitted)
+    # Unplug: the tip now floats. Let the presence debounce catch it.
+    _set_pin("GP27", "float", charge=60000)
+    t = _run_probes(arr, 5, start_ms=t)
+    check("running pedal muted after unplug", j.present is False)
+    # Further float wander emits nothing.
+    e = []
+    for c in (0, 65535, 0):
+        _set_pin("GP27", "float", charge=c)
+        for _ in range(30):
+            e += arr.poll(t)
+            t += _POLL_INTERVAL_MS + 1
+    check("unplugged jack emits nothing", e == [], "got %r" % e[:3])
+
+
 def test_stats_shape():
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cal_min=0, cal_max=65535)])
@@ -341,9 +462,9 @@ def test_stats_shape():
     arr.poll(0)
     s = arr.stats()
     ok = (isinstance(s, list) and len(s) == 1
-          and set(s[0].keys()) == {"jack", "raw", "value", "armed"}
+          and set(s[0].keys()) == {"jack", "raw", "value", "armed", "present"}
           and s[0]["jack"] == 1 and s[0]["raw"] == 32768 and s[0]["armed"] is False)
-    check("stats() reports {jack, raw, value, armed} per jack", ok, "got %r" % s)
+    check("stats() reports {jack, raw, value, armed, present} per jack", ok, "got %r" % s)
 
 
 # ---------------- robustness ----------------
@@ -397,7 +518,11 @@ def main():
     test_unchanged_jack_not_reemitted_on_reconfigure()
     test_edited_jack_rearms_and_stays_silent()
     test_stats_shape()
-    print("D. robustness")
+    print("D. pedal-presence detection")
+    test_unplugged_jack_detected_absent()
+    test_plugged_pedal_stays_present()
+    test_unplug_mutes_a_running_pedal()
+    print("E. robustness")
     test_read_error_does_not_throw()
     test_no_analogio_is_inert()
     print("\n%d passed, %d failed" % (PASS, FAIL))
