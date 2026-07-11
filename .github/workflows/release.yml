@@ -70,6 +70,11 @@ jobs:
       # (every runner, including Windows, provides bash + curl + unzip).
       - name: Provision bundled resources
         shell: bash
+        # Authenticate the api.github.com call below: unauthenticated requests
+        # are rate-limited to 60/hour per IP, and shared macOS runner IPs hit
+        # that ceiling intermittently (a 403 that failed past releases).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           RES=editor/src-tauri/resources
@@ -82,7 +87,8 @@ jobs:
           curl -fL -o "$RES/circuitpython.uf2" \
             "https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2"
           # 3. Adafruit CircuitPython Bundle (9.x mpy) -> the four libs we import
-          BURL=$(curl -fsSL https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest \
+          BURL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest \
             | grep -oE 'https://[^"]*adafruit-circuitpython-bundle-9\.x-mpy-[0-9]+\.zip' | head -1)
           curl -fL -o "$TMP/bundle.zip" "$BURL"
           unzip -q "$TMP/bundle.zip" -d "$TMP/bundle"
