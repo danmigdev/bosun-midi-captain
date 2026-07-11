@@ -48,8 +48,31 @@ _LOOPER_CC = {
     "half_speed": 94,
 }
 
+# The "fixed" input block (between the input and stomp A) holds several
+# always-present effects, each individually switchable: Compressor, Noise
+# Gate, Pure Booster, Wah, Transpose. Unlike the stomp slots A-D / modules
+# X/Mod/Delay/Reverb these have NO simple on/off CC - they're only reachable
+# via NRPN. The sequence per effect is:
+#   CC99 = _FIXED_FX_PAGE (NRPN MSB / page)
+#   CC98 = <effect LSB>   (NRPN LSB / address, from _FIXED_FX_LSB)
+#   CC6  = 0              (Data Entry MSB)
+#   CC38 = 1 | 0          (Data Entry LSB: 1 enables, 0 disables)
+# Verified against the Kemper forum's Fixed-FX MIDI reference. Bidirectional
+# sync does NOT mirror these back to a switch LED (the Player doesn't broadcast
+# them on the pages the bilateral path watches), so a fixed-block toggle is
+# fire-and-forget - the LED tracks whatever other block the binding also drives.
+_FIXED_FX_PAGE = 5
+_FIXED_FX_LSB = {
+    "Compressor":   11,
+    "Noise Gate":    6,
+    "Pure Booster": 16,
+    "Wah":          21,
+    "Transpose":     1,
+}
+
 _EFFECT_VALUES = list(_EFFECT_CC.keys())
 _LOOPER_VALUES = list(_LOOPER_CC.keys())
+_FIXED_FX_VALUES = list(_FIXED_FX_LSB.keys())
 
 
 MESSAGE_TYPES = {
@@ -78,6 +101,15 @@ MESSAGE_TYPES = {
             "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
         },
         "summary": "Slot {slot} {value}",
+    },
+    "kemper_fixed_toggle": {
+        "label": "Fixed Block On/Off",
+        "params": {
+            "effect":  {"type": "enum", "values": _FIXED_FX_VALUES, "default": "Compressor", "label": "Fixed effect"},
+            "value":   {"type": "enum", "values": ["on", "off"],    "default": "on",          "label": "Value"},
+            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        },
+        "summary": "Fixed {effect} {value}",
     },
     "kemper_tuner": {
         "label": "Tuner",
@@ -352,6 +384,18 @@ def dispatch(msg, midi):
         cc = _EFFECT_CC.get(msg["slot"])
         if cc is not None:
             midi.send_cc(ch, cc, 127 if msg["value"] == "on" else 0)
+
+    elif t == "kemper_fixed_toggle":
+        lsb = _FIXED_FX_LSB.get(msg.get("effect"))
+        if lsb is not None:
+            # NRPN: select page + address, then Data Entry MSB/LSB. Order
+            # matters - the Player latches the parameter from CC99/CC98 and
+            # only acts on the CC6/CC38 data write.
+            on = msg.get("value", "on") == "on"
+            midi.send_cc(ch, 99, _FIXED_FX_PAGE)   # NRPN MSB (page)
+            midi.send_cc(ch, 98, lsb)              # NRPN LSB (effect address)
+            midi.send_cc(ch, 6, 0)                 # Data Entry MSB
+            midi.send_cc(ch, 38, 1 if on else 0)   # Data Entry LSB
 
     elif t == "kemper_tuner":
         midi.send_cc(ch, 31, 127 if msg.get("state", "on") == "on" else 0)

@@ -135,7 +135,7 @@ Expand a row to configure it in full:
 - **Label** is the text shown for the switch.
 - **LED on / LED off** pick the colours for each state, and **auto-momentary on hold** lets a latched switch act momentarily while held.
 - For a latched switch you build two macros, **toggle_on** and **toggle_off**; for a tap switch you build one. Each macro is a list of messages.
-- Add a message with the dropdown. The dropdown is populated from the manifest: **core** messages (`cc`, `pc`, `note_on`, `note_off`, `delay`, `captain_patch`, `captain_bank_step`) are always available, and every message type your plugin declares appears alongside them (for example "Kemper Player - Effect Slot On/Off"). The plugin-specific fields (Slot, Value, Channel, ...) come straight from the plugin's schema.
+- Add a message with the dropdown. The dropdown is populated from the manifest: **core** messages (`cc`, `pc`, `note_on`, `note_off`, `delay`, `captain_patch`, `captain_bank_step`) are always available, and every message type your plugin declares appears alongside them (for example "Kemper Player - Effect Slot On/Off" for the A-D / X / Mod / Delay / Reverb blocks, or "Kemper Player - Fixed Block On/Off" for the input-section compressor, noise gate, pure booster, wah and transpose). The plugin-specific fields (Slot, Value, Channel, ...) come straight from the plugin's schema.
 
 This is the heart of Bosun: a switch press runs a macro, and a macro is just an ordered list of MIDI messages, some core and some expanded by a plugin.
 
@@ -252,7 +252,7 @@ midi.send_note_off(channel, note, velocity)
 midi.send_sysex(payload)                 # payload is the bytes between F0 and F7; framing is added for you
 ```
 
-Channels are 1-16. Look at `plugins/ampero.py` for a clean, complete example (patch select that splits into bank MSB + PC, looper, scenes, tap tempo, tuner) and `plugins/kemper.py` for a larger one (SYSEX, effect-slot toggles, bidirectional state).
+Channels are 1-16. Look at `plugins/ampero.py` for a clean, complete example (patch select that splits into bank MSB + PC, looper, scenes, tap tempo, tuner) and `plugins/kemper.py` for a larger one (SYSEX, effect-slot toggles, NRPN fixed-block toggles, bidirectional state).
 
 ### Optional hooks
 

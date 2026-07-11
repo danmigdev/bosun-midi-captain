@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "bosun-editor"
-version = "0.3.28"
+version = "0.3.29"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
