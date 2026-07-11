@@ -109,7 +109,7 @@ The Home screen is a dashboard:
 - **Live mirror**: a compact readout that follows the pedal in real time. When you step a switch on the hardware (or the connected device changes preset), the current bank/slot and patch name update here without a manual refresh, and an activity dot shows the last time the pedal sent anything. It is the fastest way to confirm the editor and pedal are in sync while you work.
 - **Quick actions**: shortcuts to Patches, the Editor and the Screen layout.
 
-The left sidebar is the main navigation for everything below. **Disconnect** at the bottom releases the serial port.
+The left sidebar is the main navigation, grouped by intent: **Build** (Patches, Editor, Setlist) for authoring your sounds, **Device** (Screen layout, MIDI Learn, Settings) for pedal-wide configuration, and **System** (Maintenance, Log) for diagnostics. **Disconnect** at the bottom releases the serial port.
 
 ### Patches
 
@@ -156,7 +156,7 @@ Small **help tips** (a `?` next to controls such as Mode) explain the less obvio
 
 ![Quick setup](docs/ui-test-screenshots/40_quicksetup.png)
 
-Quick setup writes common switch configurations for you, so you do not have to know the underlying MIDI. Open a patch, go to **Quick setup**, pick a recipe, choose which physical switches it should use, and the bindings are generated and written straight to the patch.
+Quick setup is a tab inside the Patch editor (**Switches | Quick setup**), so it always acts on the patch you have open. It writes common switch configurations for you, so you do not have to know the underlying MIDI. Open a patch, switch to the **Quick setup** tab, pick a recipe, choose which physical switches it should use, and the bindings are generated and written straight to the patch. Applying a recipe drops you back to the Switches tab so you see the result.
 
 The built-in recipes include:
 

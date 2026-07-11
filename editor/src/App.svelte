@@ -53,6 +53,9 @@
    * can introduce its own page id without an editor code change. */
   type Page = string;
   let page = $state<Page>("home");
+  // Which tab is showing inside the Editor page. "Quick setup" is a mode of the
+  // editor (it acts on the open patch), not a separate nav destination.
+  let editorTab = $state<"switches" | "quicksetup">("switches");
 
   let ports = $state<PortInfo[]>([]);
   let selectedPort = $state<string | null>(null);
@@ -1002,6 +1005,8 @@
     for (const b of bindings) cmd.putBinding(bank, slot, b);
     cmd.getPatch(bank, slot);
     cmd.listPatches();
+    // Jump back to the switch list so the user sees the bindings just written.
+    editorTab = "switches";
     window.dispatchEvent(new CustomEvent("bosun-toast", {
       detail: { level: "ok", message: `Applied ${bindings.length} binding${bindings.length === 1 ? "" : "s"}` },
     }));
@@ -1034,32 +1039,50 @@
     }
   }
 
-  const CORE_NAV: Array<{ id: Page; label: string; icon: string; kind?: string }> = [
-    { id: "home",     label: "Home",        icon: "⌂" },
-    { id: "patches",  label: "Patches",     icon: "▣" },
-    { id: "editor",   label: "Editor",      icon: "✎" },
-    { id: "quicksetup", label: "Quick setup", icon: "✦" },
-    { id: "setlist",  label: "Setlist",     icon: "≣" },
-    { id: "learn",    label: "MIDI Learn",  icon: "↻" },
-    { id: "tft",      label: "Screen layout",  icon: "▭" },
-    { id: "settings", label: "Settings",    icon: "⚙" },
-    { id: "maint",    label: "Maintenance", icon: "⊕" },
-    { id: "log",      label: "Log",         icon: "≡" },
+  // Sidebar items carry a `group` so the nav can render hierarchically instead
+  // of one flat list. Home stands alone above the groups. "Quick setup" is NOT
+  // here: it lives inside the Editor as a tab (it only makes sense on the patch
+  // you have open), see `editorTab` below.
+  type NavItem = { id: Page; label: string; icon: string; kind?: string; group: NavGroup };
+  type NavGroup = "" | "build" | "device" | "system";
+  const CORE_NAV: NavItem[] = [
+    { id: "home",     label: "Home",         icon: "⌂", group: "" },
+    { id: "patches",  label: "Patches",      icon: "▣", group: "build" },
+    { id: "editor",   label: "Editor",       icon: "✎", group: "build" },
+    { id: "setlist",  label: "Setlist",      icon: "≣", group: "build" },
+    { id: "tft",      label: "Screen layout", icon: "▭", group: "device" },
+    { id: "learn",    label: "MIDI Learn",   icon: "↻", group: "device" },
+    { id: "settings", label: "Settings",     icon: "⚙", group: "device" },
+    { id: "maint",    label: "Maintenance",  icon: "⊕", group: "system" },
+    { id: "log",      label: "Log",          icon: "≡", group: "system" },
   ];
-  // Insert plugin recipes between "Editor" and "MIDI Learn" (so after
-  // Home + Patches + Editor in the visible list).
-  let visibleNav = $derived.by<Array<{ id: Page; label: string; icon: string; kind?: string }>>(() => {
-    const recipes: Array<{ id: Page; label: string; icon: string; kind?: string }> = [];
+  // Plugin recipe pages (e.g. Ampero auto-follow setup) are device setup, so
+  // they join the Device group. Active-kind filter unchanged.
+  let visibleNav = $derived.by<NavItem[]>(() => {
+    const recipes: NavItem[] = [];
     if (manifest) {
       for (const [pluginId, plug] of Object.entries(manifest.plugins)) {
         const r = plug.recipe_schema;
         if (r) {
-          recipes.push({ id: r.id, label: r.label, icon: r.icon ?? "♪", kind: pluginId });
+          recipes.push({ id: r.id, label: r.label, icon: r.icon ?? "♪", kind: pluginId, group: "device" });
         }
       }
     }
-    const combined = [...CORE_NAV.slice(0, 3), ...recipes, ...CORE_NAV.slice(3)];
-    return combined.filter(item => !item.kind || item.kind === activeKind);
+    return [...CORE_NAV, ...recipes].filter(item => !item.kind || item.kind === activeKind);
+  });
+  // Bucket the visible items into their sections for rendering, in a fixed
+  // group order, dropping any empty group. Order within a group follows
+  // insertion order (so plugin recipes land after Settings in Device).
+  let navGroups = $derived.by<Array<{ label: string; items: NavItem[] }>>(() => {
+    const order: Array<{ key: NavGroup; label: string }> = [
+      { key: "",       label: "" },
+      { key: "build",  label: "Build" },
+      { key: "device", label: "Device" },
+      { key: "system", label: "System" },
+    ];
+    return order
+      .map(g => ({ label: g.label, items: visibleNav.filter(n => n.group === g.key) }))
+      .filter(g => g.items.length > 0);
   });
   // If the user was on a now-hidden page after a profile switch, bounce
   // them to Patches so they don't see a blank content area.
@@ -1201,18 +1224,23 @@
     {/if}
     <div class="shell">
       <nav class="sidebar">
-        {#each visibleNav as item}
-          <button class="navitem" class:active={page === item.id}
-                  onclick={() => page = item.id}>
-            <span class="icon">{item.icon}</span>
-            <span class="lbl">{item.label}</span>
-            {#if item.id === "patches" && dirtyIds.length > 0}
-              <span class="badge-dot" title="unsaved">{dirtyIds.length}</span>
-            {/if}
-            {#if item.id === "learn" && learning}
-              <span class="pulse-dot" title="learning"></span>
-            {/if}
-          </button>
+        {#each navGroups as grp}
+          {#if grp.label}
+            <div class="navgroup-label">{grp.label}</div>
+          {/if}
+          {#each grp.items as item}
+            <button class="navitem" class:active={page === item.id}
+                    onclick={() => page = item.id}>
+              <span class="icon">{item.icon}</span>
+              <span class="lbl">{item.label}</span>
+              {#if item.id === "patches" && dirtyIds.length > 0}
+                <span class="badge-dot" title="unsaved">{dirtyIds.length}</span>
+              {/if}
+              {#if item.id === "learn" && learning}
+                <span class="pulse-dot" title="learning"></span>
+              {/if}
+            </button>
+          {/each}
         {/each}
         <div class="grow"></div>
         <button class="navitem ghost" onclick={doDisconnect} disabled={busy}>
@@ -1315,10 +1343,31 @@
             {/if}
           </header>
           {#if currentPatch && manifest}
-            <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
-                         patch={currentPatch.patch} {manifest} {activeKind}
-                         allPatches={patches} {linkConfig}
-                         onToggleLock={(s) => { void toggleSlotLock(s); }} />
+            <div class="editor-tabs" role="tablist" aria-label="Editor mode">
+              <button role="tab" class="etab" class:active={editorTab === "switches"}
+                      aria-selected={editorTab === "switches"}
+                      onclick={() => editorTab = "switches"}>Switches</button>
+              <button role="tab" class="etab" class:active={editorTab === "quicksetup"}
+                      aria-selected={editorTab === "quicksetup"}
+                      onclick={() => editorTab = "quicksetup"}>Quick setup</button>
+            </div>
+            {#if editorTab === "switches"}
+              <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
+                           patch={currentPatch.patch} {manifest} {activeKind}
+                           allPatches={patches} {linkConfig}
+                           onToggleLock={(s) => { void toggleSlotLock(s); }} />
+            {:else}
+              <p class="muted" style="margin:0 0 0.75rem">
+                Guided setups for this patch: pick which switches to use and the bindings are written for you - no need to know the MIDI messages. Applying jumps you back to Switches to see the result.
+              </p>
+              <QuickSetup
+                switches={SWITCH_NAMES}
+                {manifest}
+                {activeKind}
+                existing={currentPatch.patch.bindings}
+                onApply={applyRecipeBindings}
+              />
+            {/if}
           {:else if !hasActiveProfile}
             <div class="manifest-error">
               <p>No profile on this pedal yet.</p>
@@ -1354,26 +1403,6 @@
             <p class="muted">Loading patch {deviceInfo.bank}/{deviceInfo.slot}…</p>
           {:else}
             <p class="muted">Pick a patch from the Patches tab to edit.</p>
-          {/if}
-
-        {:else if page === "quicksetup"}
-          <header class="pageHead">
-            <h2>Quick setup</h2>
-          </header>
-          {#if currentPatch && manifest}
-            <p class="muted" style="margin:0 0 0.75rem">
-              Guided setups for {patchIdOf(currentPatch.bank, currentPatch.slot)} · {currentPatch.patch.name || "(unnamed)"}. Pick which switches to use and the bindings are written for you - no need to know the MIDI messages.
-            </p>
-            <QuickSetup
-              switches={SWITCH_NAMES}
-              {manifest}
-              {activeKind}
-              existing={currentPatch.patch.bindings}
-              onApply={applyRecipeBindings}
-            />
-          {:else}
-            <p class="muted">Open a patch first (from the Patches tab) to run a quick setup on it.</p>
-            <div class="row toolbar"><button class="primary" onclick={() => page = "patches"}>Open Patches</button></div>
           {/if}
 
         {:else if page === "setlist"}
@@ -1853,6 +1882,13 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
   @keyframes pulse { 50% { opacity: 0.35; } }
+  /* Section header separating the sidebar groups (Build / Device / System). */
+  .navgroup-label {
+    font-size: 0.66rem; font-weight: 600; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--text-dim);
+    padding: 0.2rem 0.85rem; margin-top: 0.7rem;
+  }
+  .navgroup-label:first-child { margin-top: 0.2rem; }
 
   /* ---------- content area ---------- */
   .content {
@@ -1891,6 +1927,25 @@
     cursor: default;
   }
   /* .pageHead buttons inherit the global :global(button) baseline. */
+
+  /* Editor Switches / Quick setup tab strip. */
+  .editor-tabs {
+    display: flex; gap: 0.25rem;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 1rem;
+  }
+  .etab {
+    background: transparent; border: none;
+    color: var(--text-muted); font-size: 0.88rem; font-weight: 500;
+    padding: 0.5rem 0.9rem; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  .etab:hover { color: var(--text); }
+  .etab.active {
+    color: var(--accent); font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
 
   /* Patches grid tile-level styles live in components/PatchesGrid.svelte.
      Only the dirty-tag indicator (reused in the editor pageHead) stays
