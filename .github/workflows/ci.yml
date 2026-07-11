@@ -27,10 +27,14 @@ jobs:
           cache: npm
           cache-dependency-path: editor/package-lock.json
 
-      # Clean, reproducible install from the lockfile.
+      # Install from the committed lockfile. We use `npm install` rather than
+      # `npm ci` on purpose: esbuild (pulled in by both vite and vitest) ships
+      # its binary as per-platform OPTIONAL deps, and npm ci is strict enough to
+      # abort with EBADPLATFORM on the cross-platform ones. `npm install` honors
+      # the committed lock for versions but skips incompatible optionals cleanly.
       - name: Install dependencies
         working-directory: editor
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # svelte-check: the "check" script in editor/package.json.
       - name: Type-check (svelte-check)
