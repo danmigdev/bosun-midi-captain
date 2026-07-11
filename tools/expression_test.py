@@ -249,6 +249,46 @@ def test_configure_releases_pins():
     check("no active jacks after empty reconfigure", not arr.any_active())
 
 
+def _settle(arr, pin, raw, start_ms=0):
+    """Drive `pin` to `raw` and poll until the EMA-smoothed value converges.
+    Returns the next free timestamp so callers can keep polling in order."""
+    FakeAnalogIn.registry[pin]._value = raw
+    t = start_ms
+    for _ in range(80):
+        arr.poll(t)
+        t += _POLL_INTERVAL_MS + 1
+    return t
+
+
+def test_unchanged_jack_not_reemitted_on_reconfigure():
+    # Regression: a PUT_GLOBAL that leaves a jack's config untouched must not
+    # re-emit its live position. Real-world symptom: the morph pedal (CC 4)
+    # jumped every time an unrelated global setting was saved, because
+    # configure() reset value=-1 and the next poll fired an "initial" value.
+    _reset_registry()
+    cfg = _cfg(jack=1, cc=4, cal_min=0, cal_max=65535)   # CC 4 = Kemper morph
+    arr = ExpressionArray([cfg])
+    t = _settle(arr, "GP27", 32768)                      # heel-to-mid, converged
+    # An unrelated settings save: same expression config pushed again. The new
+    # ADC starts at 0, so mirror the physical position the pedal is still at.
+    arr.configure([dict(cfg)])
+    FakeAnalogIn.registry["GP27"]._value = 32768
+    e = arr.poll(t)
+    check("unchanged jack across reconfigure emits nothing", e == [], "got %r" % e)
+
+
+def test_edited_jack_reemits_on_reconfigure():
+    # The flip side: a jack whose config actually changed (here: recalibrated)
+    # must re-sync so the new mapping reaches the target.
+    _reset_registry()
+    arr = ExpressionArray([_cfg(jack=1, cc=4, cal_min=0, cal_max=65535)])
+    t = _settle(arr, "GP27", 32768)
+    arr.configure([_cfg(jack=1, cc=4, cal_min=0, cal_max=40000)])  # recalibrated
+    FakeAnalogIn.registry["GP27"]._value = 32768
+    e = arr.poll(t)
+    check("edited jack across reconfigure re-emits", len(e) == 1, "got %r" % e)
+
+
 def test_stats_shape():
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cal_min=0, cal_max=65535)])
@@ -308,6 +348,8 @@ def main():
     test_missing_message_is_inert()
     test_two_jacks()
     test_configure_releases_pins()
+    test_unchanged_jack_not_reemitted_on_reconfigure()
+    test_edited_jack_reemits_on_reconfigure()
     test_stats_shape()
     print("D. robustness")
     test_read_error_does_not_throw()

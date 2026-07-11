@@ -42,6 +42,8 @@ class _Jack:
 
     def __init__(self, cfg):
         cfg = cfg or {}
+        self._cfg = cfg                    # kept verbatim so configure() can
+                                           # tell an unchanged jack from an edit
         self.jack = int(cfg.get("jack", 0))
         self.enabled = bool(cfg.get("enabled", False))
         self.invert = bool(cfg.get("invert", False))
@@ -115,10 +117,29 @@ class ExpressionArray:
     def configure(self, expression_cfg):
         """(Re)build the jacks from a device.json `expression` list. Releases
         any previously-claimed ADC pins first so a PUT_GLOBAL that flips a
-        jack on/off takes effect without a reboot."""
+        jack on/off takes effect without a reboot.
+
+        Runtime state (last emitted value + smoothing) is carried over for any
+        jack whose config is byte-for-byte unchanged, so a PUT_GLOBAL that
+        doesn't touch this jack does not re-emit its current position. Without
+        this, every settings save re-seeds value=-1 and the next poll blasts
+        the live pedal value at its target - e.g. jamming the Kemper morph
+        (CC 4) to wherever the pedal physically sits. A jack that was actually
+        added or edited still starts fresh and re-syncs, as before."""
+        # Snapshot old per-jack state keyed by jack number BEFORE releasing the
+        # pins (deinit() drops the ADC, but value/_smooth are plain numbers).
+        prev = {j.jack: (j._cfg, j.value, j._smooth) for j in self._jacks}
         for j in self._jacks:
             j.deinit()
-        self._jacks = [_Jack(c) for c in (expression_cfg or [])]
+        new_jacks = []
+        for c in (expression_cfg or []):
+            j = _Jack(c)
+            saved = prev.get(j.jack)
+            if saved is not None and saved[0] == j._cfg:
+                j.value = saved[1]
+                j._smooth = saved[2]
+            new_jacks.append(j)
+        self._jacks = new_jacks
 
     def any_active(self):
         return any(j.active() for j in self._jacks)
