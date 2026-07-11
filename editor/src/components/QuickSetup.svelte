@@ -28,9 +28,13 @@
   let expandedId = $state<string | null>(null);
   let assignments = $state<Record<string, Record<string, string>>>({});
 
+  // Pure read: returns the current assignment for a recipe, or an empty object
+  // when none exists yet. It must NOT mutate `assignments` - this runs inside a
+  // {@const} during render, and writing to reactive state there trips Svelte's
+  // unsafe-mutation guard and aborts the whole page branch from mounting.
+  // The entry is created lazily by setRole when the user actually picks a switch.
   function assignFor(id: string): Record<string, string> {
-    if (!assignments[id]) assignments[id] = {};
-    return assignments[id];
+    return assignments[id] ?? {};
   }
 
   function toggle(id: string) {
