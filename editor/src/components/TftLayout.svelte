@@ -310,7 +310,7 @@
       {#each layout as e, i (i)}
         <div class="entry">
           <div class="row">
-            <label>Field
+            <label class="field">Field
               <select bind:value={e.field}>
                 <option value="">- literal text -</option>
                 {#each allFields as f}
@@ -413,17 +413,25 @@
   .hint { color: var(--text-muted); font-size: 0.82rem; margin: 0 0 1rem; max-width: 800px; }
   .hint code { background: var(--bg); padding: 0.05rem 0.35rem; border-radius: 3px; color: var(--warn-text); }
 
-  .cols { display: flex; gap: 1.5rem; align-items: flex-start; }
-  .entries { flex: 1; display: flex; flex-direction: column; gap: 0.45rem; }
+  /* Entries + fixed 240px preview side by side, but the preview drops BELOW the
+     entries once the row can't fit both (narrow window / high UI zoom) instead
+     of overflowing off the right edge. */
+  .cols { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+  .entries { flex: 1 1 320px; min-width: min(100%, 300px); display: flex; flex-direction: column; gap: 0.45rem; }
 
   .entry { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.7rem; }
   .row { display: flex; gap: 0.55rem; align-items: end; margin-bottom: 0.4rem; flex-wrap: wrap; }
   .row:last-child { margin-bottom: 0; }
-  label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.7rem; color: var(--text-muted); }
+  label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.7rem; color: var(--text-muted); min-width: 0; }
   label.chk { align-items: center; }
   label.chk input[type="checkbox"] { width: 16px; height: 16px; margin-top: 0.15rem; }
+  /* The Field label carries a wide <select> (long field names); let it grow to
+     fill the row and, crucially, shrink (min-width:0 + select width:100%) so on
+     a narrow window it truncates instead of pushing the page wider. */
+  .row > label.field { flex: 1 1 12rem; }
+  .row > label.field select { width: 100%; }
   input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
-                  padding: 0.3rem 0.45rem; border-radius: 3px; font-size: 0.82rem; }
+                  padding: 0.3rem 0.45rem; border-radius: 3px; font-size: 0.82rem; min-width: 0; max-width: 100%; }
   input[type="number"] { width: 4.5rem; }
   input[type="color"]  { padding: 0; width: 40px; height: 28px; }
   .grow { flex: 1; }

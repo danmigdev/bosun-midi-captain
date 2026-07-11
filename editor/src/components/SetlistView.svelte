@@ -300,7 +300,7 @@
 <style>
   .setlist-view {
     display: grid;
-    grid-template-columns: minmax(180px, 240px) 1fr;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     gap: 1rem;
     align-items: start;
   }
@@ -422,7 +422,8 @@
     border-radius: 4px;
     font-size: 0.95rem;
     font-weight: 500;
-    min-width: 12rem;
+    flex: 1 1 8rem;
+    min-width: 0;
   }
 
   .badge {
@@ -439,7 +440,7 @@
 
   .panes {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1rem;
     align-items: start;
   }
@@ -599,7 +600,10 @@
     cursor: not-allowed;
   }
 
-  @media (max-width: 720px) {
+  /* Stack the setlists sidebar and the two panes once the pedal's window gets
+     narrow (small window at high UI zoom). The breakpoint accounts for the
+     ~190px app sidebar that eats into this component's available width. */
+  @media (max-width: 940px) {
     .setlist-view {
       grid-template-columns: 1fr;
     }

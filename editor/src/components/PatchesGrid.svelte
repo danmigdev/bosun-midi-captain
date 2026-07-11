@@ -70,6 +70,7 @@
   {/if}
 </div>
 
+<div class="gridscroll">
 <div class="grid" class:filtering={!!normQuery} style="--cols: {slotCount}">
   <!-- Column header row: slot number + per-column padlock. A closed lock
        means every patch at this slot is linked across banks - editing one
@@ -132,6 +133,7 @@
     {/each}
   {/each}
 </div>
+</div>
 
 <style>
   .searchbar {
@@ -158,12 +160,16 @@
      matches stand out, without removing them from the grid layout. */
   .grid.filtering .cell.dimmed { opacity: 0.18; pointer-events: none; filter: grayscale(0.6); }
 
+  /* Wrapper scrolls the fixed 5-column grid horizontally when the window is too
+     narrow (small window at high UI zoom) so the whole page never gets a
+     horizontal scrollbar - only the grid does, and only when it must. */
+  .gridscroll { overflow-x: auto; }
   .grid {
     position: relative;
     display: grid;
     gap: 0.45rem;
     align-items: stretch;
-    grid-template-columns: 2.4rem repeat(var(--cols, 5), minmax(110px, 1fr));
+    grid-template-columns: 2.4rem repeat(var(--cols, 5), minmax(96px, 1fr));
   }
   .head {
     font-size: 0.72rem;
