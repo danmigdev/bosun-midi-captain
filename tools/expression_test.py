@@ -158,19 +158,19 @@ def test_degenerate_calibration():
 
 # ---------------- deadband + throttle via ExpressionArray.poll ----------------
 
-def test_emit_on_change_only():
+def test_arms_then_emits_on_change():
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cal_min=0, cal_max=65535, cc=11)])
     adc = FakeAnalogIn.registry["GP27"]
     adc._value = 0
+    # A jack that hasn't moved is disarmed and stays silent (no power-on blast).
     e0 = arr.poll(0)
-    check("first poll emits an initial value", len(e0) == 1 and e0[0][1] == 0, "got %r" % e0)
-    # Same value, later tick past the throttle window: no emit.
+    check("unmoved jack emits nothing (disarmed)", e0 == [], "got %r" % e0)
     e1 = arr.poll(_POLL_INTERVAL_MS + 1)
-    check("unchanged value emits nothing", e1 == [], "got %r" % e1)
-    # Move the pedal to the toe. The EMA smoother means a big jump converges
-    # over several polls (by design, so noise/jumps don't snap the value);
-    # keep polling and assert it climbs monotonically and reaches the top.
+    check("still-unmoved jack emits nothing", e1 == [], "got %r" % e1)
+    # Move the pedal to the toe: it arms and emits. The EMA smoother means a big
+    # jump converges over several polls (by design, so noise/jumps don't snap
+    # the value); keep polling and assert it climbs monotonically to the top.
     adc._value = 65535
     t = 2 * (_POLL_INTERVAL_MS + 1)
     seq = []
@@ -180,12 +180,31 @@ def test_emit_on_change_only():
         if e:
             seq.append(e[0][1])
     monotonic = all(b >= a for a, b in zip(seq, seq[1:]))
-    check("moving the pedal emits a rising value stream", len(seq) > 1 and monotonic,
+    check("moving the pedal arms it and emits a rising stream", len(seq) > 1 and monotonic,
           "seq=%r" % seq[:10])
     check("value converges to the toe (127)", seq and seq[-1] == 127, "last=%r" % (seq[-1:] or None))
     # Once settled, holding still emits nothing more.
     e_hold = arr.poll(t)
     check("holding still after convergence emits nothing", e_hold == [], "got %r" % e_hold)
+
+
+def test_floating_jack_never_emits():
+    # The morph-fantasma bug: an enabled jack with NO pedal plugged reads a
+    # floating ADC that only jitters a count or two. It must never arm, so it
+    # emits nothing - no stray CC 4 (Kemper morph) or any other phantom.
+    _reset_registry()
+    arr = ExpressionArray([_cfg(jack=1, cal_min=0, cal_max=65535, cc=4)])
+    adc = FakeAnalogIn.registry["GP27"]
+    emitted = 0
+    t = 0
+    for i in range(300):
+        # ~1-count wobble near the top, mirroring the real hardware capture
+        # where an unplugged jack sat at value 126..127.
+        adc._value = 65535 if (i % 2) else 65020
+        emitted += len(arr.poll(t))
+        t += _POLL_INTERVAL_MS + 1
+    check("floating/unplugged jack never emits (no phantom CC)", emitted == 0,
+          "emitted %d" % emitted)
 
 
 def test_throttle():
@@ -204,11 +223,18 @@ def test_throttle():
 def test_message_template_carried():
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cc=7, cal_min=0, cal_max=65535)])
-    FakeAnalogIn.registry["GP27"]._value = 65535
-    events = arr.poll(0)
-    msg, value = events[0]
+    adc = FakeAnalogIn.registry["GP27"]
+    adc._value = 0
+    arr.poll(0)                                  # baseline (disarmed)
+    adc._value = 65535                           # sweep to arm + reach the toe
+    events = []
+    t = _POLL_INTERVAL_MS + 1
+    for _ in range(80):
+        events += arr.poll(t)
+        t += _POLL_INTERVAL_MS + 1
+    msg, value = events[-1]
     check("emitted event carries the message template", msg.get("cc") == 7 and msg.get("type") == "cc")
-    check("emitted event carries the 0..127 value", value == 127)
+    check("emitted event reaches the 0..127 value", value == 127)
 
 
 # ---------------- inert / disabled / reconfigure ----------------
@@ -232,11 +258,17 @@ def test_two_jacks():
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cc=11, cal_min=0, cal_max=65535),
                            _cfg(jack=2, cc=7, cal_min=0, cal_max=65535)])
-    FakeAnalogIn.registry["GP27"]._value = 0
-    FakeAnalogIn.registry["GP28"]._value = 65535
-    events = arr.poll(0)
-    ccs = sorted(m.get("cc") for m, _v in events)
-    check("both jacks active and emit independently", ccs == [7, 11], "got %r" % ccs)
+    r1 = FakeAnalogIn.registry["GP27"]; r2 = FakeAnalogIn.registry["GP28"]
+    r1._value = 0; r2._value = 0
+    arr.poll(0)                                  # baselines (both disarmed)
+    r1._value = 65535; r2._value = 65535         # move both -> arm both
+    ccs = set()
+    t = _POLL_INTERVAL_MS + 1
+    for _ in range(80):
+        for m, _v in arr.poll(t):
+            ccs.add(m.get("cc"))
+        t += _POLL_INTERVAL_MS + 1
+    check("both jacks arm and emit independently", ccs == {7, 11}, "got %r" % sorted(ccs))
 
 
 def test_configure_releases_pins():
@@ -249,12 +281,15 @@ def test_configure_releases_pins():
     check("no active jacks after empty reconfigure", not arr.any_active())
 
 
-def _settle(arr, pin, raw, start_ms=0):
-    """Drive `pin` to `raw` and poll until the EMA-smoothed value converges.
-    Returns the next free timestamp so callers can keep polling in order."""
-    FakeAnalogIn.registry[pin]._value = raw
+def _arm_and_settle(arr, pin, raw, start_ms=0):
+    """Sweep `pin` from 0 up to `raw` so the jack arms (crosses _ARM_DELTA) and
+    the EMA-smoothed value converges. Returns the next free timestamp."""
+    reg = FakeAnalogIn.registry[pin]
+    reg._value = 0
     t = start_ms
-    for _ in range(80):
+    arr.poll(t); t += _POLL_INTERVAL_MS + 1              # baseline at 0
+    reg._value = raw
+    for _ in range(120):
         arr.poll(t)
         t += _POLL_INTERVAL_MS + 1
     return t
@@ -268,25 +303,35 @@ def test_unchanged_jack_not_reemitted_on_reconfigure():
     _reset_registry()
     cfg = _cfg(jack=1, cc=4, cal_min=0, cal_max=65535)   # CC 4 = Kemper morph
     arr = ExpressionArray([cfg])
-    t = _settle(arr, "GP27", 32768)                      # heel-to-mid, converged
+    t = _arm_and_settle(arr, "GP27", 32768)              # armed, settled at mid
     # An unrelated settings save: same expression config pushed again. The new
     # ADC starts at 0, so mirror the physical position the pedal is still at.
     arr.configure([dict(cfg)])
     FakeAnalogIn.registry["GP27"]._value = 32768
     e = arr.poll(t)
-    check("unchanged jack across reconfigure emits nothing", e == [], "got %r" % e)
+    check("unchanged armed jack across reconfigure emits nothing", e == [], "got %r" % e)
 
 
-def test_edited_jack_reemits_on_reconfigure():
+def test_edited_jack_rearms_and_stays_silent():
     # The flip side: a jack whose config actually changed (here: recalibrated)
-    # must re-sync so the new mapping reaches the target.
+    # re-arms - so it does NOT blast the target on save either; it stays silent
+    # until the pedal is physically moved again, then resumes normally.
     _reset_registry()
     arr = ExpressionArray([_cfg(jack=1, cc=4, cal_min=0, cal_max=65535)])
-    t = _settle(arr, "GP27", 32768)
+    t = _arm_and_settle(arr, "GP27", 32768)
     arr.configure([_cfg(jack=1, cc=4, cal_min=0, cal_max=40000)])  # recalibrated
-    FakeAnalogIn.registry["GP27"]._value = 32768
-    e = arr.poll(t)
-    check("edited jack across reconfigure re-emits", len(e) == 1, "got %r" % e)
+    FakeAnalogIn.registry["GP27"]._value = 32768         # same position, no move
+    e_still = []
+    for _ in range(10):
+        e_still += arr.poll(t)
+        t += _POLL_INTERVAL_MS + 1
+    check("edited jack stays silent until moved", e_still == [], "got %r" % e_still)
+    FakeAnalogIn.registry["GP27"]._value = 5000          # now move it
+    seq = []
+    for _ in range(80):
+        seq += [v for _m, v in arr.poll(t)]
+        t += _POLL_INTERVAL_MS + 1
+    check("edited jack emits again once moved", len(seq) > 0, "seq=%r" % seq[:5])
 
 
 def test_stats_shape():
@@ -296,9 +341,9 @@ def test_stats_shape():
     arr.poll(0)
     s = arr.stats()
     ok = (isinstance(s, list) and len(s) == 1
-          and set(s[0].keys()) == {"jack", "raw", "value"}
-          and s[0]["jack"] == 1 and s[0]["raw"] == 32768)
-    check("stats() reports {jack, raw, value} per jack", ok, "got %r" % s)
+          and set(s[0].keys()) == {"jack", "raw", "value", "armed"}
+          and s[0]["jack"] == 1 and s[0]["raw"] == 32768 and s[0]["armed"] is False)
+    check("stats() reports {jack, raw, value, armed} per jack", ok, "got %r" % s)
 
 
 # ---------------- robustness ----------------
@@ -339,8 +384,9 @@ def main():
     test_invert()
     test_curves()
     test_degenerate_calibration()
-    print("B. deadband + throttle")
-    test_emit_on_change_only()
+    print("B. arming + deadband + throttle")
+    test_arms_then_emits_on_change()
+    test_floating_jack_never_emits()
     test_throttle()
     test_message_template_carried()
     print("C. inert / disabled / reconfigure")
@@ -349,7 +395,7 @@ def main():
     test_two_jacks()
     test_configure_releases_pins()
     test_unchanged_jack_not_reemitted_on_reconfigure()
-    test_edited_jack_reemits_on_reconfigure()
+    test_edited_jack_rearms_and_stays_silent()
     test_stats_shape()
     print("D. robustness")
     test_read_error_does_not_throw()

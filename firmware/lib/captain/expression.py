@@ -30,6 +30,8 @@ _ADC_PINS = {1: EXP1_ADC, 2: EXP2_ADC}
 _ADC_FULL = 65535
 _POLL_INTERVAL_MS = 10                     # cap sampling at ~100 Hz
 _DEADBAND = 1                              # min 0..127 delta to emit a message
+_ARM_DELTA = 8                             # 0..127 travel before a jack "arms"
+                                           # and starts emitting (see poll)
 
 
 def _clampf(v, lo, hi):
@@ -54,6 +56,8 @@ class _Jack:
         self.message = cfg.get("message")
         self.raw = 0                       # last raw read, for calibration UI
         self.value = -1                    # last emitted 0..127 (-1 = never)
+        self.armed = False                 # has the input actually moved yet?
+        self._baseline = None              # first value seen, to measure travel
         self._smooth = None                # EMA state on the raw signal
         self._adc = None
         if self.enabled and self.message and analogio is not None:
@@ -119,16 +123,19 @@ class ExpressionArray:
         any previously-claimed ADC pins first so a PUT_GLOBAL that flips a
         jack on/off takes effect without a reboot.
 
-        Runtime state (last emitted value + smoothing) is carried over for any
-        jack whose config is byte-for-byte unchanged, so a PUT_GLOBAL that
-        doesn't touch this jack does not re-emit its current position. Without
-        this, every settings save re-seeds value=-1 and the next poll blasts
-        the live pedal value at its target - e.g. jamming the Kemper morph
-        (CC 4) to wherever the pedal physically sits. A jack that was actually
-        added or edited still starts fresh and re-syncs, as before."""
+        Runtime state (last emitted value, smoothing, and the armed/baseline
+        movement gate) is carried over for any jack whose config is
+        byte-for-byte unchanged, so a PUT_GLOBAL that doesn't touch this jack
+        neither re-emits its current position nor makes it re-arm. Without the
+        value carry-over, every settings save re-seeded value=-1 and the next
+        poll blasted the live pedal value at its target - e.g. jamming the
+        Kemper morph (CC 4) to wherever the pedal physically sits. A jack that
+        was actually added or edited starts fresh and must re-arm (move) before
+        it emits again."""
         # Snapshot old per-jack state keyed by jack number BEFORE releasing the
-        # pins (deinit() drops the ADC, but value/_smooth are plain numbers).
-        prev = {j.jack: (j._cfg, j.value, j._smooth) for j in self._jacks}
+        # pins (deinit() drops the ADC, but these are all plain values).
+        prev = {j.jack: (j._cfg, j.value, j._smooth, j.armed, j._baseline)
+                for j in self._jacks}
         for j in self._jacks:
             j.deinit()
         new_jacks = []
@@ -136,8 +143,7 @@ class ExpressionArray:
             j = _Jack(c)
             saved = prev.get(j.jack)
             if saved is not None and saved[0] == j._cfg:
-                j.value = saved[1]
-                j._smooth = saved[2]
+                j.value, j._smooth, j.armed, j._baseline = saved[1:]
             new_jacks.append(j)
         self._jacks = new_jacks
 
@@ -147,7 +153,15 @@ class ExpressionArray:
     def poll(self, now_ms):
         """Return a list of (message_template, value127) for jacks whose value
         moved past the deadband since last poll. Throttled to _POLL_INTERVAL_MS
-        so a slow sweep doesn't spam MIDI faster than a real pedal would."""
+        so a slow sweep doesn't spam MIDI faster than a real pedal would.
+
+        A jack only emits once it has "armed": its value has travelled at least
+        _ARM_DELTA from the first reading. An enabled jack with no pedal plugged
+        reads a floating ADC that only jitters a count or two, so it never arms
+        and stays silent - no phantom CC (e.g. a stray Kemper morph). It also
+        means no jack blasts its power-on position; the first real sweep arms
+        it and from then on it behaves normally. `value` still tracks every
+        read for the editor's live calibration bar."""
         if now_ms - self._last_poll_ms < _POLL_INTERVAL_MS:
             return []
         self._last_poll_ms = now_ms
@@ -156,14 +170,23 @@ class ExpressionArray:
             v = j.sample()
             if v is None:
                 continue
-            if j.value < 0 or abs(v - j.value) >= _DEADBAND:
-                j.value = v
-                if j.message:
-                    events.append((j.message, v))
+            if not (j.value < 0 or abs(v - j.value) >= _DEADBAND):
+                continue
+            if not j.armed:
+                if j._baseline is None:
+                    j._baseline = v
+                elif abs(v - j._baseline) >= _ARM_DELTA:
+                    j.armed = True
+            j.value = v                    # track for the calibration bar even
+                                           # while still disarmed
+            if j.armed and j.message:
+                events.append((j.message, v))
         return events
 
     def stats(self):
-        """Per-jack {jack, raw, value} for the editor's live calibration bar."""
-        return [{"jack": j.jack, "raw": j.raw,
+        """Per-jack {jack, raw, value, armed} for the editor's live calibration
+        bar. `armed` is False for a jack that hasn't moved yet (e.g. no pedal
+        plugged), so the editor can show a "waiting for pedal" hint."""
+        return [{"jack": j.jack, "raw": j.raw, "armed": j.armed,
                  "value": j.value if j.value >= 0 else 0}
                 for j in self._jacks]
