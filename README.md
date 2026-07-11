@@ -56,7 +56,7 @@ The result is the two halves of this repository: the `firmware/` that runs on th
                                                                        v
                                                             +----------------------+
                                                             |  Your device         |
-                                                            |  (Kemper, Ampero...) |
+                                                            | (Kemper, Ampero, ...)|
                                                             +----------------------+
 ```
 

@@ -1364,7 +1364,7 @@
                 <p class="empty-state__hint">
                   Protocol messages will appear here as the pedal sends them.
                   Useful when you're debugging bindings or watching the
-                  bidirectional sync to a Kemper / Ampero.
+                  bidirectional sync to a supported device (Kemper, Ampero, ...).
                 </p>
               </div>
             {:else}
