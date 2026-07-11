@@ -72,6 +72,41 @@ _VALIGN = {"top":  0.0, "center": 0.5, "bottom": 1.0}
 _SCREEN_W = 240
 _SCREEN_H = 240
 
+# ---- horizontal scrolling (marquee) for overflowing labels ----
+# When a label opts in (spec["scroll"]) and its text is wider than the space
+# from the left margin to the right screen edge, it is re-anchored left and
+# animated by tick(): a bounce (pause, scroll to reveal the end, pause, scroll
+# back). Only the label's .x moves - a small dirty region - so this stays cheap
+# even though the full render() is comparatively expensive.
+_SCROLL_MARGIN = 6            # left/right inset, px
+_SCROLL_SPEED_PX_S = 40       # default travel speed, px/second
+_SCROLL_PAUSE_MS = 800        # dwell at each end before reversing
+_SCROLL_FRAME_MS = 40         # min interval between position updates (~25 fps)
+
+
+def _scroll_offset(elapsed_ms, span, speed):
+    """Bounce offset in [0, span] for a marquee at `elapsed_ms` into its cycle.
+
+    0 = text at its left home (start visible); span = fully scrolled left (end
+    visible). Dwells _SCROLL_PAUSE_MS at each end. `speed` is px/second."""
+    if span <= 0 or speed <= 0:
+        return 0
+    travel_ms = int(span * 1000 / speed)
+    if travel_ms <= 0:
+        return span
+    period = 2 * (_SCROLL_PAUSE_MS + travel_ms)
+    t = elapsed_ms % period
+    if t < _SCROLL_PAUSE_MS:
+        return 0
+    t -= _SCROLL_PAUSE_MS
+    if t < travel_ms:
+        return int(span * t / travel_ms)
+    t -= travel_ms
+    if t < _SCROLL_PAUSE_MS:
+        return span
+    t -= _SCROLL_PAUSE_MS
+    return int(span * (travel_ms - t) / travel_ms)
+
 # Brand accent (matches the editor's green). Used for the splash logo + name.
 _LOGO_COLOR = 0x6FD99B
 
@@ -188,8 +223,16 @@ class Display:
             bus, width=240, height=240,
             rowstart=rowstart, colstart=colstart, rotation=rotation,
         )
+        # Marquee state: list of {"label", "left", "span", "speed"} for the
+        # labels currently scrolling, plus the shared phase clock. Rebuilt by
+        # every render(); animated by tick().
+        self._scroll = []
+        self._scroll_start_ms = None
+        self._last_scroll_ms = None
 
     def show_splash(self):
+        self._scroll = []
+        self._scroll_start_ms = None
         group = displayio.Group()
         try:
             group.append(_logo_tilegrid())
@@ -209,10 +252,18 @@ class Display:
         """Repaint the screen from the (context, layout) pair.
         Falls back to a single centered patch name if layout is missing/empty.
 
-        When `context['kemper_tuner'] == 'on'` the regular layout is bypassed
-        and a dedicated tuner splash takes over the whole screen - the user
-        is presumably looking at their guitar, not at preset names."""
-        if context.get("kemper_tuner") == "on":
+        When the generic `context['tuner'] == 'on'` (or the legacy
+        `kemper_tuner == 'on'`) the regular layout is bypassed and a dedicated
+        tuner splash takes over the whole screen - the user is presumably
+        looking at their guitar, not at preset names. Any plugin can drive the
+        tuner by publishing `tuner` (and optionally `tuner_note` /
+        `tuner_deviance`); the Kemper plugin also keeps its kemper_* aliases."""
+        # Drop any labels registered by the previous frame before we rebuild -
+        # those Label objects are about to be replaced and must not be animated.
+        self._scroll = []
+        self._scroll_start_ms = None
+
+        if context.get("tuner") == "on" or context.get("kemper_tuner") == "on":
             self._render_tuner(context)
             return
 
@@ -237,14 +288,44 @@ class Display:
                 # label visually aligns the same way regardless of its
                 # text length or scale.
                 font = _load_font(spec.get("font"))
+                apx, apy = _anchor_point(spec)
+                ax, ay = _anchor_pixels(spec)
                 lbl = label.Label(
                     font,
                     text=text,
                     color=color,
                     scale=size,
-                    anchor_point=_anchor_point(spec),
-                    anchored_position=_anchor_pixels(spec),
+                    anchor_point=(apx, apy),
+                    anchored_position=(ax, ay),
                 )
+                # Marquee: if this label opts in and its text is wider than the
+                # usable width, re-anchor it to the left margin (keeping its
+                # vertical anchor) and register it for animation in tick().
+                if spec.get("scroll"):
+                    try:
+                        text_w = int(lbl.bounding_box[2]) * size
+                    except Exception:
+                        text_w = 0
+                    avail = _SCREEN_W - 2 * _SCROLL_MARGIN
+                    if text_w > avail:
+                        lbl.anchor_point = (0.0, apy)
+                        lbl.anchored_position = (_SCROLL_MARGIN, ay)
+                        try:
+                            speed = int(spec.get("scroll_speed"))
+                        except (TypeError, ValueError):
+                            speed = _SCROLL_SPEED_PX_S
+                        if speed <= 0:
+                            speed = _SCROLL_SPEED_PX_S
+                        # Capture the label's real home x AFTER anchoring: for
+                        # some BDF fonts the glyph bounding box origin isn't 0,
+                        # so lbl.x != _SCROLL_MARGIN. Animating from the actual
+                        # value avoids a one-frame jump at the start of a cycle.
+                        self._scroll.append({
+                            "label": lbl,
+                            "home": lbl.x,
+                            "span": text_w - avail,
+                            "speed": speed,
+                        })
                 group.append(lbl)
             except Exception as e:
                 # Bad layout entry should never crash the display.
@@ -252,10 +333,36 @@ class Display:
 
         self.display.root_group = group
 
+    def tick(self, now_ms):
+        """Advance the marquee animation. Cheap no-op when nothing scrolls.
+
+        Called from the main loop every iteration; throttled to ~25 fps so the
+        SPI refresh of the moving label doesn't starve MIDI. Position is derived
+        from absolute elapsed time, so scrolling stays smooth despite loop
+        jitter and the occasional dropped frame."""
+        if not self._scroll:
+            return
+        if self._scroll_start_ms is None:
+            self._scroll_start_ms = now_ms
+        if (self._last_scroll_ms is not None
+                and now_ms - self._last_scroll_ms < _SCROLL_FRAME_MS):
+            return
+        self._last_scroll_ms = now_ms
+        elapsed = now_ms - self._scroll_start_ms
+        for s in self._scroll:
+            try:
+                s["label"].x = s["home"] - _scroll_offset(
+                    elapsed, s["span"], s["speed"])
+            except Exception:
+                pass
+
     def _render_tuner(self, context):
         """Full-screen tuner splash: large note name, horizontal deviance
-        bar with center reference, and a small numeric readout. Driven by
-        the Kemper bidirectional broadcast (see plugins/kemper.py).
+        bar with center reference, and a small numeric readout. Driven by any
+        plugin that publishes `tuner`/`tuner_note`/`tuner_deviance` (the Kemper
+        plugin publishes both these and legacy kemper_* aliases). Degrades
+        gracefully when a plugin has no pitch feedback (e.g. Ampero only sends
+        a tuner on/off toggle): note shows "-" and the needle stays centred.
 
         Geometry (240x240 screen):
           y  ~70  : note name, scale 6, centered
@@ -271,7 +378,9 @@ class Display:
         # Deviance: 0..16383, 8192 = in tune. Show a usable window of
         # 8192 +/- 2000 so the indicator has meaningful travel; clamp
         # outside that to the edges so the user still sees direction.
-        deviance = context.get("kemper_tuner_deviance")
+        deviance = context.get("tuner_deviance")
+        if deviance is None:
+            deviance = context.get("kemper_tuner_deviance")
         try:
             deviance = int(deviance) if deviance is not None else 8192
         except (TypeError, ValueError):
@@ -294,7 +403,7 @@ class Display:
         group = displayio.Group()
 
         # Note name (big). Falls back to "-" if we never received one yet.
-        note = context.get("kemper_tuner_note") or "-"
+        note = context.get("tuner_note") or context.get("kemper_tuner_note") or "-"
         note_lbl = label.Label(
             terminalio.FONT,
             text=str(note),
@@ -346,6 +455,8 @@ class Display:
 
     def show_patch(self, name):
         """Fallback when no layout is configured."""
+        self._scroll = []
+        self._scroll_start_ms = None
         group = displayio.Group()
         group.append(label.Label(terminalio.FONT, text=name or "(unnamed)", x=20, y=120))
         self.display.root_group = group

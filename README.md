@@ -2,7 +2,7 @@
 
 Open firmware and a desktop editor for [PaintAudio MIDI Captain](https://paintaudio.com/) foot controllers. Bosun replaces the stock firmware on the pedal with a small, plugin-driven CircuitPython engine, and ships a companion desktop app that lets you configure every switch, screen label and MIDI mapping without touching a text file.
 
-It is built for guitarists who drive a modeller or multi-effect (Kemper Player, Hotone Ampero II Stage, and anything you can describe with a plugin) from a 10-switch foot controller and want full control over what each switch does.
+It is built for guitarists who drive a modeller or multi-effect (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, a generic-MIDI device, and anything else you can describe with a plugin) from a 10-switch foot controller and want full control over what each switch does.
 
 ---
 
@@ -158,7 +158,8 @@ The 240x240 TFT is fully user-defined. Each row here is one label drawn on the s
 - **Field** pulls a live value. The list mixes **core** fields (patch name, bank) with the fields your plugin exposes (for example "Kemper Player - Rig within bank (1-5)").
 - **text** is a static literal, and **prefix** / **suffix** wrap the value (so a `BANK` prefix renders `BANK 1`).
 - **H-align / V-align / X offset / Y offset / Size / Color / Font** position and style the label.
-- The live **Preview** on the right renders the layout with sample data.
+- **Scroll** turns a label into a marquee: when its text is wider than the screen it scrolls back and forth instead of being clipped, with an optional **Speed** (pixels per second). Short text that already fits stays still.
+- The live **Preview** on the right renders the layout with sample data (scrolling labels animate here too).
 - **Reset to plugin default** drops back to the layout the plugin ships, and **Top / Even / Bottom** are quick vertical arrangers.
 
 ### Settings
@@ -170,6 +171,7 @@ Device-wide behaviour that is not tied to a single patch:
 - **Switch behaviour**: long-press time, double-tap window, and the auto-momentary threshold for latched switches.
 - **MIDI**: the channel the pedal uses to talk to your device. This is device-wide, not per-plugin, so match your device's channel.
 - **Global long-press**: which switch, when held, steps the bank up or down. A patch can override this for a specific switch.
+- **Expression pedals**: each of the two jacks can be enabled and mapped to a continuous MIDI control - a plain CC (for example CC 11 expression) or a plugin control such as the Kemper wah, volume or morph pedal. Sweep the pedal heel-to-toe and use **Capture min / Capture max** to calibrate against the live reading, then pick invert and a taper curve (linear / log / exp). The live value is streamed into the mapped message as you move.
 - **Persistence / debounce** and similar tuning.
 
 Most settings apply live; display and LED changes need a reboot, as noted at the bottom of the page.

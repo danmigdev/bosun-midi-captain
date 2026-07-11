@@ -127,22 +127,27 @@ def list_profiles():
     return out
 
 
-def create_profile(pid, name, kind, default_layout=None):
+def create_profile(pid, name, kind, default_layout=None, color=None):
     """Create an empty profile. Raises ValueError if id is invalid or exists.
 
     `default_layout`, if given, is the tft.layout to seed the new profile's
     device.json with - usually pulled from the matching plugin's
-    DEFAULT_LAYOUT so the user gets a sensible TFT out of the box."""
+    DEFAULT_LAYOUT so the user gets a sensible TFT out of the box.
+    `color`, if given, is an optional "#rrggbb" accent stored in the
+    manifest and surfaced by the editor's profile picker."""
     if not pid or not _valid_id(pid):
         raise ValueError("invalid profile id (use a-z 0-9 -)")
     profile_dir = _join(CONFIG_ROOT, "profiles", pid)
     if _isdir(profile_dir):
         raise ValueError("profile already exists: " + pid)
     _mkdir_p(_join(profile_dir, "patches"))
-    _write_json(_join(profile_dir, "manifest.json"), {
+    manifest = {
         "name": name or pid,
         "kind": kind or "unknown",
-    })
+    }
+    if color:
+        manifest["color"] = color
+    _write_json(_join(profile_dir, "manifest.json"), manifest)
     dev = _empty_device_json()
     if default_layout:
         dev["tft"]["layout"] = default_layout
@@ -215,8 +220,12 @@ def _empty_device_json():
         "leds": {"brightness": 64},
         "tft": {"brightness": 80, "theme_color": "#00ff88", "rotation": 180, "rowstart": 80, "colstart": 0},
         "expression": [
-            {"jack": 1, "calibration": {"min": 0, "max": 1023}},
-            {"jack": 2, "calibration": {"min": 0, "max": 1023}},
+            {"jack": 1, "enabled": False, "invert": False,
+             "calibration": {"min": 300, "max": 65200}, "curve": "linear",
+             "message": {"type": "cc", "channel": 1, "cc": 11, "value": 0}},
+            {"jack": 2, "enabled": False, "invert": False,
+             "calibration": {"min": 300, "max": 65200}, "curve": "linear",
+             "message": {"type": "cc", "channel": 1, "cc": 11, "value": 0}},
         ],
     }
 

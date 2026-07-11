@@ -5,6 +5,7 @@ from . import VERSION, config
 from .bindings import BindingRunner, SwitchArray
 from .board import LED_INDEX_PER_SWITCH
 from .display import Display
+from .expression import ExpressionArray
 from .leds import Leds, parse_hex
 from .midi import MidiEngine
 from .plugin import PluginRegistry
@@ -61,6 +62,9 @@ class Captain:
         self.plugins = PluginRegistry()
         self.plugins.discover()
         self.runner = BindingRunner(self.midi, self.plugins, app=self)
+        # Expression jacks (GP27/GP28). Idle unless a jack is enabled with a
+        # message in device.json; a board with nothing plugged in costs nothing.
+        self.expression = ExpressionArray(self.device.get("expression"))
         self.protocol = Protocol(self)
         self.midi_learn = False
 
@@ -204,6 +208,14 @@ class Captain:
         # beacon) hook here. The check is cheap when no plugin
         # opts in.
         self.plugins.tick(self, now_ms)
+        # Expression pedals: sample the jacks (throttled) and dispatch a MIDI
+        # message for each jack that moved. Cheap no-op when no jack is enabled.
+        # These are plain cc / plugin continuous-control messages, so they don't
+        # touch the display context and never trigger a TFT render.
+        for message, value in self.expression.poll(now_ms):
+            m = dict(message)
+            m["value"] = value
+            self.runner.run_message(m)
         # Deferred TFT render: fire the one slow render only after the inbound
         # MIDI burst has gone quiet (no message for _REFRESH_QUIET_MS), or at
         # the hard cap. The fast ticks until then keep draining USB-MIDI, so the
@@ -215,6 +227,10 @@ class Captain:
                 or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
             self._refresh_due_ms = 0
             self._refresh_display()
+        # Advance any marquee (scrolling) labels. Cheap no-op when no label
+        # overflows; it only moves each scrolling label's .x (a small dirty
+        # region), so it doesn't block the loop the way a full render does.
+        self.display.tick(now_ms)
 
     def stats(self):
         gc.collect()
@@ -231,6 +247,9 @@ class Captain:
             "protocol_cmd_count": self.protocol_cmd_count,
             "last_patch_switch_ms": self.last_patch_switch_ms,
             "current": {"bank": self.current_bank, "slot": self.current_slot},
+            # Live expression jack readings so the editor can draw a calibration
+            # bar and capture min/max from a heel-to-toe sweep.
+            "expression": self.expression.stats(),
         }
 
     # ---------- patch operations (called from Protocol) ----------
@@ -258,6 +277,16 @@ class Captain:
             self.plugins.on_patch_loaded(self)
             self._mark_display_dirty()
             return True
+        # Fire the OUTGOING patch's on_exit chain before we load the target
+        # (symmetric to the incoming patch's on_enter). Gated like on_enter:
+        # only when fire_on_enter is set (an auto-follow with fire_on_enter=False
+        # must not emit MIDI the device didn't ask for) and only when we're
+        # actually leaving for a different slot (not a same-patch reload).
+        if (fire_on_enter and self.current_patch is not None
+                and (bank, slot) != (self.current_bank, self.current_slot)):
+            on_exit = self.current_patch.get("on_exit")
+            if on_exit:
+                self.runner.run(on_exit)
         t0 = self._now_ms()
         self.current_bank = bank
         self.current_slot = slot
@@ -432,6 +461,9 @@ class Captain:
             sw.auto_momentary_ms = auto_momentary_ms
         # Re-apply per-binding overrides on top of refreshed globals
         self._reindex_patch()
+        # Rebuild the expression jacks so an enable/disable or a recalibration
+        # pushed from the editor takes effect without a reboot.
+        self.expression.configure(device.get("expression"))
         # Display layout lives under tft.layout - refresh if it changed.
         self.apply_display_layout(device.get("tft", {}).get("layout") or [])
 

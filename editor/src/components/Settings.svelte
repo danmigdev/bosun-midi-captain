@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { cmd, type Manifest } from "../lib/protocol";
+  import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
+  import ExpressionPedals from "./ExpressionPedals.svelte";
 
   type DeviceConfig = {
     device_name?: string;
@@ -15,12 +16,41 @@
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number };
     tft?: { brightness?: number; theme_color?: string; rotation?: number; rowstart?: number; colstart?: number };
-    expression?: Array<{ jack: number; calibration?: { min?: number; max?: number } }>;
+    expression?: ExpressionConfig[];
     [k: string]: unknown;
   };
 
-  type Props = { device: DeviceConfig | null; manifest?: Manifest | null; activeKind?: string };
-  let { device, manifest = null, activeKind = "" }: Props = $props();
+  type Props = { device: DeviceConfig | null; manifest?: Manifest | null; activeKind?: string; connected?: boolean };
+  let { device, manifest = null, activeKind = "", connected = true }: Props = $props();
+
+  /** A full expression-jack entry with sensible defaults (disabled, CC 11). */
+  function defaultExpression(jack: number): ExpressionConfig {
+    return {
+      jack,
+      enabled: false,
+      invert: false,
+      calibration: { min: 0, max: 65535 },
+      curve: "linear",
+      message: { type: "cc", channel: 1, cc: jack === 2 ? 4 : 11, value: 0 },
+    };
+  }
+
+  /** Backfill any missing fields on a stored expression entry so the editor
+   * always has a complete, mutable object to bind to. */
+  function withExpressionDefaults(e: Partial<ExpressionConfig> & { jack: number }): ExpressionConfig {
+    const d = defaultExpression(e.jack);
+    return {
+      jack: e.jack,
+      enabled: e.enabled ?? d.enabled,
+      invert: e.invert ?? d.invert,
+      calibration: {
+        min: e.calibration?.min ?? d.calibration.min,
+        max: e.calibration?.max ?? d.calibration.max,
+      },
+      curve: e.curve ?? d.curve,
+      message: e.message ?? d.message,
+    };
+  }
 
   // Fill in every section we render against so the template never has
   // to do non-null assertions on possibly-missing keys. The Svelte 5
@@ -34,10 +64,13 @@
     if (!w.autosave) w.autosave = { enabled: false, debounce_ms: 2000 };
     if (!w.leds) w.leds = { brightness: 64 };
     if (!w.tft) w.tft = { brightness: 80, theme_color: "#00ff88", rotation: 180, rowstart: 80, colstart: 0 };
-    if (!w.expression) w.expression = [
-      { jack: 1, calibration: { min: 0, max: 1023 } },
-      { jack: 2, calibration: { min: 0, max: 1023 } },
-    ];
+    // Expression jacks: two by default, each backfilled to a complete entry
+    // so the editor can bind enable/invert/curve/message without null checks.
+    if (!w.expression || w.expression.length === 0) {
+      w.expression = [defaultExpression(1), defaultExpression(2)];
+    } else {
+      w.expression = w.expression.map(e => withExpressionDefaults(e));
+    }
     if (!w.long_press_actions) w.long_press_actions = {};
     if (!w.patch_link) w.patch_link = {};
     return w;
@@ -244,13 +277,13 @@
 
     <section class="block">
       <h3>Expression pedals</h3>
-      {#each working.expression ?? [] as exp, i (i)}
-        <div class="exp">
-          <span class="jack">EXP {exp.jack}</span>
-          <label>min <input type="number" min="0" max="65535" bind:value={exp.calibration!.min} /></label>
-          <label>max <input type="number" min="0" max="65535" bind:value={exp.calibration!.max} /></label>
-        </div>
-      {/each}
+      <p class="hint">
+        Two expression jacks. Enable a jack, then move the pedal and use
+        Capture min / Capture max to calibrate its travel. Each jack sends a
+        continuous MIDI message (CC, or a plugin control) with the live
+        0-127 position.
+      </p>
+      <ExpressionPedals bind:expression={working.expression!} {manifest} {connected} />
     </section>
 
     {#each pluginConfigs as cfg (cfg.key)}
@@ -318,8 +351,6 @@
   input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 0.35rem 0.5rem; border-radius: 3px; font-size: 0.85rem; }
   input[type="color"] { padding: 0; width: 50px; height: 30px; cursor: pointer; }
   input[type="checkbox"] { width: auto; }
-  .exp { display: flex; align-items: end; gap: 0.6rem; padding: 0.4rem 0; }
-  .exp .jack { background: var(--bg-hover); color: var(--warn-text); padding: 0.25rem 0.5rem; border-radius: 3px; font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; min-width: 4rem; text-align: center; }
   .saverow {
     position: sticky; bottom: 0;
     background: var(--bg-elevated); border-top: 1px solid var(--border);

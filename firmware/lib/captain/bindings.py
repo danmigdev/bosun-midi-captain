@@ -168,6 +168,13 @@ class BindingRunner:
         for msg in action.get("messages", []):
             self._dispatch(msg)
 
+    def run_message(self, msg):
+        """Dispatch a single message outside a binding action. Used by the
+        expression-pedal input, which substitutes the live 0..127 into a
+        message template and sends it every time the pedal moves."""
+        if msg is not None:
+            self._dispatch(msg)
+
     def _dispatch(self, msg):
         t = msg.get("type")
         ch = msg.get("channel", 1)

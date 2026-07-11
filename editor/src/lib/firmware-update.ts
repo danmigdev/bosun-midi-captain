@@ -9,7 +9,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 const DEFAULT_REPO_OWNER = "danmigdev";
-const DEFAULT_REPO_NAME  = "bosun";
+const DEFAULT_REPO_NAME  = "bosun-midi-captain";
 
 /** Version of the firmware tree bundled with this editor build (read from
  * the Tauri resource). The editor can always flash this over USB, so it is

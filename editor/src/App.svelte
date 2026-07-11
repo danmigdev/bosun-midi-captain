@@ -8,7 +8,6 @@
   import Dashboard from "./components/Dashboard.svelte";
   import PatchesGrid from "./components/PatchesGrid.svelte";
   import Onboarding from "./components/Onboarding.svelte";
-  import { invoke } from "@tauri-apps/api/core";
   import { detectPedal } from "./lib/installer";
   import { readSavedTheme, saveTheme, type Theme } from "./lib/theme";
   import {
@@ -26,6 +25,7 @@
     cmd,
     connect,
     disconnect,
+    fallbackManifest,
     isConnected,
     listPorts,
     midiBridgeStart,
@@ -74,17 +74,10 @@
   let _toastTimer: ReturnType<typeof setTimeout> | undefined;
   function showToast(level: ToastLevel, message: string) {
     toast = { message, level };
-    dbg(`TOAST[${level}] ${message}`);
     if (_toastTimer !== undefined) clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => { toast = null; }, level === "error" ? 8000 : 5000);
   }
 
-  // Diagnostic logger -> %TEMP%\bosun-debug.log (no GUI console needed).
-  // Captures every toast plus key install/connect events so we can see exactly
-  // which notification fires during a session.
-  function dbg(line: string) {
-    try { void invoke("debug_log", { line: `${new Date().toISOString()}  ${line}` }); } catch {}
-  }
   let showInstaller = $state(false);
   // True when the installer was auto-opened because an unflashed pedal was
   // detected (vs. the user clicking "Install firmware" themselves). Drives the
@@ -245,6 +238,11 @@
   // give up after MANIFEST_MAX_RETRIES with a user-visible error.
   let manifestRetries = $state(0);
   let manifestGaveUp = $state(false);
+  // True when `manifest` holds the core-only fallback (built after GET_MANIFEST
+  // exhausted its retries) rather than a real firmware manifest. Drives the
+  // "Plugin features unavailable" banner and lets us tell a genuine manifest
+  // from the stand-in so a later real MANIFEST response can replace it.
+  let manifestFallbackActive = $state(false);
   const MANIFEST_MAX_RETRIES = 5;
   const MANIFEST_RETRY_MS = 3000;
   let _manifestTimer: ReturnType<typeof setTimeout> | undefined;
@@ -263,12 +261,11 @@
   let unsubDisc: (() => void) | null = null;
 
   onMount(async () => {
-    dbg("===== editor session start =====");
     unsubMsg  = await onFirmwareMessage(handleMessage);
     unsubDisc = await onDisconnected(async () => {
       connected = false; learning = false; deviceInfo = null;
       manifest = null; currentPatch = null;
-      manifestRetries = 0; manifestGaveUp = false;
+      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
       // Clean up Rust state too - the reader thread exits on disconnect
       // but the SerialHandle stays in state.serial. Explicit disconnect
       // releases it so the next autoConnect goes through cleanly.
@@ -318,6 +315,7 @@
       deviceInfo = null; manifest = null; currentPatch = null;
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
       globalDevice = null; activeKind = "";
+      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
       try { await disconnect(); } catch {}
       connected = false;
       try {
@@ -369,7 +367,7 @@
           deviceInfo = null; manifest = null; currentPatch = null;
           patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
           globalDevice = null; activeKind = "";
-          manifestRetries = 0; manifestGaveUp = false;
+          manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
           await refetchAll();
         }
       } catch (e) { error = String(e); }
@@ -395,11 +393,11 @@
       deviceInfo = null; manifest = null; currentPatch = null;
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
       globalDevice = null; activeKind = "";
+      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
       // Defensively release the Rust-side handle so a future Connect
       // doesn't bounce against a stale "already connected" state.
       try { await disconnect(); } catch {}
       error = "Lost connection to firmware - click Connect to re-attach.";
-      dbg("rust-disconnected: set 'Lost connection' error");
     });
   });
 
@@ -458,7 +456,7 @@
       // Successful re-sync - any prior "lost connection" / "reconnect failed"
       // error is now stale.
       error = "";
-    } catch (e) { error = String(e); dbg(`refetchAll error -> ${String(e)}`); }
+    } catch (e) { error = String(e); }
   }
 
   // ------------------- watchdog -------------------
@@ -512,7 +510,13 @@
       }
       if (manifestRetries >= MANIFEST_MAX_RETRIES) {
         manifestGaveUp = true;
-        dbg(`MANIFEST gave up after ${manifestRetries} retries (fw=${deviceInfo?.fw ?? "?"}, profile=${deviceInfo?.profile ?? "none"})`);
+        // Install the core-only fallback so the editor stays usable (Patches,
+        // Editor, on_enter/on_exit) with core MIDI messages. Plugin-specific
+        // messages and Settings sections are absent until a real MANIFEST
+        // arrives; a non-blocking banner tells the user. We never overwrite a
+        // real manifest with the fallback (guarded by !manifest above).
+        manifest = fallbackManifest();
+        manifestFallbackActive = true;
         _manifestTimer = undefined;
         return;
       }
@@ -525,6 +529,9 @@
   function retryManifest() {
     manifestRetries = 0;
     manifestGaveUp = false;
+    // Drop the core-only fallback so the retry watchdog re-arms and a real
+    // MANIFEST can replace it (the effect gate keys off `manifest` being null).
+    if (manifestFallbackActive) { manifest = null; manifestFallbackActive = false; }
     cmd.getManifest().catch(() => {});
   }
 
@@ -553,7 +560,6 @@
   // pedal once it has rebooted (the self-heal hard reset brings the data port
   // up a few seconds later).
   async function handleInstalled() {
-    dbg("handleInstalled: firmware copied, reconnecting...");
     showInstaller = false;
     installerAutoPrompt = false;
     installDismissed = false;
@@ -561,17 +567,14 @@
     error = "";
     try {
       const ok = await tryReconnect(20_000);
-      dbg(`handleInstalled: tryReconnect -> ${ok}`);
       if (ok) {
         await refetchAll();
         showToast("ok", "Firmware installed. Pedal connected.");
       } else {
         error = "Firmware installed, but the pedal didn't reconnect in time - click Connect.";
-        dbg(`handleInstalled: set error -> ${error}`);
       }
     } catch (e) {
       error = "Firmware installed; reconnect failed: " + String(e);
-      dbg(`handleInstalled: catch -> ${String(e)}`);
     } finally {
       busy = false;
     }
@@ -871,6 +874,7 @@
         manifest = { core_messages: msg.core_messages, plugins: msg.plugins };
         manifestRetries = 0;
         manifestGaveUp = false;
+        manifestFallbackActive = false;
         if (_manifestTimer !== undefined) { clearTimeout(_manifestTimer); _manifestTimer = undefined; }
         break;
       case "GLOBAL":
@@ -902,7 +906,7 @@
         const detail = (msg as { detail?: string }).detail;
         // A profile-less (freshly-installed) pedal answers "not_found" to
         // manifest/patch queries. That's expected, not a fault - don't toast it.
-        if (err === "not_found" && !deviceInfo?.profile) { dbg(`suppressed not_found ERROR (no profile)`); break; }
+        if (err === "not_found" && !deviceInfo?.profile) { break; }
         flashFirmwareError(
           `firmware: ${err}${of ? ` (handling ${of})` : ""}${detail ? ` - ${detail}` : ""}`,
         );
@@ -1137,6 +1141,13 @@
       </div>
     </main>
   {:else}
+    {#if manifestFallbackActive}
+      <div class="fallback-banner" role="status">
+        <span class="fallback-banner__icon" aria-hidden="true">⚠</span>
+        <span class="fallback-banner__msg">Plugin features unavailable - core MIDI only</span>
+        <button class="fallback-banner__retry" onclick={retryManifest}>Retry</button>
+      </div>
+    {/if}
     <div class="shell">
       <nav class="sidebar">
         {#each visibleNav as item}
@@ -1333,7 +1344,7 @@
             <h2>Settings</h2>
             <button onclick={() => cmd.getGlobal()}>Reload</button>
           </header>
-          <Settings device={globalDevice} {manifest} {activeKind} />
+          <Settings device={globalDevice} {manifest} {activeKind} {connected} />
 
         {:else if page === "maint"}
           <header class="pageHead">
@@ -1853,6 +1864,25 @@
     from { opacity: 0; transform: translateY(-8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
+
+  /* Non-blocking banner shown when only the core-only fallback manifest is
+     active (the plugin manifest never arrived). Sits under the topbar, above
+     the shell, so it doesn't take over the page like .manifest-error did. */
+  .fallback-banner {
+    display: flex; align-items: center; gap: 0.55rem;
+    padding: 0.5rem 1.15rem;
+    background: var(--warn-bg); border-bottom: 1px solid var(--warn);
+    color: var(--warn-text); font-size: 0.82rem;
+    flex-shrink: 0;
+  }
+  .fallback-banner__icon { font-weight: 600; }
+  .fallback-banner__msg { flex: 1; }
+  .fallback-banner__retry {
+    background: transparent; border: 1px solid var(--warn);
+    color: var(--warn-text); padding: 0.2rem 0.6rem; border-radius: 4px;
+    font-size: 0.76rem;
+  }
+  .fallback-banner__retry:hover { background: rgba(217,155,111,0.12); }
 
   .manifest-error {
     max-width: 640px;

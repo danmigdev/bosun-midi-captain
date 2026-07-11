@@ -35,6 +35,9 @@ export interface Patch {
   name?: string;
   tft_color?: string;
   on_enter?: Action;
+  /** Optional message chain fired when leaving this patch (symmetric to
+   * on_enter). Fires just before the next patch's on_enter. */
+  on_exit?: Action;
   bindings: Binding[];
   /** Explicit links: when the user runs "Apply to linked", this patch's
    * full payload (everything except `linked_to`) is copied to each
@@ -136,6 +139,94 @@ export interface Manifest {
   plugins: Record<string, PluginManifestEntry>;
 }
 
+/** One expression-pedal jack config, persisted under device.expression[]. The
+ * `message` is a template; the firmware substitutes the live 0..127 position
+ * into its `value` field before sending. */
+export interface ExpressionConfig {
+  jack: number;
+  enabled: boolean;
+  invert: boolean;
+  calibration: { min: number; max: number };
+  curve: string;
+  message: MidiMessage;
+}
+
+/** The core message types the firmware always handles, regardless of which
+ * plugins are loaded. Mirrors firmware/lib/captain/messages.py CORE_MESSAGE_TYPES.
+ * Used as a fallback so the editor stays usable (Patches/Editor with core MIDI
+ * only) when GET_MANIFEST never lands - e.g. an older firmware truncating the
+ * large plugin manifest response. Keep in sync with the firmware file. */
+export const CORE_MESSAGE_TYPES: Record<string, MessageSchema> = {
+  cc: {
+    label: "Control Change",
+    params: {
+      channel: { type: "int", min: 1, max: 16, default: 1, label: "Channel" },
+      cc:      { type: "int", min: 0, max: 127, default: 0, label: "CC #" },
+      value:   { type: "int", min: 0, max: 127, default: 0, label: "Value" },
+    },
+    summary: "CC {cc}={value} ch {channel}",
+  },
+  pc: {
+    label: "Program Change",
+    params: {
+      channel: { type: "int", min: 1, max: 16, default: 1, label: "Channel" },
+      program: { type: "int", min: 0, max: 127, default: 0, label: "Program" },
+    },
+    summary: "PC {program} ch {channel}",
+  },
+  note_on: {
+    label: "Note On",
+    params: {
+      channel:  { type: "int", min: 1, max: 16, default: 1, label: "Channel" },
+      note:     { type: "int", min: 0, max: 127, default: 60, label: "Note" },
+      velocity: { type: "int", min: 0, max: 127, default: 100, label: "Velocity" },
+    },
+    summary: "Note On {note} v{velocity} ch {channel}",
+  },
+  note_off: {
+    label: "Note Off",
+    params: {
+      channel:  { type: "int", min: 1, max: 16, default: 1, label: "Channel" },
+      note:     { type: "int", min: 0, max: 127, default: 60, label: "Note" },
+      velocity: { type: "int", min: 0, max: 127, default: 64, label: "Velocity" },
+    },
+    summary: "Note Off {note} ch {channel}",
+  },
+  delay: {
+    label: "Delay",
+    params: {
+      ms: { type: "int", min: 0, max: 5000, default: 100, label: "Milliseconds" },
+    },
+    summary: "Wait {ms}ms",
+  },
+  captain_patch: {
+    label: "Switch Captain Patch",
+    params: {
+      bank: { type: "int", min: 1, max: 99, default: 1, label: "Bank" },
+      slot: { type: "int", min: 1, max: 10, default: 1, label: "Slot" },
+    },
+    summary: "→ Captain {bank}/{slot}",
+  },
+  captain_bank_step: {
+    label: "Step Captain Bank",
+    params: {
+      delta: { type: "int", min: -10, max: 10, default: 1, label: "Delta (banks)" },
+    },
+    summary: "Bank step {delta}",
+  },
+};
+
+/** Build a minimal manifest from the known core message types, with no
+ * plugins. Used when the firmware's GET_MANIFEST never returns so the editor
+ * stays usable with core MIDI messages only. */
+export function fallbackManifest(): Manifest {
+  // Deep-clone so callers can't mutate the shared CORE_MESSAGE_TYPES constant.
+  return {
+    core_messages: structuredClone(CORE_MESSAGE_TYPES),
+    plugins: {},
+  };
+}
+
 export interface FlattenedSchema extends MessageSchema {
   /** message type id (e.g. "cc" or "ampero_scene") */
   type: string;
@@ -152,6 +243,37 @@ export function flattenManifest(m: Manifest): FlattenedSchema[] {
     for (const [type, schema] of Object.entries(plugin.messages)) {
       out.push({ ...schema, type, source: plugin.label });
     }
+  }
+  return out;
+}
+
+/** Continuous-control message types usable as an expression-pedal target: any
+ * message (core "cc" or a plugin message) whose params include a `value` int
+ * field spanning 0..127 - the range the firmware substitutes the live pedal
+ * position into. Returns `{ type, label }` entries for a dropdown. Always
+ * includes "cc" first (it is a core message and always present). */
+export function continuousControlTypes(m: Manifest | null): Array<{ type: string; label: string }> {
+  const out: Array<{ type: string; label: string }> = [];
+  const seen = new Set<string>();
+  const consider = (type: string, schema: MessageSchema, source: string) => {
+    if (seen.has(type)) return;
+    const v = schema.params?.value;
+    if (v && v.type === "int" && (v.min ?? 0) <= 0 && (v.max ?? 0) >= 127) {
+      seen.add(type);
+      out.push({ type, label: source === "core" ? schema.label : `${source} · ${schema.label}` });
+    }
+  };
+  if (m) {
+    for (const [type, schema] of Object.entries(m.core_messages)) consider(type, schema, "core");
+    for (const plugin of Object.values(m.plugins)) {
+      for (const [type, schema] of Object.entries(plugin.messages)) consider(type, schema, plugin.label);
+    }
+  }
+  // Guarantee "cc" is present and first even if the manifest is missing.
+  if (!seen.has("cc")) out.unshift({ type: "cc", label: "Control Change" });
+  else {
+    const idx = out.findIndex(o => o.type === "cc");
+    if (idx > 0) out.unshift(out.splice(idx, 1)[0]);
   }
   return out;
 }
@@ -207,6 +329,10 @@ export interface DeviceStats {
   protocol_cmd_count: number;
   last_patch_switch_ms: number;
   current: { bank: number; slot: number };
+  /** Live expression-jack readings (firmware 0.4.x+). `raw` is the ADC value
+   * 0..65535; `value` is the calibrated 0..127 the firmware would send. Absent
+   * on firmware without expression support. */
+  expression?: Array<{ jack: number; raw: number; value: number }>;
 }
 
 export interface MidiLearnEntry {
@@ -527,8 +653,11 @@ export const cmd = {
   // ----- profiles -----
   listProfiles:   () => sendAndAwait<{ type: "PROFILE_LIST"; profiles: ProfileInfo[]; active: string }>(
                           { type: "LIST_PROFILES" }, 4000),
-  createProfile:  (profile_id: string, name: string, kind: string) =>
-                    sendAndAwait({ type: "CREATE_PROFILE", profile_id, name, kind }, 4000),
+  // `color` is an optional hex swatch (e.g. "#6fd99b"). Passed through when
+  // set; firmware that predates color support simply ignores the extra field.
+  createProfile:  (profile_id: string, name: string, kind: string, color?: string) =>
+                    sendAndAwait({ type: "CREATE_PROFILE", profile_id, name, kind,
+                                   ...(color ? { color } : {}) }, 4000),
   switchProfile:  (profile_id: string) =>
                     sendAndAwait({ type: "SWITCH_PROFILE", profile_id }, 4000),
   deleteProfile:  (profile_id: string) =>
@@ -562,4 +691,27 @@ export function debouncedPutBinding(
     cmd.putBinding(bank, slot, binding);
     _debouncers.delete(key);
   }, ms));
+}
+
+
+// --------------------- test-only introspection ---------------------
+// Read-only sizes of the module's internal bookkeeping maps/sets. Used by
+// the endurance/leak tests to assert these structures return to baseline
+// (no unbounded growth) after churn. This getter is a pure observer: it
+// never mutates state and has no effect on runtime behavior. Kept out of
+// the public transport surface deliberately - it exists only so tests can
+// prove the absence of leaks without reaching into module internals via
+// hacks. Do not use from application code.
+export function __getInternalSizes(): {
+  pending: number;
+  subscribers: number;
+  rawSubscribers: number;
+  debouncers: number;
+} {
+  return {
+    pending: _pending.size,
+    subscribers: _firmwareSubscribers.size,
+    rawSubscribers: _firmwareRawSubscribers.size,
+    debouncers: _debouncers.size,
+  };
 }

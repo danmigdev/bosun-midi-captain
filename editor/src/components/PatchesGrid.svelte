@@ -16,6 +16,18 @@
 
   let { patches, deviceInfo, dirtyIds, linkConfig, onToggleLock, onOpen, onCreate }: Props = $props();
 
+  // Non-destructive name filter. When non-empty, only patches whose name
+  // matches (case-insensitive) stay visible; non-matching filled tiles and
+  // the create-placeholders are dimmed out of the way. Clearing the box
+  // restores the full grid.
+  let query = $state("");
+  let normQuery = $derived(query.trim().toLowerCase());
+  function matchesQuery(p: PatchSummary): boolean {
+    if (!normQuery) return true;
+    return (p.name ?? "").toLowerCase().includes(normQuery);
+  }
+  let matchCount = $derived(normQuery ? patches.filter(matchesQuery).length : patches.length);
+
   // Rows are exactly the banks that already contain at least one
   // patch - empty banks are not rendered. The slot axis pads to at
   // least MIN_SLOTS so each bank shows a few "empty next slot"
@@ -44,7 +56,21 @@
   let dirtySet = $derived(new Set(dirtyIds.map(d => `${d.bank}/${d.slot}`)));
 </script>
 
-<div class="grid" style="--cols: {slotCount}">
+<div class="searchbar">
+  <span class="searchicon" aria-hidden="true">⌕</span>
+  <input
+    class="searchbox"
+    type="search"
+    placeholder="Filter patches by name…"
+    bind:value={query}
+    aria-label="Filter patches by name" />
+  {#if normQuery}
+    <span class="searchcount">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
+    <button class="searchclear" onclick={() => query = ""} title="Clear filter" aria-label="Clear filter">×</button>
+  {/if}
+</div>
+
+<div class="grid" class:filtering={!!normQuery} style="--cols: {slotCount}">
   <!-- Column header row: slot number + per-column padlock. A closed lock
        means every patch at this slot is linked across banks - editing one
        propagates to all the others in the same column. Replaces the old
@@ -83,7 +109,8 @@
       {@const active = deviceInfo && deviceInfo.bank === bank && deviceInfo.slot === slot}
       {@const isDirty = dirtySet.has(key)}
       {@const locked = isSlotLocked(slot, linkConfig, patches)}
-      <div class="cell" class:active class:dirty={isDirty} class:locked>
+      {@const dimmed = !!normQuery && !!p && !matchesQuery(p)}
+      <div class="cell" class:active class:dirty={isDirty} class:locked class:dimmed>
         {#if p}
           <button class="tile filled" onclick={() => onOpen(p.bank, p.slot)}>
             <span class="tile__id">{patchIdOf(p.bank, p.slot)}</span>
@@ -93,7 +120,7 @@
               {#if active}<span class="dot live" title="live">●</span>{/if}
             </span>
           </button>
-        {:else}
+        {:else if !normQuery}
           <button class="tile placeholder"
                   onclick={() => onCreate(bank, slot)}
                   title="Create patch at {bank}/{slot}">
@@ -107,6 +134,30 @@
 </div>
 
 <style>
+  .searchbar {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.35rem 0.6rem;
+    max-width: 420px;
+  }
+  .searchbar .searchicon { color: var(--text-dim); font-size: 0.95rem; }
+  .searchbox {
+    flex: 1; background: transparent; border: none; color: var(--text);
+    font: inherit; font-size: 0.85rem; outline: none;
+  }
+  .searchbox::placeholder { color: var(--text-dim); }
+  .searchcount { color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
+  .searchclear {
+    background: transparent; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 0.2rem;
+  }
+  .searchclear:hover { color: var(--text); }
+
+  /* Non-matching tiles during a filter: dimmed and non-interactive so the
+     matches stand out, without removing them from the grid layout. */
+  .grid.filtering .cell.dimmed { opacity: 0.18; pointer-events: none; filter: grayscale(0.6); }
+
   .grid {
     position: relative;
     display: grid;

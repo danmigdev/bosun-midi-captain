@@ -484,7 +484,10 @@ def on_midi_in(port, channel, status, data, app):
                         app.set_switch_latched(sw_name, on)
                         break
         elif cc == 31:
-            app.update_context({"kemper_tuner": "on" if value >= 64 else "off"})
+            on = "on" if value >= 64 else "off"
+            # Publish both the kemper_* field (legacy layouts) and the generic
+            # `tuner` field the shared tuner screen keys off.
+            app.update_context({"kemper_tuner": on, "tuner": on})
     elif status == 0xC0 and data:
         # Echo of a bosun-initiated rig/bank change: within the echo window of a
         # local switch, this PC is just the Player confirming what we just sent.
@@ -592,12 +595,36 @@ def on_navigate(app, bank, slot):
     })
 
 
+# Kemper-specific bidirectional field -> generic tuner field the shared
+# tuner screen (display._render_tuner) reads. We publish both so existing
+# kemper_* layouts keep working while the generic screen also lights up.
+_TUNER_ALIASES = {
+    "kemper_tuner":          "tuner",
+    "kemper_tuner_note":     "tuner_note",
+    "kemper_tuner_deviance": "tuner_deviance",
+}
+
+
+def _add_tuner_aliases(updates):
+    """Return `updates` with generic tuner fields mirrored in from any
+    kemper_tuner* keys. Copies only when needed so the common (non-tuner)
+    path allocates nothing."""
+    extra = None
+    for k, generic in _TUNER_ALIASES.items():
+        if k in updates and generic not in updates:
+            if extra is None:
+                extra = dict(updates)
+            extra[generic] = updates[k]
+    return extra if extra is not None else updates
+
+
 def _publish(app, updates):
     """Push field updates to display_context, de-duped against the last
     values we sent. Skips the update_context call entirely (and the TFT
     redraw it would trigger) when no field actually changed. Used by all
     bidirectional broadcasts - they fire frequently and unconditional
     publish-on-receive would burn the CPU on TFT renders."""
+    updates = _add_tuner_aliases(updates)
     pub = _BIDIR_STATE["published"]
     fresh = {k: v for k, v in updates.items() if pub.get(k) != v}
     if not fresh:
@@ -797,7 +824,7 @@ TFT_FIELDS = {
 DEFAULT_LAYOUT = [
     {"field": "patch_name",
      "halign": "left", "valign": "top", "x": 0, "y": 0,
-     "size": 5, "color": "#ffffff", "font": "system"},
+     "size": 5, "color": "#ffffff", "font": "system", "scroll": True},
     {"field": "bank",
      "halign": "left", "valign": "top", "x": 0, "y": 60,
      "size": 5, "color": "#9aa1ad", "font": "system",

@@ -17,10 +17,15 @@ TOOLS = Path(__file__).resolve().parent
 
 SUITES = [
     "fsm_test.py",                  # switch FSM (debounce / long-press / double-tap)
-    "firmware_stability_test.py",   # protocol + main-loop resilience + MIDI parser fuzz
+    "midi_parser_test.py",          # MIDI stream parser (running status, realtime, SYSEX)
+    "protocol_test.py",             # USB CDC protocol handlers + partial-write streaming
+    "expression_test.py",           # expression-pedal calibration / curves / deadband
+    "plugins_test.py",              # plugin dispatch + cross-plugin manifest consistency
     "kemper_plugin_test.py",        # Kemper bidirectional inbound handling
     "kemper_bank_change_test.py",   # Kemper bank-select dispatch (always-send, self-heal)
     "bilateral_test.py",            # Kemper bilateral protocol + MIDI parser + plugin registry
+    "firmware_stability_test.py",   # protocol + main-loop resilience + MIDI parser fuzz
+    "soak_test.py",                 # hours-of-use endurance: no leaks, no crashes
 ]
 
 

@@ -173,6 +173,13 @@ class _FakePluginRegistry:
             },
         }
 
+    def iter_manifest(self):
+        # Mirror the real PluginRegistry: the streaming _get_manifest emits the
+        # manifest plugin-by-plugin via iter_manifest(), not manifest(). Without
+        # this the fake threw mid-stream and truncated the JSON after "plugins":{.
+        for name, entry in self.manifest().items():
+            yield name, entry
+
     def default_layout(self, kind):
         return []
 

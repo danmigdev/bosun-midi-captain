@@ -18,6 +18,9 @@
   let profileId = $state("");
   let profileName = $state("");
   let profileKind = $state("");
+  // Optional profile colour (hex); passed to CREATE_PROFILE, ignored by
+  // firmware without colour support.
+  let profileColor = $state("#6fd99b");
   let busy = $state(false);
   let err = $state("");
 
@@ -64,7 +67,7 @@
     if (!profileId || !profileName) { err = "Pick an id and a name"; return; }
     busy = true; err = "";
     try {
-      await cmd.createProfile(profileId, profileName, profileKind);
+      await cmd.createProfile(profileId, profileName, profileKind, profileColor);
       step = "done";
     } catch (e) {
       err = String(e);
@@ -146,6 +149,9 @@
         <label>Profile id
           <input type="text" bind:value={profileId} placeholder="auto from name" />
           <span class="hint">letters, numbers, dashes</span>
+        </label>
+        <label class="colorrow">Colour
+          <input type="color" bind:value={profileColor} />
         </label>
       </div>
       {#if err}<p class="err">{err}</p>{/if}
@@ -260,6 +266,8 @@
     outline: none; border-color: var(--accent-border); background: var(--bg);
   }
   .form .hint { color: var(--text-dim); font-size: 0.7rem; }
+  .form .colorrow { flex-direction: row; align-items: center; gap: 0.6rem; }
+  .form .colorrow input[type="color"] { width: 46px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 5px; cursor: pointer; }
 
   .actions {
     display: flex; gap: 0.6rem; justify-content: center;

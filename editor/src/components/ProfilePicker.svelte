@@ -16,6 +16,9 @@
   let newId = $state("");
   let newName = $state("");
   let newKind = $state("");
+  // Optional profile colour (hex). Seeded to the accent green; passed to
+  // CREATE_PROFILE (ignored by firmware that predates colour support).
+  let newColor = $state("#6fd99b");
 
   // Rename state - id of the profile currently being renamed
   let renamingId = $state<string | null>(null);
@@ -126,13 +129,14 @@
     newId = "";
     newName = "";
     newKind = "ampero_ii_stage";
+    newColor = "#6fd99b";
   }
 
   async function doCreate() {
     if (!newId || !newName) { error = "id and name are required"; return; }
     busy = true; error = "";
     try {
-      await cmd.createProfile(newId, newName, newKind);
+      await cmd.createProfile(newId, newName, newKind, newColor);
       creating = false;
       await refresh();
     } catch (e) { error = String(e); }
@@ -183,6 +187,8 @@
                       ondblclick={() => startRename(p.id, p.name)}
                       disabled={busy || p.active}
                       title={p.active ? "Double-click to rename" : "Click to switch · Double-click to rename"}>
+                <span class="swatch" style:background={p.color || "var(--border-strong)"}
+                      title={p.color ? `Colour ${p.color}` : "No colour set"}></span>
                 <span class="pname">{p.name}</span>
                 <span class="pkind">{p.kind}</span>
                 {#if p.active}<span class="active-tag">active</span>{/if}
@@ -214,6 +220,9 @@
           <select bind:value={newKind}>
             {#each kinds as k}<option value={k.id}>{k.label}</option>{/each}
           </select>
+        </label>
+        <label class="colorrow">Colour
+          <input type="color" bind:value={newColor} />
         </label>
         <div class="actions">
           <button onclick={() => creating = false} disabled={busy}>Cancel</button>
@@ -262,6 +271,10 @@
   ul.plist li .row:hover:not(:disabled) { background: var(--bg-hover); }
   ul.plist li .row:disabled { cursor: default; }
   ul.plist li.active .row { background: var(--accent-bg); border-color: var(--accent-border); color: var(--text); }
+  .swatch {
+    width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0;
+    border: 1px solid var(--border-strong);
+  }
   .pname { flex: 1; font-weight: 500; }
   .pkind { color: var(--text-muted); font-size: 0.7rem; font-family: ui-monospace, Consolas, monospace; }
   .active-tag { background: var(--accent-bg); color: var(--accent); font-size: 0.62rem; padding: 0.05rem 0.4rem; border-radius: 3px; text-transform: uppercase; }
@@ -293,6 +306,8 @@
     background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
     padding: 0.3rem 0.5rem; border-radius: 3px; font-size: 0.82rem;
   }
+  .createform .colorrow { flex-direction: row; align-items: center; gap: 0.5rem; }
+  .createform .colorrow input[type="color"] { width: 40px; height: 26px; padding: 0; cursor: pointer; border: 1px solid var(--border-strong); border-radius: 3px; }
   .createform .actions { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
   .createform .actions button {
     flex: 1; padding: 0.35rem; background: var(--bg-hover); border: 1px solid var(--border-strong);

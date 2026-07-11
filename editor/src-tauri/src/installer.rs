@@ -174,18 +174,6 @@ pub fn flash_circuitpython(target: String, app: AppHandle) -> Result<(), String>
     Ok(())
 }
 
-/// Append a line to a debug log the frontend can dump into without a console.
-/// Used to capture every toast/notification during a session for diagnosis.
-/// File: %TEMP%\bosun-debug.log.
-#[tauri::command]
-pub fn debug_log(line: String) {
-    use std::io::Write;
-    let path = std::env::temp_dir().join("bosun-debug.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(f, "{}", line);
-    }
-}
-
 #[tauri::command]
 pub fn install_firmware(target: String, app: AppHandle) -> Result<Vec<String>, String> {
     let resource_root = app

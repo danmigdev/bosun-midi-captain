@@ -209,6 +209,11 @@ def update_context(msg, ctx):
         ctx["ampero_scene"] = 1
     elif t == "ampero_scene":
         ctx["ampero_scene"] = int(msg.get("scene", 1))
+    elif t == "ampero_tuner":
+        # Drive the shared full-screen tuner. The Ampero sends no pitch data
+        # over MIDI, so the screen shows just the tuner frame (note "-",
+        # centred needle) - still a clear "tuner engaged" indication.
+        ctx["tuner"] = msg.get("state", "on")
 
 
 TFT_FIELDS = {
@@ -281,7 +286,7 @@ RECIPE_SCHEMA = {
 DEFAULT_LAYOUT = [
     {"field": "patch_name",
      "halign": "left", "valign": "top", "x": 0, "y": 0,
-     "size": 5, "color": "#ffffff", "font": "system"},
+     "size": 5, "color": "#ffffff", "font": "system", "scroll": True},
     {"field": "bank",
      "halign": "left", "valign": "top", "x": 0, "y": 60,
      "size": 5, "color": "#9aa1ad", "font": "system",

@@ -14,6 +14,10 @@
     halign?: "left" | "center" | "right";
     valign?: "top" | "center" | "bottom";
     font?: string;
+    // Marquee: when the text is wider than the screen, scroll it horizontally
+    // instead of clipping. `scroll_speed` is px/second (default 40 on device).
+    scroll?: boolean;
+    scroll_speed?: number;
   };
 
   const HALIGN: Array<LayoutEntry["halign"]> = ["left", "center", "right"];
@@ -224,6 +228,56 @@
     }
     return pfx + (e.text ?? "") + sfx;
   }
+
+  // ---- marquee preview ----
+  // Mirrors the firmware (display.py): left inset, bounce with a dwell at each
+  // end, px/second travel. Keyed by entry index; a positive span means the
+  // label overflows and is actively scrolling, which the layout below uses to
+  // re-anchor it to the left (like the device does).
+  const PREV_MARGIN = 6;
+  const SCROLL_DEFAULT_SPEED = 40;
+  const SCROLL_PAUSE_MS = 800;
+  let marqueeSpan = $state<Record<number, number>>({});
+
+  // `size` isn't used directly but is included so the action re-measures when
+  // the font scale (and thus the text width) changes.
+  type MarqueeParams = { enabled: boolean; speed: number; text: string; size: number; idx: number };
+
+  function marquee(node: HTMLElement, params: MarqueeParams) {
+    let anim: Animation | null = null;
+    function stop() { if (anim) { anim.cancel(); anim = null; } }
+    function apply(p: MarqueeParams) {
+      stop();
+      node.style.transform = "translateX(0)";
+      if (!p.enabled) { marqueeSpan[p.idx] = 0; return; }
+      // Measure after layout so scrollWidth reflects the rendered text.
+      requestAnimationFrame(() => {
+        const preview = node.parentElement?.parentElement; // inner -> label -> preview
+        const avail = (preview ? preview.clientWidth : PREV_W) - 2 * PREV_MARGIN;
+        const span = Math.max(0, Math.ceil(node.scrollWidth - avail));
+        marqueeSpan[p.idx] = span;
+        if (span <= 0) return;
+        const speed = p.speed > 0 ? p.speed : SCROLL_DEFAULT_SPEED;
+        const travel = (span / speed) * 1000;
+        const dur = 2 * (SCROLL_PAUSE_MS + travel);
+        anim = node.animate(
+          [
+            { transform: "translateX(0)", offset: 0 },
+            { transform: "translateX(0)", offset: SCROLL_PAUSE_MS / dur },
+            { transform: `translateX(${-span}px)`, offset: (SCROLL_PAUSE_MS + travel) / dur },
+            { transform: `translateX(${-span}px)`, offset: (2 * SCROLL_PAUSE_MS + travel) / dur },
+            { transform: "translateX(0)", offset: 1 },
+          ],
+          { duration: dur, iterations: Infinity, easing: "linear" },
+        );
+      });
+    }
+    apply(params);
+    return {
+      update(p: MarqueeParams) { apply(p); },
+      destroy() { stop(); },
+    };
+  }
 </script>
 
 <div class="tftlayout">
@@ -290,6 +344,19 @@
                 {#each availableFonts as f}<option value={f}>{f}</option>{/each}
               </select>
             </label>
+            <label class="chk" title="Scroll the text horizontally when it is too wide for the screen">Scroll
+              <input type="checkbox" bind:checked={e.scroll} />
+            </label>
+            {#if e.scroll}
+              <label title="Scroll speed in pixels per second">Speed
+                <input type="number" min="5" max="200" placeholder="40"
+                       value={e.scroll_speed ?? ""}
+                       oninput={(ev) => {
+                         const v = (ev.target as HTMLInputElement).value;
+                         e.scroll_speed = v === "" ? undefined : Number(v);
+                       }} />
+              </label>
+            {/if}
             <div class="grow"></div>
             <button class="tiny danger" onclick={() => removeEntry(i)} title="Remove">×</button>
           </div>
@@ -301,20 +368,24 @@
     <div class="previewWrap">
       <h3>Preview (240×240)</h3>
       <div class="preview" style="width: {PREV_W}px; height: {PREV_H}px;">
-        {#each layout as e (e)}
+        {#each layout as e, i (i)}
+          {@const scrolling = !!e.scroll && (marqueeSpan[i] ?? 0) > 0}
           {@const h = e.halign ?? "left"}
           {@const v = e.valign ?? "top"}
-          {@const baseX = h === "center" ? PREV_W/2 : (h === "right" ? PREV_W : 0)}
+          {@const baseX = scrolling ? PREV_MARGIN : (h === "center" ? PREV_W/2 : (h === "right" ? PREV_W : 0))}
           {@const baseY = v === "center" ? PREV_H/2 : (v === "bottom" ? PREV_H : 0)}
-          {@const tx = h === "center" ? "-50%" : (h === "right" ? "-100%" : "0")}
+          {@const tx = scrolling ? "0" : (h === "center" ? "-50%" : (h === "right" ? "-100%" : "0"))}
           {@const ty = v === "center" ? "-50%" : (v === "bottom" ? "-100%" : "0")}
           {@const boxH = (e.size ?? 1) * 12}
+          {@const offX = scrolling ? 0 : e.x}
           <div class="prevlabel"
-               style="left:{baseX + e.x}px; top:{baseY + e.y}px;
+               style="left:{baseX + offX}px; top:{baseY + e.y}px;
                       transform: translate({tx}, {ty});
                       color:{e.color}; font-size:{e.size * 9}px;
                       height:{boxH}px; line-height:{boxH}px;">
-            {previewText(e)}
+            <span class="marqueeInner"
+                  use:marquee={{ enabled: !!e.scroll, speed: e.scroll_speed ?? SCROLL_DEFAULT_SPEED,
+                                 text: previewText(e), size: e.size, idx: i }}>{previewText(e)}</span>
           </div>
         {/each}
       </div>
@@ -347,6 +418,8 @@
   .row { display: flex; gap: 0.55rem; align-items: end; margin-bottom: 0.4rem; flex-wrap: wrap; }
   .row:last-child { margin-bottom: 0; }
   label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.7rem; color: var(--text-muted); }
+  label.chk { align-items: center; }
+  label.chk input[type="checkbox"] { width: 16px; height: 16px; margin-top: 0.15rem; }
   input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
                   padding: 0.3rem 0.45rem; border-radius: 3px; font-size: 0.82rem; }
   input[type="number"] { width: 4.5rem; }
@@ -374,5 +447,6 @@
     outline: 1px dashed rgba(255, 255, 255, 0.25);
     outline-offset: 0;
   }
+  .marqueeInner { display: inline-block; white-space: nowrap; will-change: transform; }
   .prevhint { color: var(--text-dim); font-size: 0.72rem; margin: 0.4rem 0 0; max-width: 240px; }
 </style>

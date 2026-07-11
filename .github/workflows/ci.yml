@@ -1,0 +1,68 @@
+# Continuous integration for Bosun: the Tauri/Svelte editor and the
+# CircuitPython firmware. Runs on every push and pull request.
+#
+# Two independent jobs so an editor break and a firmware break are reported
+# separately:
+#   - editor:   svelte-check type-check + vitest unit tests (Node 20)
+#   - firmware: py_compile every module + the offline tools/*_test.py suites
+#               (Python 3.12, no hardware / no CircuitPython runtime needed)
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  editor:
+    name: Editor (svelte-check + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # Cache npm downloads keyed off the editor lockfile.
+          cache: npm
+          cache-dependency-path: editor/package-lock.json
+
+      # Clean, reproducible install from the lockfile.
+      - name: Install dependencies
+        working-directory: editor
+        run: npm ci
+
+      # svelte-check: the "check" script in editor/package.json.
+      - name: Type-check (svelte-check)
+        working-directory: editor
+        run: npm run check
+
+      # vitest: the "test" script in editor/package.json (vitest run).
+      - name: Unit tests (vitest)
+        working-directory: editor
+        run: npm test
+
+  firmware:
+    name: Firmware (py_compile + offline tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Byte-compile every firmware module. This catches syntax errors on
+      # code paths the offline tests never import. Fails the job on any error.
+      - name: Compile all firmware modules
+        run: |
+          python -m compileall -q firmware
+
+      # Run the full offline battery via the aggregator (single source of
+      # truth - keeps CI and `python tools/run_all_tests.py` in lockstep).
+      # It runs every suite and exits non-zero if any one fails, including the
+      # endurance soak test that guards against leaks over hours of use.
+      - name: Run firmware offline test battery
+        run: |
+          python tools/run_all_tests.py

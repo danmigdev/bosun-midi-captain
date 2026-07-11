@@ -254,6 +254,36 @@
 
   let onEnterExpanded = $state(false);
 
+  // ---------- on_exit (patch-leave macro) ----------
+  // Symmetric to on_enter: messages that fire when the user leaves this patch.
+
+  function ensureOnExit() {
+    if (!working.on_exit) working.on_exit = { messages: [] };
+    return working.on_exit;
+  }
+
+  function addOnExitMessage(msgType: string) {
+    const schema = typesByName[msgType];
+    if (!schema) return;
+    ensureOnExit().messages.push(defaultMessageFromSchema(msgType, schema));
+    persistPatch();
+  }
+
+  function removeOnExitMessage(idx: number) {
+    if (!working.on_exit) return;
+    working.on_exit.messages.splice(idx, 1);
+    persistPatch();
+  }
+
+  function changeOnExitMessageType(idx: number, newType: string) {
+    const schema = typesByName[newType];
+    if (!schema) return;
+    ensureOnExit().messages[idx] = defaultMessageFromSchema(newType, schema);
+    persistPatch();
+  }
+
+  let onExitExpanded = $state(false);
+
   // How many OTHER banks this (locked) slot links to. Drives the editor's
   // "edits propagate to N" hint and the page-header Save/Discard counts.
   let implicitCount = $derived.by<number>(() => {
@@ -367,6 +397,81 @@
           <button onclick={(e) => {
             const sel = (e.currentTarget as HTMLElement).previousElementSibling as HTMLSelectElement;
             addOnEnterMessage(sel.value);
+          }}>+ add message</button>
+        </div>
+      </div>
+    {/if}
+  </section>
+
+  <!-- on_exit macro: messages that fire automatically when this patch is left -->
+  <section class="on-enter">
+    <button class="onhead" onclick={() => onExitExpanded = !onExitExpanded}>
+      <span class="chevron">{onExitExpanded ? "▾" : "▸"}</span>
+      <span class="title">On exit</span>
+      <span class="hint">{working.on_exit?.messages?.length ?? 0} message{(working.on_exit?.messages?.length ?? 0) === 1 ? "" : "s"} fire when this patch is left</span>
+    </button>
+    {#if onExitExpanded}
+      <div class="onbody">
+        {#each (working.on_exit?.messages ?? []) as msg, mi}
+          <div class="msg">
+            <select value={msg.type}
+                    onchange={(e) => changeOnExitMessageType(mi, (e.target as HTMLSelectElement).value)}>
+              {#each allTypes as t}
+                <option value={t.type}>{t.source} · {t.label}</option>
+              {/each}
+            </select>
+            {#if typesByName[msg.type]}
+              {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
+                {#if paramVisible(param, msg)}
+                  <label class="param">
+                    <span>{param.label ?? pname}</span>
+                    {#if param.type === "int"}
+                      <input type="number" min={param.min} max={param.max}
+                             value={msg[pname] as number}
+                             oninput={(e) => {
+                               msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                               persistPatch();
+                             }} />
+                    {:else if param.type === "enum"}
+                      <select value={String(msg[pname])}
+                              onchange={(e) => {
+                                msg[pname] = coerce(param, (e.target as HTMLSelectElement).value);
+                                persistPatch();
+                              }}>
+                        {#each param.values ?? [] as v}
+                          <option value={String(v)}>{v}</option>
+                        {/each}
+                      </select>
+                    {:else if param.type === "bool"}
+                      <input type="checkbox"
+                             checked={Boolean(msg[pname])}
+                             onchange={(e) => {
+                               msg[pname] = (e.target as HTMLInputElement).checked;
+                               persistPatch();
+                             }} />
+                    {:else}
+                      <input value={String(msg[pname] ?? "")}
+                             oninput={(e) => {
+                               msg[pname] = (e.target as HTMLInputElement).value;
+                               persistPatch();
+                             }} />
+                    {/if}
+                  </label>
+                {/if}
+              {/each}
+            {/if}
+            <button class="rm" onclick={() => removeOnExitMessage(mi)} title="Remove">×</button>
+          </div>
+        {/each}
+        <div class="addmsg">
+          <select id="ox-add">
+            {#each allTypes as t}
+              <option value={t.type}>{t.source} · {t.label}</option>
+            {/each}
+          </select>
+          <button onclick={(e) => {
+            const sel = (e.currentTarget as HTMLElement).previousElementSibling as HTMLSelectElement;
+            addOnExitMessage(sel.value);
           }}>+ add message</button>
         </div>
       </div>

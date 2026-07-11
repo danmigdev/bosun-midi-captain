@@ -250,7 +250,9 @@ def _():
                     "auto_follow_effects": True, "auto_follow_rig": True},
     )
     kemper.on_midi_in("usb", 1, 0xB0, [31, 127], app)
-    assert app.context_updates == [{"kemper_tuner": "on"}]
+    # Publishes both the legacy kemper_tuner field and the generic `tuner`
+    # field the shared tuner screen keys off.
+    assert app.context_updates == [{"kemper_tuner": "on", "tuner": "on"}]
 
 
 @test("kemper: tuner CC 31 value 0 -> 'off'")
@@ -260,7 +262,7 @@ def _():
                     "auto_follow_effects": True, "auto_follow_rig": True},
     )
     kemper.on_midi_in("usb", 1, 0xB0, [31, 0], app)
-    assert app.context_updates == [{"kemper_tuner": "off"}]
+    assert app.context_updates == [{"kemper_tuner": "off", "tuner": "off"}]
 
 
 @test("kemper: wrong channel -> ignored entirely")
@@ -699,7 +701,8 @@ def _():
     )
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7F, 0x7E, 1), app)
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7F, 0x7E, 0), app)
-    assert app.context_updates == [{"kemper_tuner": "on"}, {"kemper_tuner": "off"}], app.context_updates
+    assert app.context_updates == [{"kemper_tuner": "on", "tuner": "on"},
+                                    {"kemper_tuner": "off", "tuner": "off"}], app.context_updates
 
 
 @test("kemper: SYSEX $01 tuner note page 0x7D addr 0x54 -> kemper_tuner_note")
@@ -712,7 +715,8 @@ def _():
     # value 60 % 12 = 0 -> 'C'; 69 % 12 = 9 -> 'A'
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7D, 0x54, 60), app)
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7D, 0x54, 69), app)
-    assert app.context_updates == [{"kemper_tuner_note": "C"}, {"kemper_tuner_note": "A"}], app.context_updates
+    assert app.context_updates == [{"kemper_tuner_note": "C", "tuner_note": "C"},
+                                    {"kemper_tuner_note": "A", "tuner_note": "A"}], app.context_updates
 
 
 @test("kemper: SYSEX $01 tuner deviance page 0x7C addr 0x0F -> kemper_tuner_deviance")
@@ -723,7 +727,7 @@ def _():
                     "auto_follow_effects": True, "auto_follow_rig": True},
     )
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7C, 0x0F, 8192), app)
-    assert app.context_updates == [{"kemper_tuner_deviance": 8192}], app.context_updates
+    assert app.context_updates == [{"kemper_tuner_deviance": 8192, "tuner_deviance": 8192}], app.context_updates
 
 
 @test("kemper: sensing $7E publishes kemper_connected='on', subsequent sensings de-duped")

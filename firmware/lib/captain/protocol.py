@@ -514,6 +514,7 @@ class Protocol:
         pid  = msg.get("profile_id") or msg.get("id")
         name = msg.get("name") or pid
         kind = msg.get("kind") or "unknown"
+        color = msg.get("color")
         # Seed the new profile with the matching plugin's default layout.
         # If no plugin matches the kind (e.g. "other"), default_layout is [].
         layout = []
@@ -522,7 +523,7 @@ class Protocol:
         except Exception:
             pass
         try:
-            config.create_profile(pid, name, kind, default_layout=layout)
+            config.create_profile(pid, name, kind, default_layout=layout, color=color)
         except Exception as e:
             self._send({"type": "ERROR", "id": mid, "error": "create_profile", "detail": str(e)})
             return

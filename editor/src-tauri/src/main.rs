@@ -20,7 +20,6 @@ fn main() {
             serial::is_connected,
             serial::drain_inbox,
             serial::reboot_to_bootloader,
-            installer::debug_log,
             installer::detect_pedal,
             installer::flash_circuitpython,
             installer::install_firmware,
