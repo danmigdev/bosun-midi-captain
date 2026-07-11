@@ -19,6 +19,12 @@
   } from "../lib/protocol";
   import { defaultLedFor } from "../lib/switch-colors";
   import { resolveLinkedPatches, isSlotLocked, retargetOnEnterBank, type LinkConfig } from "../lib/patch-links";
+  import PedalMap from "./PedalMap.svelte";
+  import HelpTip from "./HelpTip.svelte";
+  import { MODE_HELP } from "../lib/help-text";
+  import { loadLayout, saveLayout, type PedalLayout } from "../lib/pedal-layout";
+  import { listSnippets, saveSnippet, bindingFromSnippet, type Snippet } from "../lib/snippets";
+  import { History } from "../lib/undo-stack";
 
   type Props = {
     bank: number;
@@ -86,6 +92,7 @@
     cmd.putPatch(bank, slot, working);
     propagatePatch();
     cmd.getPatch(bank, slot).catch(() => {});
+    snapshotHistory();
   }
 
   // Filtered manifest: drop plugins that don't match the active profile's
@@ -118,10 +125,51 @@
   // precisely when we want to adopt it.
   let working = $state<Patch>(untrack(() => structuredClone($state.snapshot(patch) as Patch)));
   let lastPatchRef = $state<Patch | null>(null);
+
+  // ---- Undo/redo: whole-patch snapshots, reset only when navigating to a
+  // different (bank,slot). Same-patch re-syncs (our own save round-trips) keep
+  // the history intact. Purely additive: existing edit handlers are unchanged;
+  // they just also push a snapshot, and undo/redo push a restored patch. ----
+  const history = new History<Patch>(untrack(() => $state.snapshot(patch) as Patch));
+  let lastKey = untrack(() => `${bank}/${slot}`);
+  let applyingHistory = false;
+  let canUndo = $state(false);
+  let canRedo = $state(false);
+  function refreshHistoryFlags() { canUndo = history.canUndo(); canRedo = history.canRedo(); }
+  function snapshotHistory() {
+    if (applyingHistory) return;
+    try { history.push($state.snapshot(working) as Patch); refreshHistoryFlags(); } catch { /* ignore */ }
+  }
+  function applyHistory(state: Patch | null) {
+    if (!state) return;
+    applyingHistory = true;
+    working = structuredClone(state);
+    cmd.putPatch(bank, slot, working);
+    propagatePatch();
+    applyingHistory = false;
+    refreshHistoryFlags();
+  }
+  function undoEdit() { applyHistory(history.undo()); }
+  function redoEdit() { applyHistory(history.redo()); }
+  function onGlobalKey(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const tgt = e.target as HTMLElement | null;
+    if (tgt && /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName)) return;  // don't hijack field editing
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) { e.preventDefault(); undoEdit(); }
+    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redoEdit(); }
+  }
+
   $effect(() => {
     if (patch !== lastPatchRef) {
       working = structuredClone($state.snapshot(patch) as Patch);
       lastPatchRef = patch;
+      const key = `${bank}/${slot}`;
+      if (key !== lastKey) {
+        history.reset($state.snapshot(working) as Patch);
+        refreshHistoryFlags();
+        lastKey = key;
+      }
     }
   });
 
@@ -170,6 +218,7 @@
   function commit(b: Binding, debounceKey?: string) {
     if (debounceKey) debouncedPutBinding(bank, slot, b, debounceKey);
     else cmd.putBinding(bank, slot, b);
+    if (!debounceKey) snapshotHistory();   // structural edits only (not per-keystroke)
     // Auto-propagation: every binding edit also lands on every linked
     // target. We don't debounce the propagation itself - the editor
     // already debounces the source write for keystrokes, and by the
@@ -312,9 +361,66 @@
   }
 
   const MODES: BindingMode[] = ["tap","latched","momentary","long_press_alt","double_tap"];
+
+  // ---- Pedal map: a spatial, user-arrangeable view of the 10 switches.
+  // The layout is the user's own arrangement (no fixed physical grid),
+  // persisted in localStorage. Clicking a switch selects + expands its row. ----
+  let pedalLayout = $state<PedalLayout>(loadLayout());
+  let editLayout = $state(false);
+  let selectedSwitch = $state<string | null>(null);
+  function onLayoutChange(next: PedalLayout) { pedalLayout = next; saveLayout(next); }
+  function selectSwitch(sw: string) {
+    selectedSwitch = sw;
+    const next = new Set(expanded); next.add(sw); expanded = next;
+    queueMicrotask(() => {
+      try { document.getElementById(`swrow-${sw}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch { /* ignore */ }
+    });
+  }
+
+  // ---- Snippets: save a configured switch and reuse it on any switch/patch. ----
+  let snippets = $state<Snippet[]>(listSnippets());
+  function refreshSnippets() { snippets = listSnippets(); }
+  function saveSwitchAsSnippet(b: Binding) {
+    const name = (b.label && b.label.trim()) || `Switch ${b.switch}`;
+    try {
+      saveSnippet(name, $state.snapshot(b) as Binding);
+      refreshSnippets();
+      window.dispatchEvent(new CustomEvent("bosun-toast", { detail: { level: "ok", message: `Saved snippet "${name}"` } }));
+    } catch { /* ignore */ }
+  }
+  function pasteSnippet(sw: string, id: string) {
+    const s = snippets.find(x => x.id === id);
+    if (!s) return;
+    const nb = bindingFromSnippet(s, sw);
+    const idx = working.bindings.findIndex(b => b.switch === sw);
+    if (idx >= 0) working.bindings[idx] = nb; else working.bindings.push(nb);
+    persistPatch();
+    const next = new Set(expanded); next.add(sw); expanded = next;
+  }
 </script>
 
+<svelte:window onkeydown={onGlobalKey} />
+
 <section class="patch">
+  <div class="editor-toolbar">
+    <div class="undoredo">
+      <button type="button" onclick={undoEdit} disabled={!canUndo} title="Undo (Ctrl+Z)">↶ Undo</button>
+      <button type="button" onclick={redoEdit} disabled={!canRedo} title="Redo (Ctrl+Y)">↷ Redo</button>
+    </div>
+  </div>
+
+  <section class="pedalmap-wrap">
+    <div class="pmhead">
+      <span class="pmtitle">Pedal map</span>
+      <label class="pmedit" title="Drag the switches to arrange the map however you like">
+        <input type="checkbox" bind:checked={editLayout} /> arrange
+      </label>
+    </div>
+    <PedalMap bindings={working.bindings} selected={selectedSwitch}
+              onSelect={selectSwitch} layout={pedalLayout}
+              editable={editLayout} onLayoutChange={onLayoutChange} />
+  </section>
+
   <header class="patchhead">
     <label class="patchname">
       Patch name
@@ -504,7 +610,7 @@
   <ul class="bindings">
     {#each SWITCH_ORDER as sw}
       {@const b = bindingFor(sw)}
-      <li class:expanded={expanded.has(sw)}>
+      <li id={`swrow-${sw}`} class:expanded={expanded.has(sw)} class:selected={selectedSwitch === sw}>
         <button class="bindinghead" onclick={() => toggle(sw)}>
           <span class="sw">{sw}</span>
           {#if b}
@@ -522,6 +628,16 @@
 
         {#if expanded.has(sw) && !b}
           <div class="bindingbody emptybody">
+            {#if snippets.length > 0}
+              <select class="paste-select" title="Apply a saved snippet to this switch"
+                      onchange={(e) => {
+                        const el = e.target as HTMLSelectElement;
+                        if (el.value) { pasteSnippet(sw, el.value); el.value = ""; }
+                      }}>
+                <option value="">Paste snippet…</option>
+                {#each snippets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+              </select>
+            {/if}
             <button onclick={() => createBinding(sw)}>+ Create binding</button>
           </div>
         {/if}
@@ -529,7 +645,7 @@
           <div class="bindingbody">
             <div class="row">
               <label>
-                Mode
+                <span class="lbl-with-help">Mode <HelpTip text={MODE_HELP[b.mode]} label="About this switch mode" /></span>
                 <select bind:value={b.mode}
                         onchange={() => changeMode(b, b.mode)}>
                   {#each MODES as m}<option value={m}>{m}</option>{/each}
@@ -644,6 +760,11 @@
             {/each}
 
             <div class="bindingfoot">
+              <button class="snippet-save"
+                      onclick={() => saveSwitchAsSnippet(b)}
+                      title="Save this switch's configuration to your snippet library for reuse on other switches or patches">
+                Save as snippet
+              </button>
               <button class="unbind"
                       onclick={() => unbind(sw)}
                       title="Remove this binding entirely. The LED turns off and the switch becomes inert until you create a new binding.">
@@ -704,7 +825,12 @@
   .chevron { color: var(--text-dim); font-size: 0.7rem; width: 1rem; text-align: right; }
   .bindingbody { padding: 0.5rem 0.75rem 0.75rem; border-top: 1px solid var(--border); }
   .bindingbody.emptybody { display: flex; align-items: center; justify-content: flex-end; }
-  .bindingfoot { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+  .bindingfoot { display: flex; justify-content: space-between; gap: 0.5rem; margin-top: 0.5rem; }
+  .bindingfoot .snippet-save {
+    background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text-muted);
+    padding: 0.3rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.78rem;
+  }
+  .bindingfoot .snippet-save:hover { border-color: var(--accent-border); color: var(--accent); background: var(--accent-bg); }
   .bindingfoot .unbind {
     background: transparent; border: 1px solid var(--err-border); color: var(--err);
     padding: 0.3rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.78rem;
@@ -726,4 +852,33 @@
   .addmsg { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
   .addmsg button { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); padding: 0.25rem 0.5rem; cursor: pointer; border-radius: 3px; font-size: 0.8rem; }
   .addmsg button:hover { background: var(--accent-hover-bg); }
+
+  /* Undo/redo toolbar */
+  .editor-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+  .undoredo { display: flex; gap: 0.35rem; }
+  .undoredo button {
+    background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border-strong);
+    padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.78rem; font-family: inherit;
+  }
+  .undoredo button:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); background: var(--bg-elevated); }
+  .undoredo button:disabled { opacity: 0.4; cursor: default; }
+
+  /* Pedal map */
+  .pedalmap-wrap { background: var(--bg-hover); border-radius: 6px; padding: 0.4rem 0.5rem 0.5rem; margin-bottom: 0.75rem; }
+  .pmhead { display: flex; align-items: center; justify-content: space-between; padding: 0.15rem 0.3rem 0.3rem; }
+  .pmtitle { font-size: 0.78rem; font-weight: 600; color: var(--accent); }
+  .pmedit { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; color: var(--text-muted); cursor: pointer; }
+
+  /* Inline help affordance next to a field label */
+  .lbl-with-help { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+  /* Snippet paste dropdown on an empty switch */
+  .emptybody { gap: 0.5rem; }
+  .paste-select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
+    padding: 0.25rem 0.4rem; border-radius: 3px; font-size: 0.8rem;
+  }
+
+  /* Selected switch row (from the pedal map) */
+  ul.bindings li.selected { box-shadow: inset 0 0 0 1px var(--accent-border); }
 </style>

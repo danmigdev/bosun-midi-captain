@@ -20,6 +20,7 @@
   import PluginRecipe from "./components/PluginRecipe.svelte";
   import ProfilePicker from "./components/ProfilePicker.svelte";
   import TftLayout from "./components/TftLayout.svelte";
+  import QuickSetup from "./components/QuickSetup.svelte";
   import {
     autoConnect,
     cmd,
@@ -39,6 +40,7 @@
     type Manifest,
     type MidiInCapturedEvent,
     type MidiLearnTable,
+    type Binding,
     type Patch,
     type PatchSummary,
     type PortInfo,
@@ -985,10 +987,29 @@
   // the manifest. A nav item can declare a `kind` to be shown only when
   // the matching plugin is the active profile; plugin recipe items
   // inherit their kind from the plugin id.
+  // The 10 physical switches, in firmware order. Passed to QuickSetup so the
+  // user can assign recipe roles to switches.
+  const SWITCH_NAMES = ["1","2","3","4","up","A","B","C","D","down"];
+
+  // Apply a recipe's generated bindings to the currently-open patch. Each
+  // binding is written straight to the firmware, then we re-read the patch and
+  // refresh the list so the editor and grid reflect the new switches.
+  function applyRecipeBindings(bindings: Binding[]) {
+    if (!currentPatch) return;
+    const { bank, slot } = currentPatch;
+    for (const b of bindings) cmd.putBinding(bank, slot, b);
+    cmd.getPatch(bank, slot);
+    cmd.listPatches();
+    window.dispatchEvent(new CustomEvent("bosun-toast", {
+      detail: { level: "ok", message: `Applied ${bindings.length} binding${bindings.length === 1 ? "" : "s"}` },
+    }));
+  }
+
   const CORE_NAV: Array<{ id: Page; label: string; icon: string; kind?: string }> = [
     { id: "home",     label: "Home",        icon: "⌂" },
     { id: "patches",  label: "Patches",     icon: "▣" },
     { id: "editor",   label: "Editor",      icon: "✎" },
+    { id: "quicksetup", label: "Quick setup", icon: "✦" },
     { id: "learn",    label: "MIDI Learn",  icon: "↻" },
     { id: "tft",      label: "Screen layout",  icon: "▭" },
     { id: "settings", label: "Settings",    icon: "⚙" },
@@ -1303,6 +1324,26 @@
             <p class="muted">Loading patch {deviceInfo.bank}/{deviceInfo.slot}…</p>
           {:else}
             <p class="muted">Pick a patch from the Patches tab to edit.</p>
+          {/if}
+
+        {:else if page === "quicksetup"}
+          <header class="pageHead">
+            <h2>Quick setup</h2>
+          </header>
+          {#if currentPatch && manifest}
+            <p class="muted" style="margin:0 0 0.75rem">
+              Guided setups for {patchIdOf(currentPatch.bank, currentPatch.slot)} · {currentPatch.patch.name || "(unnamed)"}. Pick which switches to use and the bindings are written for you - no need to know the MIDI messages.
+            </p>
+            <QuickSetup
+              switches={SWITCH_NAMES}
+              {manifest}
+              {activeKind}
+              existing={currentPatch.patch.bindings}
+              onApply={applyRecipeBindings}
+            />
+          {:else}
+            <p class="muted">Open a patch first (from the Patches tab) to run a quick setup on it.</p>
+            <div class="row toolbar"><button class="primary" onclick={() => page = "patches"}>Open Patches</button></div>
           {/if}
 
         {:else if page === "learn"}

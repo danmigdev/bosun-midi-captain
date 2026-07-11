@@ -7,6 +7,7 @@
     type PatchSummary,
     type Manifest,
   } from "../lib/protocol";
+  import DeviceMirror from "./DeviceMirror.svelte";
 
   type Props = {
     connected: boolean;
@@ -26,6 +27,12 @@
 
   let stats = $state<DeviceStats | null>(null);
   let statsTimer: ReturnType<typeof setInterval> | null = null;
+  // Timestamp of the last observed MIDI activity (rx/tx count change between
+  // polls), so the live mirror can pulse. Coarse (5s poll) but enough to show
+  // the pedal is talking.
+  let lastActivityMs = $state<number | null>(null);
+  let prevRx = -1;
+  let prevTx = -1;
 
   onMount(() => { if (connected) startPoll(); });
   onDestroy(() => stopPoll());
@@ -40,8 +47,14 @@
     if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   }
   async function pollOnce() {
-    try { stats = await cmd.getStats(); }
-    catch { /* ignore poll errors */ }
+    try {
+      const s = await cmd.getStats();
+      if (prevRx >= 0 && (s.midi_rx_count !== prevRx || s.midi_tx_count !== prevTx)) {
+        lastActivityMs = Date.now();
+      }
+      prevRx = s.midi_rx_count; prevTx = s.midi_tx_count;
+      stats = s;
+    } catch { /* ignore poll errors */ }
   }
 
   function humanMs(ms: number): string {
@@ -153,6 +166,15 @@
         <p class="muted small">Connect to see what's loaded.</p>
       {/if}
     </div>
+
+    <!-- Live device mirror -->
+    <DeviceMirror
+      {connected}
+      current={deviceInfo ? { bank: deviceInfo.bank, slot: deviceInfo.slot } : null}
+      patchName={activePatch?.name ?? ""}
+      {lastActivityMs}
+      {stats}
+    />
 
     <!-- Quick actions card -->
     <div class="card quick">
