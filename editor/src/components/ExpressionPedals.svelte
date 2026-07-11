@@ -32,7 +32,7 @@
   // Same pattern as Dashboard.svelte: poll STATS on an interval while the
   // section is mounted and the pedal is connected. The response carries
   // per-jack raw (0..65535) + calibrated value (0..127) we render as bars.
-  let live = $state<Record<number, { raw: number; value: number }>>({});
+  let live = $state<Record<number, { raw: number; value: number; armed?: boolean; present?: boolean }>>({});
   let statsTimer: ReturnType<typeof setInterval> | null = null;
 
   onMount(() => { if (connected) startPoll(); });
@@ -50,14 +50,27 @@
   async function pollOnce() {
     try {
       const s = await cmd.getStats();
-      const next: Record<number, { raw: number; value: number }> = {};
-      for (const e of s.expression ?? []) next[e.jack] = { raw: e.raw, value: e.value };
+      const next: Record<number, { raw: number; value: number; armed?: boolean; present?: boolean }> = {};
+      for (const e of s.expression ?? []) next[e.jack] = { raw: e.raw, value: e.value, armed: e.armed, present: e.present };
       live = next;
     } catch { /* ignore poll errors - firmware may lack expression support */ }
   }
 
   function liveFor(jack: number) {
     return live[jack] ?? null;
+  }
+
+  /** Auto-detected status badge for an enabled jack, driven by the firmware's
+   * presence probe + arming (STATS.expression). Returns null when there's
+   * nothing useful to show (disabled, disconnected, or older firmware that
+   * doesn't report present/armed). */
+  function detectStatus(exp: ExpressionConfig): { text: string; kind: string } | null {
+    if (!exp.enabled || !connected) return null;
+    const l = liveFor(exp.jack);
+    if (!l || l.present === undefined) return null;   // fw without detection
+    if (l.present === false) return { text: "no pedal detected", kind: "absent" };
+    if (l.armed === false) return { text: "move pedal to activate", kind: "waiting" };
+    return { text: "active", kind: "active" };
   }
 
   // Position 0..1 of the raw reading between the configured min/max, for the
@@ -122,6 +135,10 @@
           <input type="checkbox" bind:checked={exp.invert} />
           invert
         </label>
+        {#if detectStatus(exp)}
+          {@const st = detectStatus(exp)}
+          <span class="detect {st?.kind}" title="Auto-detected from the pedal: no external plug-detect, sensed electrically">{st?.text}</span>
+        {/if}
         <span class="grow"></span>
         <label class="curve">curve
           <select bind:value={exp.curve}>
@@ -190,6 +207,14 @@
   }
   .cb { flex-direction: row !important; align-items: center; gap: 0.35rem; color: var(--text); font-size: 0.8rem; }
   .curve { flex-direction: row !important; align-items: center; gap: 0.4rem; }
+
+  .detect {
+    font-size: 0.68rem; padding: 0.15rem 0.45rem; border-radius: 3px;
+    border: 1px solid var(--border-strong); white-space: nowrap;
+  }
+  .detect.absent  { color: var(--warn-text); border-color: var(--warn-text); }
+  .detect.waiting { color: var(--text-muted); }
+  .detect.active  { color: var(--accent); border-color: var(--accent); }
 
   .calibrate { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
   .bar {

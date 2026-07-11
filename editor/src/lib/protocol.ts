@@ -331,8 +331,11 @@ export interface DeviceStats {
   current: { bank: number; slot: number };
   /** Live expression-jack readings (firmware 0.4.x+). `raw` is the ADC value
    * 0..65535; `value` is the calibrated 0..127 the firmware would send. Absent
-   * on firmware without expression support. */
-  expression?: Array<{ jack: number; raw: number; value: number }>;
+   * on firmware without expression support. `armed` is false until the input
+   * has moved (so a bare/parked jack sends nothing); `present` is false when
+   * the presence probe finds no pedal plugged - both optional for older fw. */
+  expression?: Array<{ jack: number; raw: number; value: number;
+                       armed?: boolean; present?: boolean }>;
 }
 
 export interface MidiLearnEntry {
