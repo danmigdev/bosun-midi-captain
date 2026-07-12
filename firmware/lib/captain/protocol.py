@@ -427,7 +427,27 @@ class Protocol:
                     first_field = False
                     w(json.dumps(k).encode())
                     w(b':')
-                    w(json.dumps(v).encode())
+                    if isinstance(v, dict):
+                        # Stream a big field value one entry at a time so peak
+                        # allocation is a single sub-entry, not the whole dict.
+                        # json.dumps of a large field (notably kemper's
+                        # "messages" MESSAGE_TYPES) can MemoryError on the RP2040
+                        # once other code has raised the baseline heap use - it
+                        # truncated the manifest mid-stream, leaving the editor
+                        # with "core MIDI only". One key/value per gc is frugal.
+                        w(b'{')
+                        first_sub = True
+                        for sk, sv in v.items():
+                            w(b'' if first_sub else b',')
+                            first_sub = False
+                            w(json.dumps(sk).encode())
+                            w(b':')
+                            w(json.dumps(sv).encode())
+                            sv = None
+                            gc.collect()
+                        w(b'}')
+                    else:
+                        w(json.dumps(v).encode())
                     v = None
                     gc.collect()
                 w(b'}')
