@@ -128,6 +128,10 @@ class FakeApp:
         self.midi_learn_table = {"pc_to_patch": [{"channel": 1, "bank_msb": 0, "pc": 0, "bank": 1, "slot": 1}]}
         self.patches = _FakePatchStore()
         self.plugins = _FakePluginRegistry()
+        self.midi_monitor_calls = []
+
+    def set_midi_monitor(self, on):
+        self.midi_monitor_calls.append(bool(on))
 
     def stats(self):
         return {"uptime_ms": 1234, "loop_iters": 5}
@@ -350,6 +354,26 @@ def _():
     assert resp["type"] == "ACK", resp
     assert resp["id"] == "x", resp
     assert "fw" in resp, resp
+
+
+@test("handle: SET_MIDI_MONITOR on -> app toggled + ACK on:true")
+def _():
+    port = FakePort()
+    p, _ = build_protocol(port)
+    p.handle({"type": "SET_MIDI_MONITOR", "id": "m1", "on": True})
+    resp = json.loads(bytes(port.written).strip())
+    assert resp == {"type": "ACK", "id": "m1", "on": True}, resp
+    assert p.app.midi_monitor_calls == [True], p.app.midi_monitor_calls
+
+
+@test("handle: SET_MIDI_MONITOR missing/false 'on' -> off, ACK on:false")
+def _():
+    port = FakePort()
+    p, _ = build_protocol(port)
+    p.handle({"type": "SET_MIDI_MONITOR", "id": "m2"})   # no 'on' -> falsey
+    resp = json.loads(bytes(port.written).strip())
+    assert resp == {"type": "ACK", "id": "m2", "on": False}, resp
+    assert p.app.midi_monitor_calls == [False], p.app.midi_monitor_calls
 
 
 @test("handle: unknown_type -> ERROR with original 'of' field")

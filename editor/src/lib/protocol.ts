@@ -397,6 +397,13 @@ export type FirmwareMessage =
   | ({ type: "STATS"; id?: string } & DeviceStats)
   | { type: "PROFILE_LIST"; id?: string; profiles: ProfileInfo[]; active: string }
   | { type: "FONT_LIST"; id?: string; fonts: string[] }
+  // Current rig name (and best-effort colour) read from a device that can
+  // report it (Kemper). `name` is the live rig name ("" if the device hasn't
+  // broadcast one yet). `rig` is the flat rig index 1..125 the name belongs to
+  // (null if unknown). `color` is a POSITION colour hint (the device does not
+  // report a real per-rig colour) - may be null. `fresh` is true when the name
+  // is tagged to the rig the device is currently on.
+  | { type: "RIG_INFO"; id?: string; name: string; rig: number | null; color: string | null; fresh: boolean }
   | { type: "EVENT"; event: string; [k: string]: unknown };
 
 
@@ -696,6 +703,22 @@ export const cmd = {
   // ----- fonts -----
   listFonts:      () => sendAndAwait<{ type: "FONT_LIST"; fonts: string[] }>(
                           { type: "LIST_FONTS" }, 3000),
+
+  // ----- device rig info (Kemper) -----
+  // Read the current rig name (and best-effort position colour) from a device
+  // that can report it. Routes to the active plugin on the firmware; ERRORs
+  // ("no_rig_info") when the active profile has no such device. `request` asks
+  // the device to refresh; pass false to read only the firmware's cache.
+  getRigInfo:     (request = true) =>
+                    sendAndAwait<{ type: "RIG_INFO"; name: string; rig: number | null; color: string | null; fresh: boolean }>(
+                      { type: "GET_RIG_INFO", request }, 3000),
+
+  // ----- MIDI monitor -----
+  // Stream inbound/outbound MIDI to the editor as "midi" EVENTs. Gated: the
+  // firmware only emits while this is on, so it stays off during normal use
+  // and is enabled just while the monitor panel is open.
+  setMidiMonitor: (on: boolean) => sendAndAwait<{ type: "ACK"; on: boolean }>(
+                          { type: "SET_MIDI_MONITOR", on }, 3000),
 };
 
 export function patchIdOf(bank: number, slot: number): string {

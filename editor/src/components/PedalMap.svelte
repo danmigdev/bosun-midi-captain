@@ -5,31 +5,30 @@
     DEFAULT_LAYOUT,
     labelForSwitch,
     isBound,
-    moveSwitch,
-    type PedalLayout,
   } from "../lib/pedal-layout";
 
   let {
     bindings,
     selected = null,
     onSelect,
+    onPress,
+    onRelease,
     colorFor,
-    layout,
-    editable = false,
-    onLayoutChange,
   }: {
     bindings: Binding[];
     selected?: string | null;
-    onSelect: (sw: string) => void;
+    /** Click handler (used by the editor to jump to a switch row). Optional so
+     *  the simulator can reuse this map purely for press/release. */
+    onSelect?: (sw: string) => void;
+    /** Press/release taps for the pedal simulator (pointer down / up). When
+     *  omitted (the editor's normal use) the map is click-to-select only. */
+    onPress?: (sw: string) => void;
+    onRelease?: (sw: string) => void;
     colorFor?: (sw: string) => string;
-    layout?: PedalLayout;
-    editable?: boolean;
-    onLayoutChange?: (layout: PedalLayout) => void;
   } = $props();
 
-  // The layout to render. Makes NO assumption about physical positions -
-  // whatever the user (or the default) describes is exactly what we draw.
-  let view = $derived<PedalLayout>(layout ?? DEFAULT_LAYOUT);
+  // The switches are drawn in a fixed schematic layout.
+  const view = DEFAULT_LAYOUT;
 
   /** LED color for a switch, in priority order:
    *  1. an explicit colorFor(sw) override,
@@ -41,50 +40,6 @@
     return b?.led?.on ?? defaultLedFor(sw);
   }
 
-  // ---- drag-and-drop reordering (only when editable) ----
-  // Track the dragged switch and whether a drag actually happened, so a plain
-  // click (no drag) still fires onSelect rather than being swallowed.
-  let dragging = $state<string | null>(null);
-  let didDrag = false;
-
-  function onDragStart(e: DragEvent, sw: string) {
-    if (!editable) return;
-    dragging = sw;
-    didDrag = true;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      // Some browsers require data to be set for a drag to start.
-      try { e.dataTransfer.setData("text/plain", sw); } catch { /* ignore */ }
-    }
-  }
-
-  function onDragEnd() {
-    dragging = null;
-    // Clear the flag on the next tick so the click that follows a real drag
-    // is suppressed, but an ordinary click still registers.
-    setTimeout(() => { didDrag = false; }, 0);
-  }
-
-  function onDragOver(e: DragEvent) {
-    if (!editable || dragging === null) return;
-    e.preventDefault(); // allow drop
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-  }
-
-  function onDrop(e: DragEvent, toRow: number, toCol: number) {
-    if (!editable || dragging === null) return;
-    e.preventDefault();
-    const sw = dragging;
-    dragging = null;
-    const next = moveSwitch(view, sw, toRow, toCol);
-    onLayoutChange?.(next);
-  }
-
-  function onCellClick(sw: string) {
-    // Ignore the synthetic click that fires at the end of a real drag.
-    if (didDrag) { didDrag = false; return; }
-    onSelect(sw);
-  }
 </script>
 
 <div class="pedalmap" role="group" aria-label="Pedal switch map">
@@ -92,12 +47,7 @@
     <div class="row">
       {#each row as sw, c (`${r}:${c}:${sw}`)}
         {#if sw === ""}
-          <div
-            class="cell spacer"
-            role="presentation"
-            ondragover={onDragOver}
-            ondrop={(e) => onDrop(e, r, c)}
-          ></div>
+          <div class="cell spacer" role="presentation"></div>
         {:else}
           {@const bound = isBound(bindings, sw)}
           {@const label = labelForSwitch(bindings, sw)}
@@ -106,16 +56,12 @@
             class="cell stomp"
             class:bound
             class:selected={selected === sw}
-            class:dragging={dragging === sw}
-            class:editable
             aria-pressed={selected === sw}
             aria-label={`Switch ${sw}${label ? ` - ${label}` : ""}${bound ? "" : " (empty)"}`}
-            draggable={editable}
-            ondragstart={(e) => onDragStart(e, sw)}
-            ondragend={onDragEnd}
-            ondragover={onDragOver}
-            ondrop={(e) => onDrop(e, r, c)}
-            onclick={() => onCellClick(sw)}
+            onclick={() => onSelect?.(sw)}
+            onpointerdown={onPress ? () => onPress(sw) : undefined}
+            onpointerup={onRelease ? () => onRelease(sw) : undefined}
+            onpointerleave={onRelease ? () => onRelease(sw) : undefined}
           >
             <span class="led" style={`--led:${ledColor(sw)}`} aria-hidden="true"></span>
             <span class="name">{sw}</span>
@@ -128,10 +74,6 @@
     </div>
   {/each}
 </div>
-
-{#if editable}
-  <p class="hint">Drag switches to rearrange the map. Your layout is saved automatically.</p>
-{/if}
 
 <style>
   .pedalmap {
@@ -181,13 +123,6 @@
   .stomp:hover {
     border-color: var(--border-strong);
     color: var(--text);
-  }
-  .stomp.editable {
-    cursor: grab;
-  }
-  .stomp.dragging {
-    opacity: 0.4;
-    cursor: grabbing;
   }
 
   /* Unbound switches read as empty/dimmed. */
@@ -245,13 +180,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .hint {
-    margin: 0.5rem 0 0;
-    text-align: center;
-    color: var(--text-dim);
-    font-size: 0.72rem;
   }
 
   @media (max-width: 420px) {

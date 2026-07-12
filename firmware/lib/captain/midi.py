@@ -96,6 +96,14 @@ class MidiEngine:
         self.uart = busio.UART(tx=UART_TX, rx=UART_RX, baudrate=31250, timeout=0)
         self._din_parser = MidiParser()
         self._usb_parser = MidiParser()
+        # Optional outbound tap for the editor's MIDI monitor. When set to a
+        # callable it is invoked with the raw framed bytes of every message we
+        # send (channel-voice or full F0..F7 SYSEX). None (the default) means no
+        # monitor is attached, so the common case pays only one attribute test.
+        # Gated on purpose: emitting one event per outbound message would add
+        # loop work and CDC traffic during a burst, so the app only wires this
+        # while the monitor panel is open.
+        self.tx_monitor = None
 
     # ------------- outbound ----------------
 
@@ -135,6 +143,11 @@ class MidiEngine:
 
     def _tx(self, data):
         self.tx_count = getattr(self, "tx_count", 0) + 1
+        if self.tx_monitor is not None:
+            try:
+                self.tx_monitor(data)
+            except Exception:
+                pass                              # monitor must never break TX
         if self.usb_out is not None:
             self._tx_usb(data)
         try:

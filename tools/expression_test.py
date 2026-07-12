@@ -125,6 +125,82 @@ from captain.expression import (  # noqa: E402
     ExpressionArray, _Jack, _POLL_INTERVAL_MS, _PRESENCE_INTERVAL_MS)
 
 
+# ---------------- import the per-patch merge helper from app.py ----------------
+# The merge lives on captain.app.Captain (_expression_for_patch). Importing that
+# module pulls in the whole firmware surface (display/board/leds/midi/...), which
+# needs CircuitPython. We only want the two pure merge methods, so we stub every
+# heavy submodule of `captain` with an empty module exposing the names app.py
+# imports, then import app and bind the unbound methods to a tiny stub object
+# whose only real attribute is `.device`. No hardware, no instances built.
+
+class _ExprMergeStub:
+    """Minimal stand-in for Captain: carries a device config and reuses the real
+    _expression_for_patch / _copy_expression_jack methods bound off the class."""
+    def __init__(self, device):
+        self.device = device
+
+
+def _load_expression_merge():
+    import importlib
+
+    def _stub(modname, **attrs):
+        m = types.ModuleType(modname)
+        for k, v in attrs.items():
+            setattr(m, k, v)
+        sys.modules[modname] = m
+        return m
+
+    class _Any:
+        """A callable/attr-tolerant placeholder for names app.py imports at the
+        top level (classes it references only inside methods we never call)."""
+        def __init__(self, *a, **k):
+            pass
+
+        def __getattr__(self, _n):
+            return _Any()
+
+    # captain package itself is real (expression imported above), but app.py
+    # imports a handful of siblings we don't need. Stub the heavy ones.
+    _stub("captain.board", LED_INDEX_PER_SWITCH={})
+    _stub("captain.bindings", BindingRunner=_Any, SwitchArray=_Any)
+    _stub("captain.display", Display=_Any)
+    _stub("captain.leds", Leds=_Any, parse_hex=lambda *_a, **_k: (0, 0, 0))
+    _stub("captain.midi", MidiEngine=_Any)
+    _stub("captain.plugin", PluginRegistry=_Any)
+    _stub("captain.protocol", Protocol=_Any)
+    _stub("captain.store", PatchStore=_Any)
+    _stub("captain.config", load_device=lambda: {}, load_midi_learn=lambda: {},
+          list_profiles=lambda: [], save_device=lambda *_a, **_k: None)
+    app = importlib.import_module("captain.app")
+    return app.Captain
+
+
+_Captain = _load_expression_merge()
+
+
+def _merge(device_expr, patch):
+    """Run Captain._expression_for_patch against a stub whose device.json has
+    `device_expr` as its `expression` list. The stub reuses the real merge and
+    copy methods bound off Captain, so this exercises the shipped code path."""
+    stub = _ExprMergeStub({"expression": device_expr})
+    # Bind BOTH methods the merge relies on so self.<method>() resolves.
+    stub._copy_expression_jack = types.MethodType(_Captain._copy_expression_jack, stub)
+    stub._expression_for_patch = types.MethodType(_Captain._expression_for_patch, stub)
+    return stub._expression_for_patch(patch)
+
+
+def _dev_expr():
+    """A representative two-jack device.expression list."""
+    return [
+        {"jack": 1, "enabled": True, "invert": False,
+         "calibration": {"min": 300, "max": 65200}, "curve": "log",
+         "message": {"type": "cc", "channel": 1, "cc": 11, "value": 0}},
+        {"jack": 2, "enabled": True, "invert": False,
+         "calibration": {"min": 500, "max": 64000}, "curve": "linear",
+         "message": {"type": "cc", "channel": 1, "cc": 7, "value": 0}},
+    ]
+
+
 # ---------------- tiny harness ----------------
 
 PASS = 0
@@ -483,6 +559,85 @@ def test_read_error_does_not_throw():
     analogio.AnalogIn = FakeAnalogIn
 
 
+# ---------------- per-patch expression merge (app._expression_for_patch) ----------------
+
+def test_merge_override_keeps_calibration_and_curve():
+    # A patch override retargets jack 1's message but must keep the device's
+    # calibration, curve, enabled and invert (those are physical to the jack).
+    dev = _dev_expr()
+    patch = {"name": "solo", "expression": [
+        {"jack": 1, "message": {"type": "kemper_morph", "value": 0}}]}
+    merged = _merge(dev, patch)
+    j1 = next(j for j in merged if j["jack"] == 1)
+    check("merge: jack 1 message replaced by override",
+          j1["message"].get("type") == "kemper_morph", "got %r" % j1["message"])
+    check("merge: jack 1 keeps device calibration",
+          j1["calibration"] == {"min": 300, "max": 65200}, "got %r" % j1["calibration"])
+    check("merge: jack 1 keeps device curve", j1["curve"] == "log", "got %r" % j1["curve"])
+    check("merge: jack 1 keeps device enabled", j1["enabled"] is True)
+    # The device config must be untouched (deep copy, not aliased).
+    check("merge: device.expression not mutated",
+          dev[0]["message"]["type"] == "cc", "got %r" % dev[0]["message"])
+
+
+def test_merge_no_expression_returns_device():
+    # A patch with no expression key yields the device config unchanged.
+    dev = _dev_expr()
+    merged = _merge(dev, {"name": "clean"})
+    check("merge: no override -> two jacks", len(merged) == 2, "got %d" % len(merged))
+    check("merge: no override -> jack 1 unchanged",
+          merged[0]["message"]["cc"] == 11 and merged[0]["curve"] == "log")
+    check("merge: no override -> jack 2 unchanged",
+          merged[1]["message"]["cc"] == 7)
+    # None patch (no current patch loaded yet) must not crash and returns device.
+    merged_none = _merge(dev, None)
+    check("merge: None patch -> device config", len(merged_none) == 2, "got %d" % len(merged_none))
+
+
+def test_merge_malformed_override_falls_back():
+    dev = _dev_expr()
+    # Various malformed overrides: not a dict, missing jack, non-numeric jack,
+    # jack the device doesn't have, and message that isn't a dict. None crash;
+    # each leaves the addressed jack (if any) at the device default.
+    patch = {"expression": [
+        "not-a-dict",
+        {"message": {"type": "cc", "value": 0}},            # no jack
+        {"jack": "x", "message": {"type": "cc", "value": 0}},  # bad jack
+        {"jack": 9, "message": {"type": "cc", "value": 0}},    # unknown jack
+        {"jack": 1, "message": "nope"},                        # bad message
+    ]}
+    merged = None
+    raised = None
+    try:
+        merged = _merge(dev, patch)
+    except Exception as e:                    # noqa: BLE001
+        raised = e
+    check("merge: malformed overrides never raise", raised is None, "raised %r" % raised)
+    check("merge: still two jacks after malformed overrides",
+          merged is not None and len(merged) == 2, "got %r" % (merged and len(merged)))
+    j1 = next(j for j in merged if j["jack"] == 1)
+    check("merge: jack 1 message untouched by bad (non-dict) message override",
+          j1["message"].get("cc") == 11, "got %r" % j1["message"])
+
+
+def test_merge_jack2_only_leaves_jack1_default():
+    dev = _dev_expr()
+    patch = {"expression": [
+        {"jack": 2, "message": {"type": "cc", "channel": 2, "cc": 4, "value": 0},
+         "invert": True}]}
+    merged = _merge(dev, patch)
+    j1 = next(j for j in merged if j["jack"] == 1)
+    j2 = next(j for j in merged if j["jack"] == 2)
+    check("merge: jack 1 left at device default when only jack 2 overridden",
+          j1["message"].get("cc") == 11 and j1["invert"] is False, "got %r" % j1)
+    check("merge: jack 2 message retargeted",
+          j2["message"].get("cc") == 4 and j2["message"].get("channel") == 2, "got %r" % j2["message"])
+    check("merge: jack 2 invert override applied", j2["invert"] is True)
+    check("merge: jack 2 keeps device calibration/curve",
+          j2["calibration"] == {"min": 500, "max": 64000} and j2["curve"] == "linear",
+          "got %r %r" % (j2["calibration"], j2["curve"]))
+
+
 def test_no_analogio_is_inert():
     _reset_registry()
     # Simulate a build without analogio: expression.py caches the module ref at
@@ -525,6 +680,11 @@ def main():
     print("E. robustness")
     test_read_error_does_not_throw()
     test_no_analogio_is_inert()
+    print("F. per-patch expression merge (app._expression_for_patch)")
+    test_merge_override_keeps_calibration_and_curve()
+    test_merge_no_expression_returns_device()
+    test_merge_malformed_override_falls_back()
+    test_merge_jack2_only_leaves_jack1_default()
     print("\n%d passed, %d failed" % (PASS, FAIL))
     if FAILURES:
         print("\nFailures:")

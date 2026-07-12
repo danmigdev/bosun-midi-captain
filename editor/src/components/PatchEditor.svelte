@@ -3,6 +3,7 @@
   import {
     ACTION_KEYS_BY_MODE,
     cmd,
+    continuousControlTypes,
     debouncedPutBinding,
     defaultMessageFromSchema,
     flattenManifest,
@@ -22,7 +23,6 @@
   import PedalMap from "./PedalMap.svelte";
   import HelpTip from "./HelpTip.svelte";
   import { MODE_HELP } from "../lib/help-text";
-  import { loadLayout, saveLayout, type PedalLayout } from "../lib/pedal-layout";
   import { listSnippets, saveSnippet, bindingFromSnippet, type Snippet } from "../lib/snippets";
   import { History } from "../lib/undo-stack";
 
@@ -333,6 +333,80 @@
 
   let onExitExpanded = $state(false);
 
+  // ---------- per-patch expression override ----------
+  // A patch may optionally retarget an expression jack (which MIDI message it
+  // sends) for the time it is active. Calibration and curve stay device-wide
+  // (physical to the jack, edited in Settings). The override list is persisted
+  // on the patch under `expression`, one entry per overridden jack:
+  //   { jack: 1|2, message: {..template..}, invert?: bool }
+  // The firmware merges it over device.expression on patch load. A jack with no
+  // entry keeps the device-wide target.
+  type ExpressionOverride = { jack: number; message: MidiMessage; invert?: boolean };
+  // The two physical jacks the hardware exposes (GP27/GP28 => EXP 1/EXP 2).
+  const EXP_JACKS = [1, 2];
+
+  // Working patch typed with the optional expression field (not on the shared
+  // Patch type, which the editor core can't edit here). Read/written via casts.
+  let expressionExpanded = $state(false);
+  let expTypes = $derived(continuousControlTypes(filteredManifest));
+
+  function expList(): ExpressionOverride[] {
+    const w = working as Patch & { expression?: ExpressionOverride[] };
+    return Array.isArray(w.expression) ? w.expression : [];
+  }
+  function overrideFor(jack: number): ExpressionOverride | null {
+    return expList().find(o => o.jack === jack) ?? null;
+  }
+  function setExpList(next: ExpressionOverride[]) {
+    const w = working as Patch & { expression?: ExpressionOverride[] };
+    if (next.length === 0) delete w.expression;
+    else w.expression = next;
+  }
+
+  /** Default target when a jack override is first enabled: a plain CC 11 on
+   * channel 1 (the classic expression-pedal assignment). */
+  function defaultExpMessage(): MidiMessage {
+    return { type: "cc", channel: 1, cc: 11, value: 0 };
+  }
+
+  function toggleExpOverride(jack: number, on: boolean) {
+    const rest = expList().filter(o => o.jack !== jack);
+    if (on) {
+      const existing = overrideFor(jack);
+      rest.push(existing ?? { jack, message: defaultExpMessage() });
+      // Keep the list ordered by jack for a stable UI/JSON.
+      rest.sort((a, b) => a.jack - b.jack);
+    }
+    setExpList(rest);
+    persistPatch();
+  }
+
+  function expMessage(jack: number): MidiMessage {
+    const o = overrideFor(jack);
+    if (!o) return defaultExpMessage();
+    if (!o.message) o.message = defaultExpMessage();
+    return o.message;
+  }
+
+  function changeExpType(jack: number, newType: string) {
+    const o = overrideFor(jack);
+    if (!o) return;
+    if (newType === "cc") {
+      o.message = defaultExpMessage();
+    } else {
+      const schema = typesByName[newType];
+      o.message = schema ? defaultMessageFromSchema(newType, schema) : { type: newType, value: 0 };
+    }
+    persistPatch();
+  }
+
+  function setExpInvert(jack: number, invert: boolean) {
+    const o = overrideFor(jack);
+    if (!o) return;
+    o.invert = invert;
+    persistPatch();
+  }
+
   // How many OTHER banks this (locked) slot links to. Drives the editor's
   // "edits propagate to N" hint and the page-header Save/Discard counts.
   let implicitCount = $derived.by<number>(() => {
@@ -362,13 +436,9 @@
 
   const MODES: BindingMode[] = ["tap","latched","momentary","long_press_alt","double_tap"];
 
-  // ---- Pedal map: a spatial, user-arrangeable view of the 10 switches.
-  // The layout is the user's own arrangement (no fixed physical grid),
-  // persisted in localStorage. Clicking a switch selects + expands its row. ----
-  let pedalLayout = $state<PedalLayout>(loadLayout());
-  let editLayout = $state(false);
+  // ---- Pedal map: a schematic view of the 10 switches.
+  // Clicking a switch selects + expands its row. ----
   let selectedSwitch = $state<string | null>(null);
-  function onLayoutChange(next: PedalLayout) { pedalLayout = next; saveLayout(next); }
   function selectSwitch(sw: string) {
     selectedSwitch = sw;
     const next = new Set(expanded); next.add(sw); expanded = next;
@@ -412,13 +482,9 @@
   <section class="pedalmap-wrap">
     <div class="pmhead">
       <span class="pmtitle">Pedal map</span>
-      <label class="pmedit" title="Drag the switches to arrange the map however you like">
-        <input type="checkbox" bind:checked={editLayout} /> arrange
-      </label>
     </div>
     <PedalMap bindings={working.bindings} selected={selectedSwitch}
-              onSelect={selectSwitch} layout={pedalLayout}
-              editable={editLayout} onLayoutChange={onLayoutChange} />
+              onSelect={selectSwitch} />
   </section>
 
   <header class="patchhead">
@@ -580,6 +646,97 @@
             addOnExitMessage(sel.value);
           }}>+ add message</button>
         </div>
+      </div>
+    {/if}
+  </section>
+
+  <!-- Per-patch expression override: retarget an EXP jack while this patch is
+       active. Calibration/curve stay device-wide (Settings). -->
+  <section class="on-enter">
+    <button class="onhead" onclick={() => expressionExpanded = !expressionExpanded}>
+      <span class="chevron">{expressionExpanded ? "▾" : "▸"}</span>
+      <span class="title">Expression</span>
+      <span class="hint">
+        {#if expList().length === 0}
+          jacks use the device-wide target
+        {:else}
+          {expList().length} jack{expList().length === 1 ? "" : "s"} retargeted for this patch
+        {/if}
+      </span>
+    </button>
+    {#if expressionExpanded}
+      <div class="onbody">
+        <p class="exphelp">
+          Override which MIDI message a pedal jack sends while this patch is
+          active. Calibration and curve stay device-wide - set them in Settings.
+        </p>
+        {#each EXP_JACKS as jack}
+          {@const ov = overrideFor(jack)}
+          <div class="expjack">
+            <label class="expover">
+              <input type="checkbox" checked={!!ov}
+                     onchange={(e) => toggleExpOverride(jack, (e.target as HTMLInputElement).checked)} />
+              <span class="expjackname">EXP {jack}</span>
+              override the target for this patch
+            </label>
+            {#if ov}
+              {@const msg = expMessage(jack)}
+              <div class="msg">
+                <select value={msg.type}
+                        onchange={(e) => changeExpType(jack, (e.target as HTMLSelectElement).value)}>
+                  {#each expTypes as t}
+                    <option value={t.type}>{t.label}</option>
+                  {/each}
+                </select>
+                {#if typesByName[msg.type]}
+                  {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
+                    {#if pname !== "value" && paramVisible(param, msg)}
+                      <label class="param">
+                        <span>{param.label ?? pname}</span>
+                        {#if param.type === "int"}
+                          <input type="number" min={param.min} max={param.max}
+                                 value={msg[pname] as number}
+                                 oninput={(e) => {
+                                   msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                                   persistPatch();
+                                 }} />
+                        {:else if param.type === "enum"}
+                          <select value={String(msg[pname])}
+                                  onchange={(e) => {
+                                    msg[pname] = coerce(param, (e.target as HTMLSelectElement).value);
+                                    persistPatch();
+                                  }}>
+                            {#each param.values ?? [] as v}
+                              <option value={String(v)}>{v}</option>
+                            {/each}
+                          </select>
+                        {:else if param.type === "bool"}
+                          <input type="checkbox"
+                                 checked={Boolean(msg[pname])}
+                                 onchange={(e) => {
+                                   msg[pname] = (e.target as HTMLInputElement).checked;
+                                   persistPatch();
+                                 }} />
+                        {:else}
+                          <input value={String(msg[pname] ?? "")}
+                                 oninput={(e) => {
+                                   msg[pname] = (e.target as HTMLInputElement).value;
+                                   persistPatch();
+                                 }} />
+                        {/if}
+                      </label>
+                    {/if}
+                  {/each}
+                {/if}
+                <label class="param inv">
+                  <span>invert</span>
+                  <input type="checkbox" checked={ov.invert === true}
+                         onchange={(e) => setExpInvert(jack, (e.target as HTMLInputElement).checked)} />
+                </label>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
     {/if}
   </section>
@@ -867,7 +1024,6 @@
   .pedalmap-wrap { background: var(--bg-hover); border-radius: 6px; padding: 0.4rem 0.5rem 0.5rem; margin-bottom: 0.75rem; }
   .pmhead { display: flex; align-items: center; justify-content: space-between; padding: 0.15rem 0.3rem 0.3rem; }
   .pmtitle { font-size: 0.78rem; font-weight: 600; color: var(--accent); }
-  .pmedit { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; color: var(--text-muted); cursor: pointer; }
 
   /* Inline help affordance next to a field label */
   .lbl-with-help { display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -881,4 +1037,19 @@
 
   /* Selected switch row (from the pedal map) */
   ul.bindings li.selected { box-shadow: inset 0 0 0 1px var(--accent-border); }
+
+  /* Per-patch expression override block */
+  .exphelp { margin: 0 0 0.6rem; font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+  .expjack { margin-bottom: 0.55rem; }
+  .expjack:last-child { margin-bottom: 0; }
+  .expover {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.78rem; color: var(--text); margin-bottom: 0.35rem;
+  }
+  .expjackname {
+    font-family: ui-monospace, Consolas, monospace; font-weight: 600;
+    color: var(--accent);
+  }
+  .param.inv { flex-direction: column; }
+  .param.inv input[type="checkbox"] { align-self: flex-start; }
 </style>

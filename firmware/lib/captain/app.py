@@ -149,6 +149,10 @@ class Captain:
         self.midi_rx_count = 0
         self.protocol_cmd_count = 0
         self.last_patch_switch_ms = 0
+        # MIDI monitor: off by default. The editor turns it on (SET_MIDI_MONITOR)
+        # only while its monitor panel is open, so the per-message EVENT traffic
+        # never runs during normal play. See set_midi_monitor().
+        self._midi_monitor = False
 
         self.patches.on_dirty_changed = self._emit_dirty_state
         self.patches.on_saved = self._emit_saved
@@ -228,6 +232,8 @@ class Captain:
                 self._fire(sw.name, action_key)
         for port, channel, status, data in self.midi.poll():
             self.midi_rx_count += 1
+            if self._midi_monitor:
+                self._emit_midi_mon("in", port, channel, status, data)
             self._handle_midi_in(port, channel, status, data)
         # Plugins that need a heartbeat (e.g. Kemper bidirectional
         # beacon) hook here. The check is cheap when no plugin
@@ -333,6 +339,18 @@ class Captain:
             self.last_local_switch_ms = t0
         self.current_patch = self.patches.get(bank, slot)
         self._reindex_patch()
+        # Per-patch expression override: a patch may retarget the expression
+        # jacks (which MIDI message each jack sends) while calibration/curve
+        # stay device-wide. Rebuild the jacks from the merged config; a bad
+        # override falls back to the device default and never crashes the load.
+        try:
+            self.expression.configure(self._expression_for_patch(self.current_patch))
+        except Exception as e:
+            print("expression per-patch configure failed:", e)
+            try:
+                self.expression.configure(self.device.get("expression"))
+            except Exception:
+                pass
         self.switches.reset_all()
         # Repaint device-mirrored switch state (Kemper effect blocks) from the
         # plugin cache ONLY when this load was triggered by the target device
@@ -654,10 +672,87 @@ class Captain:
         # Re-apply per-binding overrides on top of refreshed globals
         self._reindex_patch()
         # Rebuild the expression jacks so an enable/disable or a recalibration
-        # pushed from the editor takes effect without a reboot.
-        self.expression.configure(device.get("expression"))
+        # pushed from the editor takes effect without a reboot. Merge in the
+        # current patch's per-patch override (if any) so a settings save doesn't
+        # drop a live per-patch retarget back to the device default.
+        try:
+            self.expression.configure(self._expression_for_patch(self.current_patch))
+        except Exception as e:
+            print("expression apply_global configure failed:", e)
+            self.expression.configure(device.get("expression"))
         # Display layout lives under tft.layout - refresh if it changed.
         self.apply_display_layout(device.get("tft", {}).get("layout") or [])
+
+    def _expression_for_patch(self, patch):
+        """Merge the device-wide expression config with a patch's optional
+        per-patch overrides and return the config to hand to ExpressionArray.
+
+        Calibration, curve and enabled are physical to the jack and stay
+        device-wide; a patch may only retarget which MIDI message a jack sends
+        (and optionally its inversion). A patch override entry looks like:
+
+            {"jack": 1|2, "message": {..template..}, "invert": bool (optional)}
+
+        Start from a deep copy of device.expression so we never mutate the
+        shared device config. For each device jack, if the patch declares an
+        override with the same jack number, replace that jack's `message` (and
+        `invert` when present) with the patch's. A patch with no expression
+        overrides returns the device list unchanged (a fresh copy). Robust: a
+        malformed override is skipped, leaving that jack at the device default;
+        this never raises so a bad patch can't take down the patch load."""
+        device_exp = self.device.get("expression") or []
+        # Deep-copy the device jacks so the returned config is independent of
+        # self.device (message dicts included - we may swap them per patch).
+        merged = []
+        for jack_cfg in device_exp:
+            try:
+                merged.append(self._copy_expression_jack(jack_cfg))
+            except Exception:
+                # A malformed device jack: keep it verbatim rather than drop it.
+                merged.append(jack_cfg)
+        overrides = None
+        if isinstance(patch, dict):
+            overrides = patch.get("expression")
+        if not overrides:
+            return merged
+        # Index the merged device jacks by jack number for O(1) override lookup.
+        by_jack = {}
+        for m in merged:
+            try:
+                by_jack[int(m.get("jack"))] = m
+            except (TypeError, ValueError):
+                continue
+        for ov in overrides:
+            try:
+                if not isinstance(ov, dict):
+                    continue
+                jack_num = int(ov.get("jack"))
+            except (TypeError, ValueError):
+                continue
+            target = by_jack.get(jack_num)
+            if target is None:
+                # Patch overrides a jack the device doesn't define: ignore it.
+                continue
+            msg = ov.get("message")
+            if isinstance(msg, dict):
+                target["message"] = dict(msg)
+            if "invert" in ov:
+                target["invert"] = bool(ov.get("invert"))
+        return merged
+
+    def _copy_expression_jack(self, jack_cfg):
+        """Shallow-plus-nested copy of one device.expression jack so a per-patch
+        merge can swap its message/invert without touching self.device."""
+        if not isinstance(jack_cfg, dict):
+            return jack_cfg
+        out = dict(jack_cfg)
+        cal = jack_cfg.get("calibration")
+        if isinstance(cal, dict):
+            out["calibration"] = dict(cal)
+        msg = jack_cfg.get("message")
+        if isinstance(msg, dict):
+            out["message"] = dict(msg)
+        return out
 
     def apply_midi_learn(self, table):
         self.midi_learn_table = table
@@ -886,6 +981,37 @@ class Captain:
 
     def _now_ms(self):
         return time.monotonic_ns() // 1_000_000
+
+    # ---------- MIDI monitor ----------
+
+    def set_midi_monitor(self, on):
+        """Enable/disable streaming MIDI traffic to the editor as "midi" EVENTs.
+        Wires the outbound tap on the MIDI engine only while on, so the common
+        (monitor-off) path stays free of per-message work."""
+        self._midi_monitor = bool(on)
+        self.midi.tx_monitor = self._emit_midi_out if self._midi_monitor else None
+
+    def _emit_midi_out(self, data):
+        """Outbound tap: `data` is the raw framed bytes we just sent (channel
+        voice, or a full F0..F7 SYSEX). Emitted verbatim; the editor decodes."""
+        try:
+            self.protocol.emit_event("midi", dir="out", raw=list(data))
+        except Exception:
+            pass
+
+    def _emit_midi_mon(self, direction, port, channel, status, data):
+        """Inbound tap: rebuild the raw bytes from the parsed event so the editor
+        sees one uniform raw-byte shape for both directions. SYSEX comes back as
+        (status 0xF0, payload without framing); everything else is a channel
+        voice message."""
+        try:
+            if status == 0xF0:
+                raw = [0xF0] + list(data) + [0xF7]
+            else:
+                raw = [status | ((channel - 1) & 0x0F)] + list(data)
+            self.protocol.emit_event("midi", dir=direction, port=port, raw=raw)
+        except Exception:
+            pass
 
     def _emit_dirty_state(self):
         self.protocol.emit_event("dirty_state_changed", patches=self.patches.dirty_ids())

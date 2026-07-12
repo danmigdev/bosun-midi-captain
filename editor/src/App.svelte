@@ -5,6 +5,7 @@
   import Installer from "./components/Installer.svelte";
   import FirmwarePushOverlay from "./components/FirmwarePushOverlay.svelte";
   import MaintenancePanel from "./components/MaintenancePanel.svelte";
+  import MidiMonitor from "./components/MidiMonitor.svelte";
   import Dashboard from "./components/Dashboard.svelte";
   import PatchesGrid from "./components/PatchesGrid.svelte";
   import Onboarding from "./components/Onboarding.svelte";
@@ -21,6 +22,8 @@
   import ProfilePicker from "./components/ProfilePicker.svelte";
   import TftLayout from "./components/TftLayout.svelte";
   import QuickSetup from "./components/QuickSetup.svelte";
+  import PedalSimulator from "./components/PedalSimulator.svelte";
+  import DeviceImport from "./components/DeviceImport.svelte";
   import SetlistView from "./components/SetlistView.svelte";
   import type { SetlistItem } from "./lib/setlists";
   import {
@@ -55,7 +58,7 @@
   let page = $state<Page>("home");
   // Which tab is showing inside the Editor page. "Quick setup" is a mode of the
   // editor (it acts on the open patch), not a separate nav destination.
-  let editorTab = $state<"switches" | "quicksetup">("switches");
+  let editorTab = $state<"switches" | "quicksetup" | "simulate">("switches");
 
   let ports = $state<PortInfo[]>([]);
   let selectedPort = $state<string | null>(null);
@@ -1054,6 +1057,7 @@
     { id: "learn",    label: "MIDI Learn",   icon: "↻", group: "device" },
     { id: "settings", label: "Settings",     icon: "⚙", group: "device" },
     { id: "maint",    label: "Maintenance",  icon: "⊕", group: "system" },
+    { id: "monitor",  label: "MIDI Monitor", icon: "∿", group: "system" },
     { id: "log",      label: "Log",          icon: "≡", group: "system" },
   ];
   // Plugin recipe pages (e.g. Ampero auto-follow setup) are device setup, so
@@ -1350,13 +1354,26 @@
               <button role="tab" class="etab" class:active={editorTab === "quicksetup"}
                       aria-selected={editorTab === "quicksetup"}
                       onclick={() => editorTab = "quicksetup"}>Quick setup</button>
+              <button role="tab" class="etab" class:active={editorTab === "simulate"}
+                      aria-selected={editorTab === "simulate"}
+                      onclick={() => editorTab = "simulate"}>Simulate</button>
             </div>
             {#if editorTab === "switches"}
+              {#if activeKind === "kemper_player"}
+                <!-- Kemper-only: pull the current rig's real name off the
+                     device and offer it as this patch's name (single-rig, see
+                     the component's note on why bulk scanning is not done). -->
+                <DeviceImport
+                  envelope={currentPatch}
+                  {connected}
+                  onApplied={(b, s) => { cmd.getPatch(b, s).catch(() => {}); cmd.listPatches().catch(() => {}); }}
+                />
+              {/if}
               <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
                            patch={currentPatch.patch} {manifest} {activeKind}
                            allPatches={patches} {linkConfig}
                            onToggleLock={(s) => { void toggleSlotLock(s); }} />
-            {:else}
+            {:else if editorTab === "quicksetup"}
               <p class="muted" style="margin:0 0 0.75rem">
                 Guided setups for this patch: pick which switches to use and the bindings are written for you - no need to know the MIDI messages. Applying jumps you back to Switches to see the result.
               </p>
@@ -1366,6 +1383,12 @@
                 {activeKind}
                 existing={currentPatch.patch.bindings}
                 onApply={applyRecipeBindings}
+              />
+            {:else}
+              <PedalSimulator
+                bindings={currentPatch.patch.bindings}
+                device={globalDevice}
+                {connected}
               />
             {/if}
           {:else if !hasActiveProfile}
@@ -1464,6 +1487,18 @@
             <h2>Maintenance</h2>
           </header>
           <MaintenancePanel {connected} {activeProfile} />
+
+        {:else if page === "monitor"}
+          <header class="pageHead">
+            <h2>MIDI Monitor</h2>
+          </header>
+          <p class="muted" style="margin:0 0 0.75rem">
+            Live view of every MIDI message the pedal sends and receives, decoded
+            newest-first. The stream runs only while this page is open, so it
+            never adds traffic during normal play. Handy for debugging bindings,
+            MIDI Learn, and device sync.
+          </p>
+          <MidiMonitor {connected} />
 
         {:else if page === "log"}
           <header class="pageHead">

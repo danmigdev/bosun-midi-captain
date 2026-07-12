@@ -75,13 +75,13 @@ The result is the two halves of this repository: the `firmware/` that runs on th
 
 **Editor**
 
-- Windows 11 (the portable build is x64; WebView2 ships with Windows 11).
-- Nothing to install for end users: the editor is distributed as an extract-and-run ZIP.
+- Windows, macOS or Linux. Every GitHub release attaches a build for all three: a Windows portable x64 ZIP, a macOS `.dmg`, and a Linux AppImage. WebView2 ships with Windows 11; macOS and Linux use the system WebView.
+- Nothing to install for end users: the Windows build is an extract-and-run ZIP, and the macOS/Linux builds are a standard `.dmg` / AppImage.
 
 ## Quick start
 
-1. Download the latest `Bosun-<version>-portable-x64.zip` and extract it anywhere.
-2. Run `Bosun.exe`. No installer, no admin rights.
+1. Download the latest build for your OS from the GitHub releases page: `Bosun-<version>-portable-x64.zip` (Windows), the `.dmg` (macOS) or the AppImage (Linux). On Windows, extract it anywhere.
+2. Launch Bosun (`Bosun.exe` on Windows). No installer, no admin rights.
 3. Plug in the pedal over USB.
    - If the pedal still runs stock firmware, the editor detects it and offers to run the **Pedal setup** wizard. Back up your pedal first: installing wipes the factory files (this is destructive and not reversible from inside Bosun).
    - The wizard flashes CircuitPython 9 if needed, then copies the Bosun firmware.
@@ -146,7 +146,7 @@ This is the heart of Bosun: a switch press runs a macro, and a macro is just an 
 
 Three editor conveniences sit on top of the switch rows:
 
-- **Pedal map.** A schematic of the ten switches gives you a physical, at-a-glance view of the patch: each switch shows its label and LED colour where it actually sits under your foot, and clicking one jumps to that switch's row. The map is **free-layout**: drag the switches to match how your own pedal is arranged (or how you think about it) rather than a fixed "five on top, five on the bottom" grid. Your arrangement is remembered between sessions.
+- **Pedal map.** A schematic of the ten switches gives you a physical, at-a-glance view of the patch: each switch shows its label and LED colour where it sits under your foot (five on top, five on the bottom), and clicking one jumps to that switch's row.
 - **Undo / redo.** Every edit to the open patch (label, mode, LED, messages, colour) is tracked. `Ctrl+Z` undoes and `Ctrl+Y` (or `Ctrl+Shift+Z`) redoes, so you can experiment freely and back out without reloading from the pedal.
 - **Snippets.** Configured one switch exactly how you like it? Save it as a reusable snippet, then paste it onto another switch, in this patch or any other, to copy its whole configuration (mode, label, LEDs and macros) in one click. Handy for repeating a "tuner" or "tap tempo" switch across many patches.
 

@@ -187,6 +187,7 @@ class Protocol:
             elif t == "PUT_MIDI_LEARN":    self._put_midi_learn(mid, msg)
             elif t == "GET_MANIFEST":      self._get_manifest(mid)
             elif t == "STATS":             self._stats(mid)
+            elif t == "SET_MIDI_MONITOR":  self._set_midi_monitor(mid, msg)
             elif t == "PUT_FILE_BEGIN":    self._put_file_begin(mid, msg)
             elif t == "PUT_FILE_CHUNK":    self._put_file_chunk(mid, msg)
             elif t == "PUT_FILE_END":      self._put_file_end(mid, msg)
@@ -199,6 +200,7 @@ class Protocol:
             elif t == "LIST_FONTS":        self._list_fonts(mid)
             elif t == "LED_PROBE":         self._led_probe(mid, msg)
             elif t == "LED_DUMP":          self._led_dump(mid, msg)
+            elif t == "GET_RIG_INFO":      self._get_rig_info(mid, msg)
             else:                          self._send({"type": "ERROR", "id": mid, "error": "unknown_type", "of": t})
         except Exception as e:
             self._send({"type": "ERROR", "id": mid, "error": "exception", "detail": str(e), "of": t})
@@ -219,6 +221,11 @@ class Protocol:
             "current": {"bank": self.app.current_bank, "slot": self.app.current_slot},
             "profile": active,
         })
+
+    def _set_midi_monitor(self, mid, msg):
+        on = bool(msg.get("on"))
+        self.app.set_midi_monitor(on)
+        self._send({"type": "ACK", "id": mid, "on": on})
 
     def _put_global(self, mid, msg):
         device = msg.get("device")
@@ -590,6 +597,63 @@ class Protocol:
             self._send({"type": "ACK", "id": mid, "index": idx})
         except Exception as e:
             self._send({"type": "ERROR", "id": mid, "error": "exception", "detail": str(e), "of": "LED_PROBE"})
+
+    def _active_plugin(self):
+        """Return the plugin module backing the active profile's kind, or None.
+        Kept device-agnostic: we match the app's active_kind against each
+        plugin's NAME and never reach into any plugin's internals here - the
+        core stays plugin-neutral and this works for any future device that
+        exposes the same rig-info hook. Uses the registry's private _plugins map
+        (there is no public by-name getter); tolerant of its absence."""
+        kind = getattr(self.app, "active_kind", "") or ""
+        if not kind:
+            return None
+        plugins = getattr(self.app, "plugins", None)
+        registry = getattr(plugins, "_plugins", None)
+        if not registry:
+            return None
+        for module in registry.values():
+            if getattr(module, "NAME", None) == kind:
+                return module
+        return None
+
+    def _get_rig_info(self, mid, msg):
+        """Read the active device's current rig name (and best-effort colour)
+        for the editor's "Import rig name from device" flow. Pure ROUTING: the
+        core knows nothing about Kemper - it just asks the active plugin for its
+        `get_rig_info(app, request=...)` result if the plugin implements it.
+        Errors safely (no crash) when the active profile has no such device.
+
+        `request` (default True): also ask the device to refresh the value; the
+        editor can pass False to read the cache only."""
+        module = self._active_plugin()
+        fn = getattr(module, "get_rig_info", None) if module is not None else None
+        if fn is None:
+            # No active device that can report a rig name (e.g. generic profile,
+            # or a plugin without the hook). No-op-safe: report it as an error
+            # the editor can show, don't raise.
+            self._send({"type": "ERROR", "id": mid, "error": "no_rig_info",
+                        "of": "GET_RIG_INFO"})
+            return
+        want_request = msg.get("request", True)
+        try:
+            info = fn(self.app, request=bool(want_request))
+        except Exception as e:
+            self._send({"type": "ERROR", "id": mid, "error": "exception",
+                        "detail": str(e), "of": "GET_RIG_INFO"})
+            return
+        if info is None:
+            self._send({"type": "ERROR", "id": mid, "error": "no_rig_info",
+                        "of": "GET_RIG_INFO"})
+            return
+        self._send({
+            "type": "RIG_INFO",
+            "id": mid,
+            "name":  info.get("name", ""),
+            "rig":   info.get("rig"),
+            "color": info.get("color"),
+            "fresh": bool(info.get("fresh", False)),
+        })
 
     def _led_dump(self, mid, msg):
         """Diagnostic: return the current values of every NeoPixel as a

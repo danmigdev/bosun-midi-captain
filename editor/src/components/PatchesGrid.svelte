@@ -149,6 +149,9 @@
     font: inherit; font-size: 0.85rem; outline: none;
   }
   .searchbox::placeholder { color: var(--text-dim); }
+  /* Hide the native clear button so only our own ✕ (aligned with the match
+     count) shows - otherwise the WebView draws a second ✕ next to it. */
+  .searchbox::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
   .searchcount { color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
   .searchclear {
     background: transparent; border: none; color: var(--text-dim);

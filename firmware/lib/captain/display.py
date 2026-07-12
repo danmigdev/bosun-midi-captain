@@ -78,11 +78,14 @@ _TUNER_OFF_HUE  = 0xE54848       # red when out of tune
 _TUNER_NEUTRAL  = 0x40484F       # bar background
 _TUNER_CENTER   = 0xFFFFFF       # vertical center reference
 _TUNER_NOTE_OFF = 0xE4E6EB       # note colour when not in tune
-_TUNER_BAR_W = 200
-_TUNER_BAR_H = 6
-_TUNER_IND_W = 4
-_TUNER_IND_H = 18
-_TUNER_BAR_Y = 140
+_TUNER_FLAT     = 0xE59A48       # amber flat/sharp direction arrows
+# Wider, taller bar and a chunkier indicator so the tuner reads clearly from
+# a couple of metres away (the player is looking at the guitar, not the TFT).
+_TUNER_BAR_W = 220
+_TUNER_BAR_H = 10
+_TUNER_IND_W = 8
+_TUNER_IND_H = 30
+_TUNER_BAR_Y = 150
 
 # ---- horizontal scrolling (marquee) for overflowing labels ----
 # When a label opts in (spec["scroll"]) and its text is wider than the space
@@ -412,10 +415,10 @@ class Display:
         rebuilding and full-refreshing the whole 240x240 screen every frame.
 
         Geometry (240x240 screen):
-          y  ~75  : note name, scale 6, centered
-          y 140   : 200-wide background bar (grey) centered horizontally
-          y 131-149: 4-wide indicator (green/red) tracking deviance
-          y 195   : "TUNER" + cents-ish numeric below
+          y  ~80  : note name, scale 8, centered (big and legible)
+          y 150   : 220-wide background bar (grey) centered horizontally
+          y ~140  : 8-wide indicator (green/red) tracking deviance
+          y 195   : flat/sharp/in-tune direction cue + cents readout
         """
         # Deviance: 0..16383, 8192 = in tune. Show a usable window of
         # 8192 +/- 2000 so the indicator has meaningful travel; clamp
@@ -435,17 +438,28 @@ class Display:
         ind_x = bar_x + (rel + 2000) * travel // 4000
         cents = rel // 8
         note = context.get("tuner_note") or context.get("kemper_tuner_note") or "-"
+        # Direction: -1 flat (tune up), +1 sharp (tune down), 0 in tune.
+        direction = 0 if in_tune else (-1 if rel < 0 else 1)
 
         if self._tuner_active and self._tuner_note_lbl is not None:
-            self._update_tuner(note, in_tune, ind_x, cents)
+            self._update_tuner(note, in_tune, ind_x, cents, direction)
         else:
-            self._build_tuner(note, in_tune, ind_x, bar_x, cents)
+            self._build_tuner(note, in_tune, ind_x, bar_x, cents, direction)
 
-    def _footer_text(self, cents):
-        sign = "+" if cents > 0 else ("" if cents == 0 else "-")
-        return "TUNER  {}{}".format(sign, abs(cents))
+    def _footer_text(self, cents, direction):
+        """Bottom readout: a clear text cue for what to do plus the cents value.
+        Arrows point the way to correct: '<< FLAT' means the note is flat and
+        the player should tune up, '>> SHARP' means sharp (tune down)."""
+        if direction < 0:
+            return "<< FLAT  {}".format(abs(cents))
+        if direction > 0:
+            return "SHARP {} >>".format(abs(cents))
+        return "IN TUNE"
 
-    def _build_tuner(self, note, in_tune, ind_x, bar_x, cents):
+    def _footer_color(self, in_tune):
+        return _TUNER_IN_TUNE if in_tune else _TUNER_FLAT
+
+    def _build_tuner(self, note, in_tune, ind_x, bar_x, cents, direction):
         """First tuner frame: build the persistent group and cache the parts
         that move so later frames can update them without a full rebuild."""
         ind_y = _TUNER_BAR_Y - (_TUNER_IND_H - _TUNER_BAR_H) // 2
@@ -454,8 +468,8 @@ class Display:
         note_lbl = label.Label(
             terminalio.FONT, text=str(note),
             color=_TUNER_IN_TUNE if in_tune else _TUNER_NOTE_OFF,
-            scale=6, anchor_point=(0.5, 0.5),
-            anchored_position=(_SCREEN_W // 2, 75),
+            scale=8, anchor_point=(0.5, 0.5),
+            anchored_position=(_SCREEN_W // 2, 80),
         )
         group.append(note_lbl)
 
@@ -464,12 +478,13 @@ class Display:
         bar_pal[0] = _TUNER_NEUTRAL
         group.append(displayio.TileGrid(bar_bmp, pixel_shader=bar_pal, x=bar_x, y=_TUNER_BAR_Y))
 
-        center_bmp = displayio.Bitmap(2, _TUNER_BAR_H + 6, 1)
+        # Taller center reference so "in tune" (indicator over center) is obvious.
+        center_bmp = displayio.Bitmap(2, _TUNER_BAR_H + 12, 1)
         center_pal = displayio.Palette(1)
         center_pal[0] = _TUNER_CENTER
         group.append(displayio.TileGrid(
             center_bmp, pixel_shader=center_pal,
-            x=bar_x + _TUNER_BAR_W // 2 - 1, y=_TUNER_BAR_Y - 3,
+            x=bar_x + _TUNER_BAR_W // 2 - 1, y=_TUNER_BAR_Y - 6,
         ))
 
         ind_bmp = displayio.Bitmap(_TUNER_IND_W, _TUNER_IND_H, 1)
@@ -479,9 +494,9 @@ class Display:
         group.append(ind_tg)
 
         footer = label.Label(
-            terminalio.FONT, text=self._footer_text(cents),
-            color=0x9AA1AD, scale=2, anchor_point=(0.5, 0.5),
-            anchored_position=(_SCREEN_W // 2, 195),
+            terminalio.FONT, text=self._footer_text(cents, direction),
+            color=self._footer_color(in_tune), scale=2, anchor_point=(0.5, 0.5),
+            anchored_position=(_SCREEN_W // 2, 200),
         )
         group.append(footer)
 
@@ -492,9 +507,10 @@ class Display:
         self._tuner_footer = footer
         self._tuner_active = True
         self._tuner_last = {"note": note, "in_tune": in_tune,
-                            "ind_x": ind_x, "cents": cents}
+                            "ind_x": ind_x, "cents": cents,
+                            "direction": direction}
 
-    def _update_tuner(self, note, in_tune, ind_x, cents):
+    def _update_tuner(self, note, in_tune, ind_x, cents, direction):
         """Cheap in-place update: only touch the displayio objects whose value
         actually changed. Moving the indicator is a tiny dirty region; the note
         and footer rarely change, so their (glyph re-render) cost is rare."""
@@ -505,13 +521,15 @@ class Display:
         if in_tune != last["in_tune"]:
             self._tuner_ind_pal[0] = _TUNER_IN_TUNE if in_tune else _TUNER_OFF_HUE
             self._tuner_note_lbl.color = _TUNER_IN_TUNE if in_tune else _TUNER_NOTE_OFF
+            self._tuner_footer.color = self._footer_color(in_tune)
             last["in_tune"] = in_tune
         if note != last["note"]:
             self._tuner_note_lbl.text = str(note)
             last["note"] = note
-        if cents != last["cents"]:
-            self._tuner_footer.text = self._footer_text(cents)
+        if cents != last["cents"] or direction != last["direction"]:
+            self._tuner_footer.text = self._footer_text(cents, direction)
             last["cents"] = cents
+            last["direction"] = direction
 
     # ---- legacy single-string helpers, kept for non-rendered states ----
 

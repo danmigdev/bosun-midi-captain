@@ -337,7 +337,7 @@
             </label>
             <label>X offset<input type="number" min="-240" max="240" bind:value={e.x} /></label>
             <label>Y offset<input type="number" min="-240" max="240" bind:value={e.y} /></label>
-            <label>Size<input type="number" min="1" max="6" bind:value={e.size} /></label>
+            <label title="Font scale (1 = smallest). Use a large size for a bold patch name.">Size<input type="number" min="1" max="12" bind:value={e.size} /></label>
             <label>Color<input type="color" bind:value={e.color} /></label>
             <label>Font
               <select value={e.font ?? "system"}

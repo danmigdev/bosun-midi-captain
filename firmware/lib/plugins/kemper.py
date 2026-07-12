@@ -293,6 +293,26 @@ _BIDIR_STATE = {
 # suppressing live LED paints. Must exceed the burst length (~400 ms here).
 _SETTLE_MS = 500
 
+# Cache of the last rig NAME the Player reported over SYSEX (function $03,
+# page 0x00 / addr 0x01). Seeded automatically by the bidirectional broadcast
+# on every rig change; also refreshable on demand via request_rig_info(). The
+# editor reads this (through protocol GET_RIG_INFO) to auto-name a patch from
+# the real rig currently loaded on the device. `rig` is the flat rig index
+# 1..125 the name belongs to (from the last PC we saw / sent), so the editor
+# can tell which rig the cached name describes; None until known.
+#
+# COLOUR: the Kemper Player does NOT report a per-rig colour over SYSEX (the
+# string-parameter set only carries the rig NAME; no colour parameter exists in
+# the Player's parameter documentation). The only colour source is the static
+# per-position "Bank-Farbcodes" chart transcribed in RIG_COLORS above, keyed by
+# rig position, not by the actual rig content. We expose that as a best-effort
+# `color` so the editor can seed a swatch, but it is a POSITION colour, not a
+# device-reported one. UNVERIFIED against hardware - treat as a hint only.
+_RIG_INFO = {
+    "name": "",     # last rig name from the device ("" until first frame)
+    "rig":  None,   # flat rig index 1..125 the name belongs to
+}
+
 # How long after a LOCAL (bosun-initiated) patch/bank switch to treat an
 # incoming rig PC as our own echo rather than an external change. Matches the
 # core's switch_patch echo-suppression window so the two agree.
@@ -346,6 +366,75 @@ def rig_color(rig):
     fallback if not in the table. Plugins / editor code use this to seed
     a preset's tft_color when the preset targets a specific rig."""
     return RIG_COLORS.get(int(rig), _RIG_FALLBACK)
+
+
+def _current_rig_index(app):
+    """Flat Kemper rig index (1..125) for bosun's current (bank, slot). Mirrors
+    the outbound mapping in dispatch: rig = (bank-1)*5 + slot. bosun's slot is
+    the rig-within-bank (1..5)."""
+    bank = int(getattr(app, "current_bank", 1) or 1)
+    slot = int(getattr(app, "current_slot", 1) or 1)
+    return (bank - 1) * 5 + slot
+
+
+def request_rig_info(app):
+    """Ask the Player for the CURRENT rig's name over SYSEX. Fires a $41
+    single-parameter STRING request for page 0x00 / addr 0x01 (rig name); the
+    Player answers with a $03 string response that _handle_sysex caches into
+    _RIG_INFO. Safe to call repeatedly - it's a fire-and-forget request. Only
+    the name is requested: the Player exposes no per-rig colour parameter (see
+    _RIG_INFO note). Returns True if a request was actually sent.
+
+    NOTE (hardware-unverified): the effect-block on/off reads use the same $41
+    framing and are confirmed on hardware; the rig-NAME string is normally
+    delivered UNSOLICITED on a rig change, so an explicit request may or may not
+    be answered while the beacon is active. If it isn't, the editor still gets
+    the cached name from the last rig-change broadcast."""
+    cfg = (app.device or {}).get("kemper")
+    if cfg is None:
+        return False
+    app.midi.send_sysex(_KEMPER_MFR + (
+        _KEMPER_PRODUCT_PLAYER, _KEMPER_DEVICE_OMNI,
+        _FN_SINGLE_PARAM_REQUEST, 0x00, _PAGE_STRINGS, _ADDR_RIG_NAME,
+    ))
+    return True
+
+
+def get_rig_info(app, request=True):
+    """Return the currently-cached Kemper rig info for the editor to read:
+        {"name": <str>, "rig": <1..125 or None>, "color": <hex or None>,
+         "fresh": <bool>}
+    `name` is the last rig name the Player broadcast (empty until the first
+    rig-change frame arrives). `color` is a BEST-EFFORT position colour from the
+    static Bank-Farbcodes chart (RIG_COLORS) - the device does NOT report a real
+    per-rig colour, so treat it as a hint (see _RIG_INFO note). `fresh` is True
+    when the cached name is tagged to the rig the device is currently on (so the
+    editor can trust it applies to the open patch).
+
+    When `request` is True we also fire a fresh name request so a subsequent
+    read reflects the live device; the first read after a cold start may still
+    return the last broadcast value (or empty) until the response lands."""
+    cfg = (app.device or {}).get("kemper")
+    if cfg is None:
+        return None
+    if request:
+        try:
+            request_rig_info(app)
+        except Exception:
+            pass
+    cur = None
+    try:
+        cur = _current_rig_index(app)
+    except Exception:
+        cur = None
+    return {
+        "name":  _RIG_INFO["name"],
+        "rig":   _RIG_INFO["rig"],
+        # Best-effort POSITION colour (unverified) for the current rig index.
+        "color": rig_color(cur) if cur is not None else None,
+        # True only when the cached name belongs to the rig we're now on.
+        "fresh": (_RIG_INFO["rig"] is not None and _RIG_INFO["rig"] == cur),
+    }
 
 
 def dispatch(msg, midi):
@@ -736,6 +825,15 @@ def _handle_sysex(data, app, cfg):
             name = _decode_string(data[9:])
             if name:
                 _publish(app, {"kemper_rig_name": name, "patch_name": name})
+                # Cache for on-demand reads (editor "Import rig name"). Tag it
+                # with the rig the device is currently on so the editor knows
+                # which rig this name describes. current_bank/current_slot are
+                # bosun's 5-rig grouping -> flat rig index 1..125.
+                _RIG_INFO["name"] = name
+                try:
+                    _RIG_INFO["rig"] = _current_rig_index(app)
+                except Exception:
+                    _RIG_INFO["rig"] = None
             # A rig-name frame marks the START of a rig-change broadcast. Open a
             # settle window: until it closes, block deltas update the cache but
             # don't paint LEDs (suppresses the mid-burst BOOST flash). tick()
