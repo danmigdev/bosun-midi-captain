@@ -4,7 +4,10 @@ import type { Binding } from "../lib/protocol";
 // can preview exactly what colour the pedal will light for a given binding and
 // latched state. Keep this in lockstep with the firmware.
 
-const LATCHED_OFF_DIM_FACTOR = 4;
+// Off (dimmed) latched LED brightness on the same 0-255 scale as the overall LED
+// brightness (device.leds.brightness). Scales the on colour: 255 = as bright as
+// on, 0 = off. 64 == the old fixed divide-by-4 (25%). Config: device.leds.dim.
+export const DEFAULT_LATCHED_OFF_DIM = 64;
 
 /**
  * Parse '#rrggbb' into an [r, g, b] tuple of ints. Anything malformed
@@ -36,7 +39,11 @@ export function rgbToHex([r, g, b]: [number, number, number]): string {
  * _color_for exactly, including the "dim the on colour when latched-off and
  * off is absent or black" behaviour.
  */
-export function ledColorFor(binding: Binding, latchedOn: boolean): string {
+export function ledColorFor(
+  binding: Binding,
+  latchedOn: boolean,
+  dim: number = DEFAULT_LATCHED_OFF_DIM,
+): string {
   const led = binding.led ?? {};
   const mode = binding.mode ?? "tap";
   const onRgb = parseHex(led.on ?? "#000000");
@@ -52,10 +59,11 @@ export function ledColorFor(binding: Binding, latchedOn: boolean): string {
     if (offRgb !== null && !(offRgb[0] === 0 && offRgb[1] === 0 && offRgb[2] === 0)) {
       return rgbToHex(offRgb);
     }
+    const d = dim;
     return rgbToHex([
-      Math.floor(onRgb[0] / LATCHED_OFF_DIM_FACTOR),
-      Math.floor(onRgb[1] / LATCHED_OFF_DIM_FACTOR),
-      Math.floor(onRgb[2] / LATCHED_OFF_DIM_FACTOR),
+      Math.floor((onRgb[0] * d) / 255),
+      Math.floor((onRgb[1] * d) / 255),
+      Math.floor((onRgb[2] * d) / 255),
     ]);
   }
   return rgbToHex(onRgb);

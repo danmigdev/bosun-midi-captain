@@ -5,8 +5,9 @@ import { parseHex, rgbToHex, ledColorFor } from "./led-color";
 
 // These tests pin the editor's LED preview to the firmware's _color_for
 // (firmware/lib/captain/leds.py). The load-bearing behaviour: a latched-off
-// switch must NEVER go black - it dims the on colour by /4 (integer floor)
-// whenever led.off is absent or explicitly black.
+// switch must NEVER go black - it scales the on colour by dim/255 (integer
+// floor) whenever led.off is absent or explicitly black. The default dim is 64,
+// which is ~/4 (64/255 == 0.251), matching the historical 25%.
 
 function makeBinding(over: Partial<Binding>): Binding {
   return {
@@ -78,7 +79,21 @@ describe("ledColorFor", () => {
 
   it("(f) integer-floor proof: on '#7d7d7d' (125) dims to '#1f1f1f' (31)", () => {
     const b = makeBinding({ mode: "latched", led: { on: "#7d7d7d" } });
-    // 125 / 4 = 31.25 -> floor -> 31 = 0x1f
+    // 125 / 4 = 31.25 -> floor -> 31 = 0x1f (default 25% == /4)
     expect(ledColorFor(b, false)).toBe("#1f1f1f");
+  });
+
+  it("(g) configurable dim on the 0-255 scale: lower value gives a fainter off state", () => {
+    const b = makeBinding({ mode: "latched", led: { on: "#808080" } }); // 128
+    // dim 32 -> floor(128*32/255) = 16 = 0x10
+    expect(ledColorFor(b, false, 32)).toBe("#101010");
+    // dim 128 -> floor(128*128/255) = 64 = 0x40
+    expect(ledColorFor(b, false, 128)).toBe("#404040");
+    // dim 255 -> full on colour (no dimming)
+    expect(ledColorFor(b, false, 255)).toBe("#808080");
+    // dim 0 -> black (fully off)
+    expect(ledColorFor(b, false, 0)).toBe("#000000");
+    // default (omitted) == 64 -> floor(128*64/255) = 32 = 0x20
+    expect(ledColorFor(b, false)).toBe("#202020");
   });
 });

@@ -53,7 +53,7 @@ class Captain:
             rowstart=tft.get("rowstart", 80),
             colstart=tft.get("colstart", 0),
         )
-        self.leds = Leds()
+        self.leds = Leds(dim=self._led_dim(self.device))
         self.midi = MidiEngine()
         self.patches = PatchStore(
             autosave_enabled=autosave.get("enabled", True),
@@ -108,6 +108,9 @@ class Captain:
             # Position within the active setlist (e.g. "4/12"), "" when the
             # current patch isn't in the setlist. A TFT layout can show it.
             "setlist_pos": "",
+            # Effect shown while a latched+auto-momentary switch is held past the
+            # threshold (its hold_text); "" (nothing shown) the rest of the time.
+            "hold_effect": "",
         }
         # Cached layout from device.json (tft.layout). Render falls back to
         # a centered patch name if this is empty.
@@ -153,6 +156,9 @@ class Captain:
         # only while its monitor panel is open, so the per-message EVENT traffic
         # never runs during normal play. See set_midi_monitor().
         self._midi_monitor = False
+        # Last hold-indicator text shown, so we only refresh the TFT when it
+        # actually changes.
+        self._last_hold_effect = ""
 
         self.patches.on_dirty_changed = self._emit_dirty_state
         self.patches.on_saved = self._emit_saved
@@ -230,6 +236,26 @@ class Captain:
                 exited_tuner = True
             for action_key in triggers:
                 self._fire(sw.name, action_key)
+        # Auto-momentary hold indicator: while a latched+auto-momentary switch is
+        # held past the threshold (acting momentarily), show its hold_text on the
+        # TFT; clear on release. Only mark a refresh when the text changes, so it
+        # costs nothing on a steady loop.
+        hold_text = ""
+        for sw in self.switches.switches:
+            if sw.is_momentary_active(now_ms, self._mode_index.get(sw.name, "tap")):
+                b = self._binding_index.get(sw.name)
+                if isinstance(b, dict):
+                    # Show the switch's custom hold_text, or fall back to its
+                    # label so holding an effect (e.g. HARMONIZER) shows the
+                    # effect name on the TFT without needing per-switch config.
+                    ht = b.get("hold_text") or b.get("label") or ""
+                    if ht:
+                        hold_text = ht
+                        break
+        if hold_text != self._last_hold_effect:
+            self._last_hold_effect = hold_text
+            self.display_context["hold_effect"] = hold_text
+            self._mark_display_dirty()
         for port, channel, status, data in self.midi.poll():
             self.midi_rx_count += 1
             if self._midi_monitor:
@@ -407,9 +433,26 @@ class Captain:
             print("display refresh failed:", e)
 
     def apply_display_layout(self, layout):
-        """Called when the user pushes a new tft.layout via PUT_GLOBAL."""
-        self.display_layout = layout or []
-        self._refresh_display()
+        """Called when the user pushes a new tft.layout via PUT_GLOBAL.
+
+        Skip the render entirely when the layout is UNCHANGED. A settings save
+        (LED brightness/dim, expression, autosave, ...) re-sends the whole device
+        including its tft.layout, but the layout itself rarely changes. Rendering
+        on every save built a fresh displayio Group + label bitmaps each time -
+        big transient allocations that fragment the tight RP2040 heap until, after
+        a few saves, no contiguous block is left and the main loop MemoryErrors.
+        A plain `==` compare is cheap (a handful of small dicts) and avoids that.
+
+        When the layout DID change, defer the render (mark dirty) rather than
+        rendering inline: apply_global has just churned the heap, so an immediate
+        render would peak on a fragmented heap. Deferring lets apply_global return
+        and send its ACK first, and routes the render through _refresh_display's
+        try/except - so a tight heap degrades to a skipped frame, never a wedge."""
+        layout = layout or []
+        if layout == self.display_layout:
+            return
+        self.display_layout = layout
+        self._mark_display_dirty()
 
     def put_patch(self, bank, slot, patch):
         self.patches.put_patch(bank, slot, patch, self._now_ms())
@@ -657,6 +700,12 @@ class Captain:
 
     def apply_global(self, device):
         self.device = device
+        # Free the previous device dict (now unreferenced) before the heavy
+        # work below. The RP2040 heap is tight (~29 KB free) and a settings save
+        # peaks on the incoming config parse + reindex + expression rebuild +
+        # deferred render; reclaiming the old config up front buys headroom and
+        # keeps this path off the MemoryError edge.
+        gc.collect()
         auto = device.get("autosave", {})
         self.patches.autosave_enabled = auto.get("enabled", True)
         self.patches.autosave_debounce_ms = auto.get("debounce_ms", 2000)
@@ -680,8 +729,39 @@ class Captain:
         except Exception as e:
             print("expression apply_global configure failed:", e)
             self.expression.configure(device.get("expression"))
-        # Display layout lives under tft.layout - refresh if it changed.
+        gc.collect()
+        # Off (dimmed) latched LED brightness. Store it for the next repaint; we
+        # do NOT repaint the strip live here - that render_patch +
+        # _paint_preset_nav_leds churn added to the settings-save peak and pushed
+        # the tight heap into MemoryError. LED/brightness changes taking effect
+        # on the next patch load (or reboot) matches the Settings note ("Display
+        # + LED changes need a reboot") and keeps apply_global frugal.
+        self.leds.dim = self._led_dim(device)
+        # Reclaim the churn (reindex/expression temporaries) before the display
+        # work, so the deferred render starts from a compacted heap.
+        gc.collect()
+        # Display layout lives under tft.layout - refresh if it changed. This
+        # only stores the layout and marks a deferred render (see
+        # apply_display_layout); the ACK for this PUT_GLOBAL goes out first.
         self.apply_display_layout(device.get("tft", {}).get("layout") or [])
+
+    @staticmethod
+    def _led_dim(device):
+        """Off (dimmed) latched LED brightness on the 0..255 scale (same unit as
+        device.leds.brightness), clamped. Defaults to 64 (the old fixed
+        divide-by-4 == 25%). Back-compat: a legacy `dim_percent` (0..100) is
+        converted to the 0..255 scale when `dim` is absent."""
+        leds = device.get("leds") or {}
+        try:
+            if "dim" in leds:
+                d = int(leds.get("dim", 64))
+            elif "dim_percent" in leds:
+                d = int(leds.get("dim_percent", 25)) * 255 // 100
+            else:
+                d = 64
+        except Exception:
+            d = 64
+        return max(0, min(255, d))
 
     def _expression_for_patch(self, patch):
         """Merge the device-wide expression config with a patch's optional
@@ -917,7 +997,10 @@ class Captain:
             self._mode_index[sw] = b.get("mode", "tap")
             for fsm in self.switches.switches:
                 if fsm.name == sw:
-                    fsm.auto_momentary_on_hold = b.get("auto_momentary", global_am)
+                    # A missing OR null per-binding value inherits the global
+                    # default; only an explicit True/False overrides it.
+                    am = b.get("auto_momentary")
+                    fsm.auto_momentary_on_hold = global_am if am is None else am
                     break
         # Overlay device.preset_navigation: a "preset row" of switches that
         # select a slot inside the current bank. Per-patch wins if the patch

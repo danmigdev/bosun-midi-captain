@@ -1,4 +1,5 @@
 import binascii
+import gc
 import json
 import os
 
@@ -75,13 +76,51 @@ class Protocol:
         nl = self._rx_buf.find(b"\n")
         if nl < 0:
             return None
-        line = bytes(self._rx_buf[:nl])
-        self._rx_buf = bytearray(self._rx_buf[nl + 1:])
+        # A large inbound message (notably PUT_GLOBAL, whose device dict runs a
+        # couple of KB) has to be handed to json.loads. Copying it out to a
+        # contiguous `bytes` first (bytes(self._rx_buf[:nl])) needs a ~2 KB
+        # contiguous block, which on the tight, fragmented RP2040 heap fails even
+        # with many KB free - dropping every settings save. Instead we parse
+        # STRAIGHT from the RX buffer through a memoryview: a view, not a copy,
+        # so no extra contiguous allocation. json.loads consumes it during the
+        # call and returns a plain dict, so advancing _rx_buf afterwards is safe.
+        # gc.collect() first (coalesce) helps the parser's own working set.
+        if nl > 400:
+            try:
+                gc.collect()
+            except Exception:
+                pass
+        msg = None
+        err = None
         try:
-            return json.loads(line)
+            msg = json.loads(memoryview(self._rx_buf)[:nl])
         except ValueError:
-            self._send({"type": "ERROR", "error": "bad_json"})
+            err = "bad_json"
+        except MemoryError:
+            err = "rx_oom"
+            try:
+                gc.collect()
+            except Exception:
+                pass
+        except TypeError:
+            # A CircuitPython build whose json.loads won't take a memoryview:
+            # fall back to a contiguous copy (may still OOM on a huge message).
+            try:
+                msg = json.loads(bytes(self._rx_buf[:nl]))
+            except ValueError:
+                err = "bad_json"
+            except MemoryError:
+                err = "rx_oom"
+        # ALWAYS advance past the consumed line so a message we couldn't parse
+        # can never wedge the loop by being retried every tick.
+        self._rx_buf = bytearray(self._rx_buf[nl + 1:])
+        if err:
+            try:
+                self._send({"type": "ERROR", "error": err})
+            except Exception:
+                pass
             return None
+        return msg
 
     def emit_event(self, event, **fields):
         payload = {"type": "EVENT", "event": event}
@@ -272,7 +311,27 @@ class Protocol:
         if not use_active and pid is None:
             return                           # _resolve_profile already sent ERROR
         device = self.app.device if use_active else config.load_device_for(pid)
-        self._send({"type": "GLOBAL", "id": mid, "device": device, "profile": pid or ""})
+        # Stream the device dict field by field rather than json.dumps'ing the
+        # whole thing: the full config (TFT layout + expression + 25-bank preset
+        # colours + all settings) can exceed a single contiguous allocation on
+        # the RP2040 heap and MemoryError, which left the editor with no device
+        # config at all (empty Screen-layout / Settings, hanging layout saves).
+        # Same fix as _get_manifest. See _stream_value.
+        import gc
+        if self.port is None or not self.port.connected:
+            return
+        try:
+            gc.collect()
+            w = self._write_bytes
+            w(b'{"type":"GLOBAL","id":')
+            w(json.dumps(mid).encode())
+            w(b',"profile":')
+            w(json.dumps(pid or "").encode())
+            w(b',"device":')
+            self._stream_value(w, device, gc)
+            w(b'}\n')
+        except Exception as e:
+            print("[protocol] _send EXC type=GLOBAL err=%s" % type(e).__name__)
 
     def _list_patches(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
@@ -396,6 +455,41 @@ class Protocol:
             view = view[n:]
             stalls = 0
         return len(view)
+
+    def _stream_value(self, w, v, gc, depth=0):
+        """Write `v` as JSON directly to the port, one nested entry at a time.
+        Mirrors _get_manifest's per-field streaming but for arbitrary nested
+        JSON: dict/list are emitted element by element with a gc.collect between
+        the outer entries, so peak allocation is a single leaf rather than the
+        whole tree. Used where json.dumps of the full object MemoryErrors on the
+        RP2040 heap (e.g. GET_GLOBAL's device dict: TFT layout + expression +
+        25-bank preset colours). Collecting only at the top two levels keeps the
+        gc count sane while still bounding the peak."""
+        if isinstance(v, dict):
+            w(b'{')
+            first = True
+            for k, sv in v.items():
+                w(b'' if first else b',')
+                first = False
+                w(json.dumps(k).encode())
+                w(b':')
+                self._stream_value(w, sv, gc, depth + 1)
+                if depth < 2:
+                    sv = None
+                    gc.collect()
+            w(b'}')
+        elif isinstance(v, list):
+            w(b'[')
+            first = True
+            for el in v:
+                w(b'' if first else b',')
+                first = False
+                self._stream_value(w, el, gc, depth + 1)
+                if depth < 2:
+                    gc.collect()
+            w(b']')
+        else:
+            w(json.dumps(v).encode())
 
     def _get_manifest(self, mid):
         # The full manifest (every plugin's MESSAGE_TYPES + config/recipe

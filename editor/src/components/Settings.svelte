@@ -3,6 +3,7 @@
   import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
   import ExpressionPedals from "./ExpressionPedals.svelte";
+  import ColorField from "./ColorField.svelte";
 
   type DeviceConfig = {
     device_name?: string;
@@ -16,7 +17,7 @@
     preview?: { timeout_ms?: number; on_timeout?: "commit" | "cancel" };
     patch_link?: { implicit_by_position?: boolean; locked_slots?: number[] };
     autosave?: { enabled?: boolean; debounce_ms?: number };
-    leds?: { brightness?: number };
+    leds?: { brightness?: number; dim?: number };
     tft?: { brightness?: number; theme_color?: string; rotation?: number; rowstart?: number; colstart?: number };
     expression?: ExpressionConfig[];
     [k: string]: unknown;
@@ -64,7 +65,12 @@
     const w: DeviceConfig = d ? (structuredClone($state.snapshot(d) as DeviceConfig)) : {};
     if (w.midi_channel === undefined) w.midi_channel = 1;
     if (!w.autosave) w.autosave = { enabled: false, debounce_ms: 2000 };
-    if (!w.leds) w.leds = { brightness: 64 };
+    if (!w.leds) w.leds = { brightness: 64, dim: 64 };
+    // Back-compat: migrate a legacy dim_percent (0-100) to dim (0-255).
+    if (w.leds.dim == null) {
+      const legacy = (w.leds as { dim_percent?: number }).dim_percent;
+      w.leds.dim = legacy == null ? 64 : Math.round((legacy * 255) / 100);
+    }
     if (!w.tft) w.tft = { brightness: 80, theme_color: "#00ff88", rotation: 180, rowstart: 80, colstart: 0 };
     // Expression jacks: two by default, each backfilled to a complete entry
     // so the editor can bind enable/invert/curve/message without null checks.
@@ -299,13 +305,22 @@
       <label>Brightness (0–255)
         <input type="number" min="0" max="255" bind:value={working.leds!.brightness} />
       </label>
+      <label>Off (dimmed) LED brightness (0–255)
+        <input type="number" min="0" max="255" bind:value={working.leds!.dim} />
+      </label>
+      <p class="hint">
+        How bright a latched switch's LED is when it is OFF, on the same 0–255 scale
+        as Brightness above. It scales the ON colour: 255 = as bright as ON, 0 = off.
+        64 is the default; lower it for a fainter off state (more contrast between on
+        and off). Applies live.
+      </p>
     </section>
 
     <section class="block">
       <h3>Display</h3>
       <div class="grid">
         <label>Brightness (0–100) <input type="number" min="0" max="100" bind:value={working.tft!.brightness} /></label>
-        <label>Theme color <input type="color" bind:value={working.tft!.theme_color} /></label>
+        <label>Theme color <ColorField bind:value={working.tft!.theme_color} /></label>
         <label>Rotation
           <select bind:value={working.tft!.rotation}>
             {#each ROTATIONS as r}<option value={r}>{r}°</option>{/each}
@@ -390,7 +405,6 @@
   label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--text-muted); }
   label.cb { flex-direction: row; align-items: center; gap: 0.4rem; color: var(--text); font-size: 0.85rem; }
   input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 0.35rem 0.5rem; border-radius: 3px; font-size: 0.85rem; }
-  input[type="color"] { padding: 0; width: 50px; height: 30px; cursor: pointer; }
   input[type="checkbox"] { width: auto; }
   .saverow {
     position: sticky; bottom: 0;

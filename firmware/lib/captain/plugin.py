@@ -166,18 +166,38 @@ class PluginRegistry:
             entries = os.listdir(base_path)
         except OSError:
             return
+        entries = [e for e in entries
+                   if not (e.startswith("_") or e.startswith("."))]
+        # Import the LARGEST plugin first. Compiling a .py needs a big CONTIGUOUS
+        # heap block, and that block is only available when the heap is freshest
+        # (least fragmented) right after boot. kemper.py (~45 KB) fails to compile
+        # ("memory allocation failed") if the smaller plugins have already carved
+        # up the heap before it - so order by source size, biggest first.
+        def _size(entry):
+            try:
+                return os.stat(base_path + "/" + entry)[6]
+            except OSError:
+                return 0
+        entries.sort(key=_size, reverse=True)
         for entry in entries:
-            if entry.startswith("_") or entry.startswith("."):
-                continue
             if entry.endswith(".py"):
-                mod_name = entry[:-3]
-                self._import("plugins." + mod_name, mod_name)
+                self._import("plugins." + entry[:-3], entry[:-3])
             else:
-                # Directory plugin: must have __init__.py
-                if entry + "/__init__.py" in entries or True:
-                    self._import("plugins." + entry, entry)
+                # Directory plugin (package with __init__.py).
+                self._import("plugins." + entry, entry)
 
     def _import(self, full_name, leaf_name):
+        # Coalesce the heap before each plugin import. Compiling a large plugin
+        # (kemper.py is ~45 KB of source) needs a multi-KB contiguous block; on
+        # the fragmented RP2040 heap that alloc fails ("memory allocation
+        # failed, allocating N bytes") and the plugin silently doesn't load,
+        # even with enough total free memory. gc.collect() merges adjacent free
+        # blocks so the import has a chance at the contiguous run it needs.
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
         try:
             module = __import__(full_name, None, None, [leaf_name])
             registered = self.register(module)

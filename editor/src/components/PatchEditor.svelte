@@ -21,6 +21,7 @@
   import { defaultLedFor } from "../lib/switch-colors";
   import { resolveLinkedPatches, isSlotLocked, retargetOnEnterBank, type LinkConfig } from "../lib/patch-links";
   import PedalMap from "./PedalMap.svelte";
+  import ColorField from "./ColorField.svelte";
   import HelpTip from "./HelpTip.svelte";
   import { MODE_HELP } from "../lib/help-text";
   import { listSnippets, saveSnippet, bindingFromSnippet, type Snippet } from "../lib/snippets";
@@ -495,8 +496,7 @@
     </label>
     <label class="patchcolor" title="Color shown on the pedal's screen (TFT) for this patch">
       Screen color
-      <input type="color" bind:value={working.tft_color}
-             onchange={patchMetaChanged} />
+      <ColorField bind:value={working.tft_color} onchange={patchMetaChanged} />
     </label>
   </header>
 
@@ -815,27 +815,27 @@
               </label>
               <label>
                 LED on
-                <input type="color" value={b.led?.on ?? "#000000"}
-                       onchange={(e) => {
+                <ColorField value={b.led?.on ?? "#000000"}
+                       onchange={(hex) => {
                          if (!b.led) b.led = { on: "#000000" };
-                         b.led.on = (e.target as HTMLInputElement).value;
+                         b.led.on = hex;
                          commit(b);
                        }} />
               </label>
               {#if b.mode === "latched"}
                 <label>
                   LED off
-                  <input type="color" value={b.led?.off ?? "#000000"}
-                         onchange={(e) => {
+                  <ColorField value={b.led?.off ?? "#000000"}
+                         onchange={(hex) => {
                            // One-way binding + onchange-only writeback so
                            // that merely rendering the row doesn't push
                            // a default "#000000" into b.led.off. Without
-                           // this, Svelte's two-way bind reads back the
-                           // color input's default and the latched-off
-                           // LED renders BLACK instead of the dim
-                           // fallback derived from led.on.
+                           // this, a two-way bind reads back the color
+                           // input's default and the latched-off LED
+                           // renders BLACK instead of the dim fallback
+                           // derived from led.on.
                            if (!b.led) b.led = { on: "#000000" };
-                           b.led.off = (e.target as HTMLInputElement).value;
+                           b.led.off = hex;
                            commit(b);
                          }} />
                 </label>
@@ -845,6 +845,14 @@
                          onchange={(e) => { b.auto_momentary = (e.target as HTMLInputElement).checked; commit(b); }} />
                   auto-momentary on hold
                 </label>
+                {#if b.auto_momentary !== false}
+                  <label title="Shown on the TFT (via the 'Held effect' screen field) only while this switch is held past the auto-momentary threshold. Empty = nothing shown.">
+                    Hold text (TFT)
+                    <input value={b.hold_text ?? ""}
+                           placeholder="e.g. BOOST"
+                           onchange={(e) => { b.hold_text = (e.target as HTMLInputElement).value; commit(b); }} />
+                  </label>
+                {/if}
               {/if}
             </div>
 
@@ -940,7 +948,6 @@
   .patchhead { display: flex; gap: 1rem; align-items: end; margin-bottom: 0.75rem; }
   .patchhead label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--text-muted); }
   .patchhead input { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 0.3rem 0.5rem; border-radius: 4px; }
-  .patchhead input[type="color"] { padding: 0; width: 40px; height: 28px; cursor: pointer; }
   .on-enter, .links { background: var(--bg-hover); border-radius: 4px; margin-bottom: 0.6rem; }
   .lockrow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0.6rem; }
   .lockbtn {
@@ -998,7 +1005,6 @@
   .row input, .row select, .msg input, .msg select, .addmsg select {
     background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 0.25rem 0.4rem; border-radius: 3px; font-size: 0.8rem;
   }
-  .row input[type="color"] { padding: 0; width: 36px; height: 26px; cursor: pointer; }
   .toggle { flex-direction: row !important; align-items: center; gap: 0.4rem !important; color: var(--text) !important; }
   fieldset.action { border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.6rem; margin-bottom: 0.5rem; }
   fieldset.action legend { color: var(--accent); padding: 0 0.4rem; font-size: 0.75rem; }

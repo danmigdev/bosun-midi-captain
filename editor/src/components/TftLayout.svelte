@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
+  import ColorField from "./ColorField.svelte";
 
   type LayoutEntry = {
     field?: string;
@@ -57,6 +58,7 @@
     { id: "bank",        label: "Captain bank",     source: "core" },
     { id: "slot",        label: "Captain slot",     source: "core" },
     { id: "setlist_pos", label: "Setlist position", source: "core" },
+    { id: "hold_effect", label: "Held effect",      source: "core" },
   ];
   let pluginFields = $derived.by<FieldOpt[]>(() => {
     if (!manifest) return [];
@@ -205,6 +207,7 @@
       bank: 1,
       slot: 4,
       setlist_pos: "3/12",
+      hold_effect: "BOOST",
     };
     if (manifest) {
       for (const [, plug] of Object.entries(manifest.plugins)) {
@@ -338,7 +341,7 @@
             <label>X offset<input type="number" min="-240" max="240" bind:value={e.x} /></label>
             <label>Y offset<input type="number" min="-240" max="240" bind:value={e.y} /></label>
             <label title="Font scale (1 = smallest). Use a large size for a bold patch name.">Size<input type="number" min="1" max="12" bind:value={e.size} /></label>
-            <label>Color<input type="color" bind:value={e.color} /></label>
+            <label>Color<ColorField bind:value={e.color} /></label>
             <label>Font
               <select value={e.font ?? "system"}
                       onchange={(ev) => e.font = (ev.target as HTMLSelectElement).value}>
@@ -433,7 +436,6 @@
   input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
                   padding: 0.3rem 0.45rem; border-radius: 3px; font-size: 0.82rem; min-width: 0; max-width: 100%; }
   input[type="number"] { width: 4.5rem; }
-  input[type="color"]  { padding: 0; width: 40px; height: 28px; }
   .grow { flex: 1; }
   button.tiny { background: var(--bg-hover); color: var(--text); border: 1px solid var(--border-strong);
                 padding: 0.2rem 0.5rem; border-radius: 3px; cursor: pointer; font-size: 0.78rem; }
@@ -444,7 +446,19 @@
             padding: 0.4rem; border-radius: 4px; cursor: pointer; font-size: 0.82rem; }
   .addbtn:hover { background: var(--accent-hover-bg); }
 
-  .previewWrap { flex-shrink: 0; }
+  /* Keep the preview pinned in view while the (often much taller) entries
+     column scrolls past it. Sticky within the .content scroll container;
+     align-self:flex-start stops the flex item stretching so it can stick.
+     max-height/overflow guard the rare case of a viewport shorter than the
+     preview so its bottom stays reachable. */
+  .previewWrap {
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    max-height: calc(100vh - 6rem);
+    overflow: auto;
+  }
   .previewWrap h3 { color: var(--accent); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.4rem; }
   .preview {
     background: #000; border: 1px solid var(--border); border-radius: 4px;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { cmd, autoConnect, disconnect, isConnected, type ProfileInfo, type Manifest } from "../lib/protocol";
+  import ColorField from "./ColorField.svelte";
 
   type Props = { manifest?: Manifest | null };
   let { manifest = null }: Props = $props();
@@ -222,7 +223,7 @@
           </select>
         </label>
         <label class="colorrow">Colour
-          <input type="color" bind:value={newColor} />
+          <ColorField bind:value={newColor} />
         </label>
         <div class="actions">
           <button onclick={() => creating = false} disabled={busy}>Cancel</button>
@@ -307,7 +308,6 @@
     padding: 0.3rem 0.5rem; border-radius: 3px; font-size: 0.82rem;
   }
   .createform .colorrow { flex-direction: row; align-items: center; gap: 0.5rem; }
-  .createform .colorrow input[type="color"] { width: 40px; height: 26px; padding: 0; cursor: pointer; border: 1px solid var(--border-strong); border-radius: 3px; }
   .createform .actions { display: flex; gap: 0.4rem; margin-top: 0.3rem; }
   .createform .actions button {
     flex: 1; padding: 0.35rem; background: var(--bg-hover); border: 1px solid var(--border-strong);

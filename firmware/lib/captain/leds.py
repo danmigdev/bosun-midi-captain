@@ -17,10 +17,14 @@ def parse_hex(color):
         return (0, 0, 0)
 
 
-_LATCHED_OFF_DIM_FACTOR = 4
+# Off (dimmed) latched LED brightness, on the SAME 0-255 scale as the overall
+# LED brightness (device.leds.brightness) so the two settings share one unit.
+# It scales the on colour: 255 = as bright as on, 0 = off. 64 == the old fixed
+# "divide by 4" (25%). User-configurable via device.leds.dim.
+_LATCHED_OFF_DIM = 64
 
 
-def _color_for(binding, latched_on):
+def _color_for(binding, latched_on, dim=_LATCHED_OFF_DIM):
     led = binding.get("led", {})
     mode = binding.get("mode", "tap")
     on_rgb = parse_hex(led.get("on", "#000000"))
@@ -36,14 +40,17 @@ def _color_for(binding, latched_on):
         off_rgb = parse_hex(led["off"]) if led.get("off") is not None else None
         if off_rgb is not None and off_rgb != (0, 0, 0):
             return off_rgb
-        return (on_rgb[0] // _LATCHED_OFF_DIM_FACTOR,
-                on_rgb[1] // _LATCHED_OFF_DIM_FACTOR,
-                on_rgb[2] // _LATCHED_OFF_DIM_FACTOR)
+        d = dim
+        return (on_rgb[0] * d // 255,
+                on_rgb[1] * d // 255,
+                on_rgb[2] * d // 255)
     return on_rgb
 
 
 class Leds:
-    def __init__(self, brightness=0.25):
+    def __init__(self, brightness=0.25, dim=_LATCHED_OFF_DIM):
+        # Off (dimmed) latched LED brightness, 0-255 scaling of the on colour.
+        self.dim = dim
         self.strip = neopixel.NeoPixel(
             NEOPIXEL_PIN,
             NEOPIXEL_COUNT,
@@ -74,7 +81,7 @@ class Leds:
             binding = bindings_by_switch.get(sw.name)
             if not binding:
                 continue
-            rgb = _color_for(binding, sw.latched_on)
+            rgb = _color_for(binding, sw.latched_on, self.dim)
             for idx in LED_INDEX_PER_SWITCH.get(sw.name, ()):
                 self.strip[idx] = rgb
         self.strip.show()
@@ -82,7 +89,7 @@ class Leds:
     def set_switch_state(self, switch_name, binding, latched_on):
         """Repaint a single switch - used after a latched toggle so we don't
         re-walk all 10 bindings on every press."""
-        rgb = _color_for(binding, latched_on)
+        rgb = _color_for(binding, latched_on, self.dim)
         for idx in LED_INDEX_PER_SWITCH.get(switch_name, ()):
             self.strip[idx] = rgb
         self.strip.show()

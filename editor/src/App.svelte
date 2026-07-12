@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import PatchEditor from "./components/PatchEditor.svelte";
   import MidiLearn, { type PatchCapture } from "./components/MidiLearn.svelte";
   import Installer from "./components/Installer.svelte";
@@ -771,7 +771,7 @@
     }
   }
 
-  function openPatchInEditor(bank: number, slot: number) {
+  async function openPatchInEditor(bank: number, slot: number) {
     // Only ask the firmware to switch when this isn't already the
     // live patch. SWITCH_PATCH runs switches.reset_all() on the pedal
     // which zeroes every latched LED, so a redundant "switch to the
@@ -785,12 +785,20 @@
     // seed with a placeholder patch shape - the response fills it in
     // a moment later.
     const placeholder = patches.find(p => p.bank === bank && p.slot === slot);
+    // Switch the page in its OWN flush, before touching currentPatch. The clicked
+    // tile lives inside the {#if page === "patches"} block, whose PatchActions
+    // child reads currentPatch. Mutating currentPatch in the SAME flush as the
+    // page change made Svelte keep the Patches block mounted - the sidebar
+    // highlight moved to Editor but the content stayed on Patches (confirmed via
+    // CDP). Awaiting tick() lets the {#if} swap to the Editor block complete
+    // first; only then do we seed currentPatch and fetch the real patch.
+    page = "editor";
+    await tick();
     currentPatch = {
       bank, slot,
       patch: { name: placeholder?.name ?? "", bindings: [] },
     };
     cmd.getPatch(bank, slot).catch(() => {});
-    page = "editor";
   }
 
   // When the editor page is visible without a loaded patch, fetch the

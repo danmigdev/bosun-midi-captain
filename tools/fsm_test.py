@@ -324,6 +324,35 @@ def _():
     assert trig == ["long_press"], f"at threshold should fire, got {trig}"
 
 
+@test("is_momentary_active: latched held past threshold; not before, not on release")
+def _():
+    fsm = fresh(auto_momentary_on_hold=True, auto_momentary_ms=500)
+    press(fsm)
+    poll(fsm, "latched", 100)
+    poll(fsm, "latched", 106)              # press commits at 106
+    assert fsm.is_momentary_active(300, "latched") is False, "before threshold"
+    assert fsm.is_momentary_active(650, "latched") is True, "past threshold while held"
+    release(fsm)
+    poll(fsm, "latched", 700)
+    poll(fsm, "latched", 706)              # release commits
+    assert fsm.is_momentary_active(800, "latched") is False, "released -> inactive"
+
+
+@test("is_momentary_active: false when auto-momentary off or mode not latched")
+def _():
+    off = fresh(auto_momentary_on_hold=False, auto_momentary_ms=500)
+    press(off)
+    poll(off, "latched", 100)
+    poll(off, "latched", 106)
+    assert off.is_momentary_active(650, "latched") is False, "auto-momentary disabled"
+
+    mom = fresh()
+    press(mom)
+    poll(mom, "momentary", 100)
+    poll(mom, "momentary", 106)
+    assert mom.is_momentary_active(650, "momentary") is False, "momentary mode, not latched"
+
+
 # ---------------- runner ----------------
 
 def main():

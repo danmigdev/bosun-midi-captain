@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
+  import ColorField from "./ColorField.svelte";
 
   type Props = {
     connected: boolean;
@@ -151,7 +152,7 @@
           <span class="hint">letters, numbers, dashes</span>
         </label>
         <label class="colorrow">Colour
-          <input type="color" bind:value={profileColor} />
+          <ColorField bind:value={profileColor} />
         </label>
       </div>
       {#if err}<p class="err">{err}</p>{/if}
@@ -267,7 +268,6 @@
   }
   .form .hint { color: var(--text-dim); font-size: 0.7rem; }
   .form .colorrow { flex-direction: row; align-items: center; gap: 0.6rem; }
-  .form .colorrow input[type="color"] { width: 46px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 5px; cursor: pointer; }
 
   .actions {
     display: flex; gap: 0.6rem; justify-content: center;

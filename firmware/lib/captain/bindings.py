@@ -118,6 +118,18 @@ class SwitchFsm:
                 return ["toggle_on" if self.latched_on else "toggle_off"]
         return []
 
+    def is_momentary_active(self, now_ms, mode):
+        """True while a latched + auto-momentary switch is HELD past the
+        auto-momentary threshold - i.e. it is acting momentarily and will
+        revert on release. Drives the TFT hold indicator; does not affect
+        triggers. A quick tap (permanent toggle) never crosses the threshold,
+        so it stays False."""
+        if mode != "latched" or not self.auto_momentary_on_hold:
+            return False
+        if self._stable:                    # pull-up idle HIGH -> released
+            return False
+        return (now_ms - self._press_start_ms) >= self.auto_momentary_ms
+
     def _on_tick(self, now_ms, mode):
         triggers = []
         if mode == "long_press_alt" and not self._stable and not self._fired_long_press:

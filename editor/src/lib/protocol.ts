@@ -28,6 +28,9 @@ export interface Binding {
   label?: string;
   led?: { on?: string; off?: string };
   auto_momentary?: boolean;
+  /** Text shown on the TFT (via the hold_effect field) while this latched +
+   *  auto-momentary switch is held past the threshold. Empty/absent = nothing. */
+  hold_text?: string;
   actions: Record<string, Action>;
 }
 

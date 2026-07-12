@@ -15,6 +15,7 @@ human speeds, not at audio rates.
 import busio
 import displayio
 import fourwire
+import gc
 import math
 import pwmio
 import terminalio
@@ -305,6 +306,13 @@ class Display:
         # Leaving the tuner: the persistent tuner group is about to be replaced,
         # so the next time the tuner turns on it must rebuild from scratch.
         self._tuner_active = False
+        # Compact the heap before we build the new Group. The old root_group is
+        # still referenced (freed only when we reassign root_group below), so
+        # the new Group's labels/bitmaps peak on top of it - roughly 2x. On the
+        # RP2040's tight heap a collect here maximises the contiguous space that
+        # peak needs and keeps a settings-save render (stacked on apply_global's
+        # reindex/expression churn) from fragmenting into a MemoryError.
+        gc.collect()
         group = displayio.Group()
 
         previewing = context.get("preview") == "on"
