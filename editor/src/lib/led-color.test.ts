@@ -96,4 +96,14 @@ describe("ledColorFor", () => {
     // default (omitted) == 64 -> floor(128*64/255) = 32 = 0x20
     expect(ledColorFor(b, false)).toBe("#202020");
   });
+
+  it("(h) low-dim rounds instead of flooring so colours don't vanish unevenly", () => {
+    // At dim 4 the dominant channel of this magenta is 230*4/255 = 3.6. Flooring
+    // dropped it to 3, which then died under the strip's 0.25 brightness
+    // (3*0.25 -> 0 = black), while a channel that reached 4 survived (4*0.25 ->
+    // 1). Rounding lifts 3.6 to 4 so the colour stays lit, consistently.
+    const b = makeBinding({ mode: "latched", led: { on: "#e64bd7" } });
+    // round: (230*4+127)//255=4, (75*4+127)//255=1, (215*4+127)//255=3
+    expect(ledColorFor(b, false, 4)).toBe("#040103");
+  });
 });

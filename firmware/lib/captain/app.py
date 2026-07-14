@@ -756,10 +756,11 @@ class Captain:
         # next quiet tick (see _tick_body) makes the new dim take effect live
         # while keeping apply_global itself frugal.
         self.leds.dim = self._led_dim(device)
-        # Overall NeoPixel brightness takes effect on the strip's next show(),
-        # which the deferred repaint below performs - so this stays off the peak
-        # too. Setting the property is a cheap float assignment (no allocation).
-        self.leds.strip.brightness = self._led_brightness(device)
+        # Overall brightness takes effect on the strip's next show(), which the
+        # deferred repaint below performs - so this stays off the peak too.
+        # Stored on the Leds object (not the strip); Leds.scale() applies it per
+        # colour with rounding. Cheap float assignment (no allocation).
+        self.leds.set_brightness(self._led_brightness(device))
         self._leds_due_ms = self._now_ms() + _REFRESH_MAX_DEFER_MS
         # Reclaim the churn (reindex/expression temporaries) before the display
         # work, so the deferred render starts from a compacted heap.
@@ -996,6 +997,9 @@ class Captain:
             if target_slot not in available_slots:
                 continue
             rgb = bright_rgb if target_slot == self.current_slot else dim_rgb
+            # Apply overall brightness (the strip runs at 1.0 now; Leds.scale
+            # does the rounding-based scaling every other paint path uses).
+            rgb = self.leds.scale(rgb)
             for idx in LED_INDEX_PER_SWITCH.get(sw_name, ()):
                 self.leds.strip[idx] = rgb
         self.leds.strip.show()

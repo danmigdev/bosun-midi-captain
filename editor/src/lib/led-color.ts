@@ -60,10 +60,14 @@ export function ledColorFor(
       return rgbToHex(offRgb);
     }
     const d = dim;
+    // Round (not floor) the dim scaling - mirrors firmware leds.py _color_for.
+    // The strip applies overall brightness with a second integer truncation, so
+    // flooring here made some latched-off colours vanish to black at low dim
+    // while others survived (colour-dependent quantization). +127 == round-half.
     return rgbToHex([
-      Math.floor((onRgb[0] * d) / 255),
-      Math.floor((onRgb[1] * d) / 255),
-      Math.floor((onRgb[2] * d) / 255),
+      Math.floor((onRgb[0] * d + 127) / 255),
+      Math.floor((onRgb[1] * d + 127) / 255),
+      Math.floor((onRgb[2] * d + 127) / 255),
     ]);
   }
   return rgbToHex(onRgb);
