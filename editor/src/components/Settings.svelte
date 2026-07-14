@@ -392,7 +392,7 @@
       {#if savedAt}<span class="ok">saved at {savedAt}</span>{/if}
       {#if saveErr}<span class="err">{saveErr}</span>{/if}
       <span class="grow"></span>
-      <span class="hint small">Most settings apply live. Display + LED changes need a reboot.</span>
+      <span class="hint small">Most settings apply live. Display changes need a reboot.</span>
     </footer>
   </div>
 {/if}

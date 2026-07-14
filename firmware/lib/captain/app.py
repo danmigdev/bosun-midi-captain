@@ -53,7 +53,8 @@ class Captain:
             rowstart=tft.get("rowstart", 80),
             colstart=tft.get("colstart", 0),
         )
-        self.leds = Leds(dim=self._led_dim(self.device))
+        self.leds = Leds(brightness=self._led_brightness(self.device),
+                         dim=self._led_dim(self.device))
         self.midi = MidiEngine()
         self.patches = PatchStore(
             autosave_enabled=autosave.get("enabled", True),
@@ -147,6 +148,11 @@ class Captain:
         # buffer and drops block on/off deltas (which left effect LEDs stale,
         # worst on a direct pedal<->Player USB link). 0 = nothing pending.
         self._refresh_due_ms = 0
+        # Deferred LED repaint (see apply_global + _tick_body). A settings save
+        # that changes leds.dim needs the strip repainted to take effect live,
+        # but doing it inline in apply_global piled onto the settings-save heap
+        # peak; we schedule it for the next quiet tick instead. 0 = nothing due.
+        self._leds_due_ms = 0
         self._last_midi_in_ms = -100000   # for the "MIDI quiet" render gate
         self.loop_iters = 0
         self.midi_rx_count = 0
@@ -289,6 +295,19 @@ class Captain:
                 or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
             self._refresh_due_ms = 0
             self._refresh_display()
+        # Deferred LED repaint, on the same quiet-drain gate as the TFT render.
+        # Runs off apply_global's heap peak (a tick or two later, once the churn
+        # is reclaimed) so a leds.dim change from a settings save applies live
+        # without the inline-repaint MemoryError.
+        if self._leds_due_ms and (
+                now_ms >= self._leds_due_ms
+                or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
+            self._leds_due_ms = 0
+            try:
+                self.leds.render_patch(self.current_patch, self.switches.switches)
+                self._paint_preset_nav_leds()
+            except Exception as e:
+                print("deferred LED repaint failed:", e)
         # Advance any marquee (scrolling) labels. Cheap no-op when no label
         # overflows; it only moves each scrolling label's .x (a small dirty
         # region), so it doesn't block the loop the way a full render does.
@@ -730,13 +749,18 @@ class Captain:
             print("expression apply_global configure failed:", e)
             self.expression.configure(device.get("expression"))
         gc.collect()
-        # Off (dimmed) latched LED brightness. Store it for the next repaint; we
-        # do NOT repaint the strip live here - that render_patch +
-        # _paint_preset_nav_leds churn added to the settings-save peak and pushed
-        # the tight heap into MemoryError. LED/brightness changes taking effect
-        # on the next patch load (or reboot) matches the Settings note ("Display
-        # + LED changes need a reboot") and keeps apply_global frugal.
+        # Off (dimmed) latched LED brightness. Store it, then DEFER the repaint:
+        # doing render_patch + _paint_preset_nav_leds inline here piled onto the
+        # settings-save peak (config parse + reindex + expression rebuild) and
+        # pushed the tight heap into MemoryError. Scheduling the repaint for the
+        # next quiet tick (see _tick_body) makes the new dim take effect live
+        # while keeping apply_global itself frugal.
         self.leds.dim = self._led_dim(device)
+        # Overall NeoPixel brightness takes effect on the strip's next show(),
+        # which the deferred repaint below performs - so this stays off the peak
+        # too. Setting the property is a cheap float assignment (no allocation).
+        self.leds.strip.brightness = self._led_brightness(device)
+        self._leds_due_ms = self._now_ms() + _REFRESH_MAX_DEFER_MS
         # Reclaim the churn (reindex/expression temporaries) before the display
         # work, so the deferred render starts from a compacted heap.
         gc.collect()
@@ -762,6 +786,18 @@ class Captain:
         except Exception:
             d = 64
         return max(0, min(255, d))
+
+    @staticmethod
+    def _led_brightness(device):
+        """Overall NeoPixel brightness as a 0.0..1.0 float. Stored in device
+        config on the 0..255 scale (device.leds.brightness); NeoPixel wants a
+        float. Defaults to 64 (== 0.25), clamped."""
+        leds = device.get("leds") or {}
+        try:
+            b = int(leds.get("brightness", 64))
+        except Exception:
+            b = 64
+        return max(0, min(255, b)) / 255
 
     def _expression_for_patch(self, patch):
         """Merge the device-wide expression config with a patch's optional
