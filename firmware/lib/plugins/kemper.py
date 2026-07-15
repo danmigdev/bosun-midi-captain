@@ -142,6 +142,14 @@ MESSAGE_TYPES = {
         },
         "summary": "Morph {value}",
     },
+    "kemper_morph_trigger": {
+        "label": "Morph Trigger",
+        "params": {
+            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        },
+        "summary": "Morph {state}",
+    },
     "kemper_wah": {
         "label": "Wah Pedal",
         "params": {
@@ -500,6 +508,9 @@ def dispatch(msg, midi):
 
     elif t == "kemper_morph":
         midi.send_cc(ch, 4, int(msg.get("value", 64)))
+
+    elif t == "kemper_morph_trigger":
+        midi.send_cc(ch, 80, 127 if msg.get("state", "on") == "on" else 0)
 
     elif t == "kemper_wah":
         midi.send_cc(ch, 1, int(msg.get("value", 64)))
