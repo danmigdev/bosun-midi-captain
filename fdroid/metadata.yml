@@ -28,7 +28,8 @@ Description: |
 RepoType: git
 Repo: https://github.com/danmigdev/bosun-midi-captain.git
 
-Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.5.0/bosun.apk
+Binaries:
+  - https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.5.0/bosun.apk
 
 AllowedAPKSigningKeys: 53fd21db1e975195c7f6faf45f9c3f3a3fdcb310738762a61397be175e136e93
 
