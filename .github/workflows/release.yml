@@ -135,12 +135,15 @@ jobs:
           echo "artifact -> $f"
 
       - name: Upload to release
-        shell: bash
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Bosun ${{ github.ref_name }}
+          files: ${{ steps.art.outputs.file }}
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: false
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release upload "$TAG" "${{ steps.art.outputs.file }}" --clobber
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   android:
     runs-on: ubuntu-latest
@@ -234,9 +237,12 @@ jobs:
           echo "APK ready: $(ls -lh release/bosun.apk)"
 
       - name: Upload APK to release
-        shell: bash
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Bosun ${{ github.ref_name }}
+          files: release/bosun.apk
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release upload "$TAG" release/bosun.apk --clobber
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
