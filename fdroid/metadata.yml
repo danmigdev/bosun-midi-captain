@@ -2,12 +2,9 @@
 # Submit this file as: metadata/com.bosun.app.yml
 # To: https://gitlab.com/fdroid/fdroiddata
 #
-# Build environment requirements:
-# - Rust toolchain with aarch64-linux-android, armv7-linux-androideabi
-#   i686-linux-android, x86_64-linux-android targets
-# - Android SDK 34+ with NDK 25+
-# - Node.js 22+ for frontend build (Vite + Svelte)
-# - JDK 21+
+# This app uses pre-built APKs from GitHub Releases because the build
+# requires Rust + Android SDK + NDK (Tauri v2), which are not available
+# in F-Droid's standard Debian build environment.
 
 Categories:
   - Multimedia
@@ -18,42 +15,34 @@ IssueTracker: https://github.com/danmigdev/bosun-midi-captain/issues
 Changelog: https://github.com/danmigdev/bosun-midi-captain/releases
 
 AutoName: Bosun
-Summary: Editor for PaintAudio MIDI Captain MIDI foot controllers
+Summary: Configure MIDI Captain pedals from your phone
 
 Description: |
-  Bosun is an editor for the PaintAudio MIDI Captain pedal. It lets you
-  configure every switch, binding, LED colour, and TFT layout on the pedal
-  through a visual interface. Supports plugins for Kemper Player, Hotone
-  Ampero II Stage, Line 6 Helix, and generic MIDI devices.
+  Bosun is an editor for the PaintAudio MIDI Captain pedal. Connect your
+  pedal to your Android phone via USB-OTG and edit every aspect of your
+  MIDI foot controller on the go.
 
-  Connect your MIDI Captain pedal to your Android phone via USB-OTG to
-  edit patches, bindings, and device settings on the go, just like the
-  desktop editor.
+  Features:
+  - Edit patches and bindings: tap, latched, momentary, long-press,
+    double-tap modes with multi-message chains
+  - Data-driven UI adapts to any plugin (Kemper Player, Ampero II Stage,
+    Line 6 Helix, generic MIDI)
+  - LED colour configuration per switch, per state
+  - TFT screen layout editor
+  - MIDI Learn table
+  - Expression pedal calibration and assignment
+  - Profile management
+  - Setlist view for gig organization
+  - Works entirely offline with the pedal over USB
 
 RepoType: git
 Repo: https://github.com/danmigdev/bosun-midi-captain.git
 
-Builds:
-  - versionName: '0.4.16'
-    versionCode: 1
-    commit: HEAD
-    subdir: editor
-    sudo:
-      - apt-get install -y nodejs npm openjdk-21-jdk-headless
-    init:
-      - npm ci
-      - npm run build
-      - cd src-tauri
-      - rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-      - npx tauri android init || true
-    gradle:
-      - yes
-    prebuild: cd src-tauri && npx tauri android build --apk --ci
-    scanignore:
-      - src-tauri/gen/android
-      - src-tauri/target
+Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.5.0/bosun.apk
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.4.16
+CurrentVersion: 0.5.0
 CurrentVersionCode: 1
+
+AntiFeatures: []
