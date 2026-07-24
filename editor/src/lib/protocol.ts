@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { IS_ANDROID } from "./platform";
 
 
 // --------------------- domain types ---------------------
@@ -433,15 +434,19 @@ export type BridgeStatus = {
   pedal_port: string | null;
 };
 export async function midiListPorts(): Promise<MidiPorts> {
+  if (IS_ANDROID) return { inputs: [], outputs: [] };
   return invoke<MidiPorts>("midi_list_ports");
 }
 export async function midiBridgeStart(kemper?: string, pedal?: string): Promise<BridgeStatus> {
+  if (IS_ANDROID) return { active: false, kemper_port: null, pedal_port: null };
   return invoke<BridgeStatus>("midi_bridge_start", { kemper: kemper ?? null, pedal: pedal ?? null });
 }
 export async function midiBridgeStop(): Promise<void> {
+  if (IS_ANDROID) return;
   await invoke("midi_bridge_stop");
 }
 export async function midiBridgeStatus(): Promise<BridgeStatus> {
+  if (IS_ANDROID) return { active: false, kemper_port: null, pedal_port: null };
   return invoke<BridgeStatus>("midi_bridge_status");
 }
 export async function connect(port: string): Promise<void> {
@@ -682,11 +687,11 @@ export const cmd = {
   stopLearn:      () => send({ type: "STOP_MIDI_LEARN", id: nextId() }),
   getMidiLearn:   () => send({ type: "GET_MIDI_LEARN", id: nextId() }),
   putMidiLearn:   (table: MidiLearnTable) => send({ type: "PUT_MIDI_LEARN", id: nextId(), table }),
-  reboot:         () => send({ type: "REBOOT", id: nextId() }),
+  reboot:         () => { if (!IS_ANDROID) send({ type: "REBOOT", id: nextId() }); },
   getStats:       () => sendAndAwait<{ type: "STATS" } & DeviceStats>({ type: "STATS" }, 6000),
-  putFileBegin:   (path: string) => sendAndAwait({ type: "PUT_FILE_BEGIN", path }, 5000),
-  putFileChunk:   (path: string, data_b64: string) => sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64 }, 5000),
-  putFileEnd:     (path: string) => sendAndAwait({ type: "PUT_FILE_END", path }, 5000),
+  putFileBegin:   (path: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_BEGIN", path }, 5000),
+  putFileChunk:   (path: string, data_b64: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64 }, 5000),
+  putFileEnd:     (path: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_END", path }, 5000),
 
   // ----- profiles -----
   listProfiles:   () => sendAndAwait<{ type: "PROFILE_LIST"; profiles: ProfileInfo[]; active: string }>(

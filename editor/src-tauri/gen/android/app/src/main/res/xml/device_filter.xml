@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Raspberry Pi Pico / RP2040 (used by MIDI Captain and other CircuitPython boards).
+         The Pico's CDC-ACM serial appears with vendor-id 0x2E8A.
+         Matching by vendor-id only (no product-id) so any Pico-based pedal in
+         any USB configuration (CDC, MIDI, MSC) triggers the app. -->
+    <usb-device vendor-id="11914" /> <!-- 0x2E8A = 11914 decimal -->
+</resources>

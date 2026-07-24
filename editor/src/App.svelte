@@ -25,6 +25,8 @@
   import PedalSimulator from "./components/PedalSimulator.svelte";
   import DeviceImport from "./components/DeviceImport.svelte";
   import SetlistView from "./components/SetlistView.svelte";
+  import { IS_ANDROID } from "./lib/platform";
+  import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
   import type { SetlistItem } from "./lib/setlists";
   import {
     autoConnect,
@@ -408,6 +410,55 @@
       // doesn't bounce against a stale "already connected" state.
       try { await disconnect(); } catch {}
       error = "Lost connection to firmware - click Connect to re-attach.";
+    });
+
+    // ---- Android lifecycle (Phase 3) ----
+    // On Android, the app can be backgrounded or killed at any time.
+    // We save state before suspend and auto-reconnect on resume.
+
+    // Restore session state from a prior process kill.
+    const saved = restoreSessionState();
+    if (saved && typeof saved._page === "string") {
+      page = saved._page as Page;
+    }
+
+    // Save session state when the app goes to background.
+    onLifecycleChange((state) => {
+      if (state === "background") {
+        saveSessionState({ _page: page });
+      }
+      if (state === "active" && !connected && !manualMode) {
+        // Came back to foreground - try to reconnect silently.
+        // Don't show errors if the pedal isn't plugged in.
+        busy = true;
+        void (async () => {
+          try {
+            connectedPortName = await autoConnect();
+            connected = true;
+            await refetchAll();
+          } catch { /* pedal may not be present */ }
+          finally { busy = false; }
+        })();
+      }
+    });
+
+    // Android back button: navigate through page history instead of
+    // closing the app. The stack is: home -> patches -> editor -> settings etc.
+    onBackButton(() => {
+      if (page === "home") return false; // let the app close from home
+      // Go back one logical step
+      if (page === "editor" || page === "settings" || page === "tft" ||
+          page === "learn" || page === "setlist" || page === "recipes" ||
+          page === "expression" || page === "monitor" || page === "mirror") {
+        page = "patches";
+        return true;
+      }
+      if (page === "patches") {
+        page = "home";
+        return true;
+      }
+      page = "home";
+      return true;
     });
   });
 
@@ -1132,22 +1183,24 @@
     {#if connected}
       <ProfilePicker {manifest} />
 
-      <!-- Firmware status: only meaningful when we're actually talking
-           to a pedal. Disconnected → no claim, no button. -->
-      {#if updateStatus.kind === "checking"}
-        <span class="fwstatus muted">Checking for updates…</span>
-      {:else if updateAvailable}
-        <button class="topbtn primary"
-                onclick={() => showFirmwarePush = true}
-                title={onlineNewer
-                  ? `Installs the bundled firmware v${bundledVersion}. A newer release (v${onlineNewer}) is available online - update the editor to ship it.`
-                  : `Installs the bundled firmware v${bundledVersion}`}>
-          Update firmware ({deviceInfo?.fw ?? "?"} -> {bundledVersion})
-        </button>
-      {:else if updateStatus.kind === "error"}
-        <button class="topbtn ghost" onclick={checkForFirmwareUpdate} title={updateStatus.message}>Update check failed - retry</button>
-      {:else if deviceInfo?.fw}
-        <span class="fwstatus muted" title="Firmware up to date">v{deviceInfo.fw} ✓</span>
+      <!-- Firmware update: desktop-only (needs the bundled UF2 + firmware
+           tree shipped as Tauri resources, which don't exist on Android). -->
+      {#if !IS_ANDROID}
+        {#if updateStatus.kind === "checking"}
+          <span class="fwstatus muted">Checking for updates…</span>
+        {:else if updateAvailable}
+          <button class="topbtn primary"
+                  onclick={() => showFirmwarePush = true}
+                  title={onlineNewer
+                    ? `Installs the bundled firmware v${bundledVersion}. A newer release (v${onlineNewer}) is available online - update the editor to ship it.`
+                    : `Installs the bundled firmware v${bundledVersion}`}>
+            Update firmware ({deviceInfo?.fw ?? "?"} -> {bundledVersion})
+          </button>
+        {:else if updateStatus.kind === "error"}
+          <button class="topbtn ghost" onclick={checkForFirmwareUpdate} title={updateStatus.message}>Update check failed - retry</button>
+        {:else if deviceInfo?.fw}
+          <span class="fwstatus muted" title="Firmware up to date">v{deviceInfo.fw} ✓</span>
+        {/if}
       {/if}
     {/if}
 
@@ -1214,16 +1267,15 @@
 
         <!-- Fresh pedal with no firmware? The installer walks you through
              putting the Pico in bootloader mode and flashing CircuitPython +
-             the bosun firmware. Surfaced as a quiet secondary link so it
-             doesn't fight with the primary Connect CTA. Always shown - the
-             install wizard itself detects what the pedal actually needs.
-             Blocked while connecting so it can't open the installer (which
-             would tear down the in-flight serial connection). -->
-        <hr class="divider" />
-        <p class="install-link">
-          New pedal - never flashed before?
-          <button class="linkbtn" onclick={() => showInstaller = true} disabled={busy}>Install firmware →</button>
-        </p>
+             the bosun firmware. Desktop-only: firmware installation via USB
+             mass storage / UF2 bootloader is not available on Android. -->
+        {#if !IS_ANDROID}
+          <hr class="divider" />
+          <p class="install-link">
+            New pedal - never flashed before?
+            <button class="linkbtn" onclick={() => showInstaller = true} disabled={busy}>Install firmware →</button>
+          </p>
+        {/if}
       </div>
     </main>
   {:else}
@@ -2091,4 +2143,78 @@
 
   .muted { color: #9aa1ad; }
   .err { color: #ef9b9b; font-size: 0.85rem; }
+
+  /* ---------- mobile layout (Android / narrow viewport) ---------- */
+  @media (max-width: 767px) {
+    /* Stack the topbar vertically, hide non-essential controls */
+    .topbar {
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      padding: 0.35rem 0.5rem;
+    }
+    .topbar .grow { display: none; }
+    .topbar .wordmark { font-size: 0.95rem; }
+    .uiscale { display: none; }
+
+    /* Sidebar becomes a compact bottom navigation bar */
+    .shell {
+      flex-direction: column-reverse;
+    }
+    .sidebar {
+      flex-direction: row;
+      flex-shrink: 0;
+      width: 100%;
+      padding: 0.25rem 0.2rem;
+      gap: 0;
+      border-right: none;
+      border-top: 1px solid var(--border);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sidebar .navgroup-label { display: none; }
+    .navitem {
+      flex-direction: column;
+      gap: 0.15rem;
+      padding: 0.35rem 0.4rem;
+      min-width: 3rem;
+      border-radius: 6px;
+      font-size: 0.65rem;
+    }
+    .navitem .icon { font-size: 1.1rem; }
+    .navitem .lbl { font-size: 0.6rem; }
+
+    .content {
+      flex: 1;
+      padding: 0.4rem;
+      overflow-y: auto;
+    }
+
+    /* Toast closer to top on mobile (under the topbar) */
+    .toast {
+      top: 3rem;
+      right: 0.4rem;
+      left: 0.4rem;
+      min-width: 0;
+      max-width: none;
+    }
+
+    /* Welcome card full-width */
+    .welcome .card {
+      margin: 1rem 0.5rem;
+      padding: 1.2rem;
+    }
+
+    /* Page headers stacked */
+    .pageHead {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.4rem;
+    }
+
+    /* Toolbar wraps tighter */
+    .toolbar { gap: 0.35rem; }
+
+    /* Connpill smaller */
+    .connpill { font-size: 0.72rem; padding: 0.15rem 0.5rem; }
+  }
 </style>

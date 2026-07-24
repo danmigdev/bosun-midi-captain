@@ -1,3 +1,9 @@
+// Desktop serial backend using the serial2 crate.
+// Compiled only on non-Android targets (Windows, macOS, Linux).
+// This file is the original serial.rs, moved here unchanged to preserve
+// the serial2 data-corruption fix (see docs/plans/20260615_084932_serialport_rs_read_corruption.md).
+#![cfg(not(target_os = "android"))]
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

@@ -611,4 +611,7 @@
       grid-template-columns: 1fr;
     }
   }
+  @media (max-width: 767px) {
+    .icon-btn { min-width: 36px; min-height: 36px; font-size: 1rem; }
+  }
 </style>

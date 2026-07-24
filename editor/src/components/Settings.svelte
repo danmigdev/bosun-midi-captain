@@ -421,4 +421,23 @@
   .muted { color: var(--text-muted); }
   .hint { color: var(--text-muted); font-size: 0.8rem; margin: 0.2rem 0 0.4rem; }
   .hint.small { font-size: 0.75rem; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .form { padding: 0.5rem; }
+    .block { padding: 0.5rem; margin-bottom: 0.5rem; }
+    .block h3 { font-size: 0.9rem; }
+    .grid { grid-template-columns: 1fr; gap: 0.4rem; }
+    .grid input, .grid select, .grid textarea, .form input, .form select {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.5rem;
+      min-height: 44px;
+    }
+    .grid input[type="checkbox"] { width: auto; min-height: auto; }
+    .grid input[type="color"] { width: 100%; min-height: 44px; }
+    .cb { flex-wrap: wrap; gap: 0.35rem; }
+    .saverow { flex-direction: column; gap: 0.35rem; }
+    .saverow button { width: 100%; min-height: 44px; }
+  }
 </style>

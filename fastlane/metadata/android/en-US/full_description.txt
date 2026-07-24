@@ -1,0 +1,12 @@
+Bosun is an editor for the PaintAudio MIDI Captain pedal. Connect your pedal to your Android phone via USB-OTG and edit every aspect of your MIDI foot controller on the go.
+
+Features:
+- Edit patches and bindings: tap, latched, momentary, long-press, double-tap modes with multi-message chains
+- Data-driven UI: the editor reads the firmware manifest and adapts to any plugin (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI)
+- LED colour configuration per switch, per state
+- TFT screen layout editor
+- MIDI Learn table: map incoming Program Changes to patches
+- Expression pedal calibration and assignment
+- Profile management: multiple device profiles on one pedal
+- Setlist view for gig organization
+- No internet required: works entirely offline with the pedal over USB

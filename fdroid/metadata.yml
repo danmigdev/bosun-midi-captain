@@ -1,0 +1,59 @@
+# F-Droid Metadata for Bosun
+# Submit this file as: metadata/com.bosun.app.yml
+# To: https://gitlab.com/fdroid/fdroiddata
+#
+# Build environment requirements:
+# - Rust toolchain with aarch64-linux-android, armv7-linux-androideabi
+#   i686-linux-android, x86_64-linux-android targets
+# - Android SDK 34+ with NDK 25+
+# - Node.js 22+ for frontend build (Vite + Svelte)
+# - JDK 21+
+
+Categories:
+  - Multimedia
+License: MIT
+AuthorName: danmigdev
+SourceCode: https://github.com/danmigdev/bosun-midi-captain
+IssueTracker: https://github.com/danmigdev/bosun-midi-captain/issues
+Changelog: https://github.com/danmigdev/bosun-midi-captain/releases
+
+AutoName: Bosun
+Summary: Editor for PaintAudio MIDI Captain MIDI foot controllers
+
+Description: |
+  Bosun is an editor for the PaintAudio MIDI Captain pedal. It lets you
+  configure every switch, binding, LED colour, and TFT layout on the pedal
+  through a visual interface. Supports plugins for Kemper Player, Hotone
+  Ampero II Stage, Line 6 Helix, and generic MIDI devices.
+
+  Connect your MIDI Captain pedal to your Android phone via USB-OTG to
+  edit patches, bindings, and device settings on the go, just like the
+  desktop editor.
+
+RepoType: git
+Repo: https://github.com/danmigdev/bosun-midi-captain.git
+
+Builds:
+  - versionName: '0.4.16'
+    versionCode: 1
+    commit: HEAD
+    subdir: editor
+    sudo:
+      - apt-get install -y nodejs npm openjdk-21-jdk-headless
+    init:
+      - npm ci
+      - npm run build
+      - cd src-tauri
+      - rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - npx tauri android init || true
+    gradle:
+      - yes
+    prebuild: cd src-tauri && npx tauri android build --apk --ci
+    scanignore:
+      - src-tauri/gen/android
+      - src-tauri/target
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.4.16
+CurrentVersionCode: 1

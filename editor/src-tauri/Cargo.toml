@@ -12,22 +12,35 @@ tauri = { version = "2", default-features = false, features = ["wry"] }
 tauri-plugin-shell = "2"
 # Persist and restore the main window size/position across launches.
 tauri-plugin-window-state = "2"
-serial2 = "0.2"
-# Enumeration only (USB VID/PID of COM ports), to spot a pedal-class device
-# that isn't running bosun. serial2 stays the live connection layer.
-serialport = { version = "4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
 base64 = "0.22"
-rfd = "0.15"
 dirs = "5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# USB-MIDI relay between the Kemper (Player) and the pedal. The Player is
-# USB-MIDI only and the pedal is a USB device (not a host), so the PC has to
-# bridge them - this replaces running tools/midi_bridge.py by hand. Uses the
-# winmm backend on Windows (no extra system deps).
+
+# Platform-specific serial and MIDI dependencies.
+# Desktop: serial2 for CDC serial (the ONLY crate that correctly reads
+# multi-KB CDC data on Windows -- see docs/plans/20260615_084932). serialport
+# for USB VID/PID enumeration in installer.rs.
+# Android: tauri-plugin-serialplugin v3 (pure Rust, uses nusb +
+# android-usb-serial, supports CDC-ACM). No firmware installer on mobile.
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+serial2 = "0.2"
+serialport = { version = "4", default-features = false }
+# Native file dialog used by export.rs for folder picker. Desktop-only.
+rfd = "0.15"
+# USB-MIDI relay between the Kemper (Player) and the pedal. Uses winmm
+# on Windows, CoreMIDI on macOS, ALSA on Linux. Desktop-only.
 midir = "0.10"
+
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-serialplugin = "3"
+
+[lib]
+name = "bosun_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [profile.release]
 opt-level = "s"

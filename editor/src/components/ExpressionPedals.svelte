@@ -237,4 +237,18 @@
   .calrow button {
     padding: 0.32rem 0.6rem; font-size: 0.76rem; align-self: end;
   }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .exp-row { flex-direction: column; gap: 0.4rem; }
+    .exp-row label { font-size: 0.72rem; }
+    .exp-row input, .exp-row select {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.5rem;
+      min-height: 44px;
+    }
+    .exp-sliders { gap: 0.5rem; }
+    .cal-row { flex-wrap: wrap; gap: 0.35rem; }
+  }
 </style>

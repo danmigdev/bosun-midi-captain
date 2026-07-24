@@ -27,3 +27,7 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Android signing keys (supplied via GitHub Secrets for CI)
+*.keystore
+*.jks

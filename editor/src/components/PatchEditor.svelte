@@ -1058,4 +1058,43 @@
   }
   .param.inv { flex-direction: column; }
   .param.inv input[type="checkbox"] { align-self: flex-start; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .patchhead {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+    .patchhead label { font-size: 0.72rem; }
+    .row {
+      flex-direction: column;
+      gap: 0.45rem;
+      margin-bottom: 0.5rem;
+    }
+    .row label { font-size: 0.68rem; }
+    .row input, .row select {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.5rem;
+      min-height: 44px;
+    }
+    .bindinghead {
+      padding: 0.55rem 0.5rem;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      min-height: 44px;
+    }
+    .sw { min-width: 2rem; font-size: 0.75rem; }
+    .mode { min-width: 5rem; font-size: 0.7rem; }
+    .bindingbody { padding: 0.4rem 0.5rem 0.55rem; }
+    .bindingfoot { flex-direction: column; gap: 0.35rem; }
+    .msg input, .msg select, .addmsg select {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.5rem;
+      min-height: 44px;
+    }
+    .pedalmap-wrap { padding: 0.3rem; }
+  }
 </style>

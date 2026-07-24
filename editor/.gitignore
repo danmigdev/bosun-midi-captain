@@ -3,3 +3,11 @@ dist/
 .svelte-kit/
 src-tauri/target/
 *.log
+
+# Android Gradle build outputs (keep the project sources, ignore caches/builds)
+src-tauri/gen/android/**/build/
+src-tauri/gen/android/**/.gradle/
+src-tauri/gen/android/**/local.properties
+src-tauri/gen/android/**/*.keystore
+# .so files are build artifacts (copied from cargo target/)
+src-tauri/gen/android/**/jniLibs/

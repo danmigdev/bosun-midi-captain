@@ -141,3 +141,102 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           gh release upload "$TAG" "${{ steps.art.outputs.file }}" --clobber
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Rust toolchain with Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0 ndk;25.2.9519653 cmdline-tools;latest"
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/src-tauri
+
+      - name: Install node deps
+        working-directory: editor
+        run: npm install --no-audit --no-fund
+
+      - name: Provision bundled firmware resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          RES=editor/src-tauri/resources
+          mkdir -p "$RES/firmware" "$RES/lib"
+          cp -r firmware "$RES/firmware"
+          find "$RES/firmware" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          curl -fL -o "$RES/circuitpython.uf2" \
+            "https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2"
+
+      - name: Init Android project
+        working-directory: editor
+        run: npx tauri android init
+
+      - name: Build Android APK (debug)
+        working-directory: editor
+        run: npx tauri android build --apk --debug
+        continue-on-error: true
+
+      - name: Build Android APK (release, unsigned)
+        working-directory: editor
+        run: npx tauri android build --apk
+        continue-on-error: true
+
+      - name: Sign Release APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_apk
+        with:
+          releaseDirectory: editor/src-tauri/gen/android/app/build/outputs/apk/universal/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEYSTORE_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        continue-on-error: true
+
+      - name: Prepare APK for release
+        shell: bash
+        run: |
+          mkdir -p release
+          # Prefer signed universal release, then unsigned release, then debug
+          if [ -f editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned-signed.apk ]; then
+            cp editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned-signed.apk release/bosun.apk
+            echo "Using signed release APK"
+          elif [ -f editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk ]; then
+            cp editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk release/bosun.apk
+            echo "Using unsigned release APK"
+          else
+            # Fall back to arm64 debug APK
+            cp editor/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk release/bosun.apk 2>/dev/null || \
+            cp $(find editor/src-tauri/gen/android -name "*.apk" -path "*/debug/*" | head -1) release/bosun.apk
+            echo "Using debug APK (installable, for testing)"
+          fi
+          echo "APK ready: $(ls -lh release/bosun.apk)"
+
+      - name: Upload APK to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "$TAG" release/bosun.apk --clobber

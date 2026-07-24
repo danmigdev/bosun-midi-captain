@@ -9,12 +9,26 @@
 
 use std::path::PathBuf;
 
+/// Open a native folder picker dialog. Desktop-only (uses `rfd`).
+/// On Android, returns the app's external documents directory.
 #[tauri::command]
 pub fn pick_export_folder() -> Result<Option<String>, String> {
-    let picked = rfd::FileDialog::new()
-        .set_title("Choose where to save the export")
-        .pick_folder();
-    Ok(picked.map(|p| p.to_string_lossy().to_string()))
+    #[cfg(not(target_os = "android"))]
+    {
+        let picked = rfd::FileDialog::new()
+            .set_title("Choose where to save the export")
+            .pick_folder();
+        return Ok(picked.map(|p| p.to_string_lossy().to_string()));
+    }
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use the app's external files directory as the
+        // default export location (no native folder picker available).
+        let docs = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
+        Ok(Some(docs.to_string_lossy().to_string()))
+    }
 }
 
 #[tauri::command]
@@ -81,6 +95,12 @@ pub fn open_in_file_manager(path: String) -> Result<(), String> {
             .arg(&path)
             .spawn()
             .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "android")]
+    {
+        // Android has no native file manager intent from Rust.
+        // The export folder path is shown to the user in the UI instead.
+        let _ = path;
     }
     Ok(())
 }

@@ -311,4 +311,14 @@
   .muted { color: var(--text-muted); }
   .small { font-size: 0.85rem; line-height: 1.5; }
   .muted.small { margin: 0; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .dashboard { padding: 0.4rem; }
+    .grid { grid-template-columns: 1fr; gap: 0.6rem; }
+    .card { padding: 0.75rem; }
+    .cardtitle { font-size: 0.85rem; }
+    .hero { padding: 1rem 0.5rem; }
+    .pill { font-size: 0.72rem; }
+  }
 </style>

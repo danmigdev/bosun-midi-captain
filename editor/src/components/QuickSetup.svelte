@@ -283,4 +283,23 @@
   .muted { color: var(--text-muted); }
   .hint { color: var(--text-muted); font-size: 0.8rem; margin: 0; }
   .hint.small { font-size: 0.72rem; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .qs-grid {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+    .qs-card { padding: 0.6rem; }
+    .qs-card h4 { font-size: 0.82rem; }
+    .qs-card input, .qs-card select {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.5rem;
+      min-height: 44px;
+    }
+    .qs-row { flex-direction: column; gap: 0.35rem; }
+    .qs-actions { flex-direction: column; gap: 0.35rem; }
+    .qs-actions button { width: 100%; min-height: 44px; }
+  }
 </style>

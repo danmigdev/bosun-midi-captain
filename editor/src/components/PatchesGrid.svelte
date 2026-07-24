@@ -253,4 +253,21 @@
   /* Locked column: a faint accent tint on the left edge so the linked
      group reads as a unit down the column. */
   .cell.locked .tile.filled { border-top: 2px solid var(--accent-border); }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .searchbar { max-width: none; }
+    .grid {
+      grid-template-columns: 2rem repeat(var(--cols, 3), minmax(72px, 1fr));
+      gap: 0.3rem;
+    }
+    .head { font-size: 0.65rem; padding: 0.2rem; }
+    .head.rowhead { padding-right: 0.2rem; }
+    .cell { min-height: 48px; }
+    .tile { padding: 0.3rem 0.35rem; }
+    .tile__name { font-size: 0.72rem; }
+    .tile__id { font-size: 0.62rem; }
+    .lockicon { width: 11px; height: 11px; }
+    .slotno { font-size: 0.62rem; }
+  }
 </style>

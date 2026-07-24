@@ -473,4 +473,17 @@
   }
   .marqueeInner { display: inline-block; white-space: nowrap; will-change: transform; }
   .prevhint { color: var(--text-dim); font-size: 0.72rem; margin: 0.4rem 0 0; max-width: 240px; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    .tft-grid { gap: 0.3rem; }
+    .tft-field { padding: 0.35rem 0.4rem; }
+    .tft-preview { max-width: 180px; margin: 0 auto; }
+    .tft-row { flex-direction: column; gap: 0.35rem; }
+    .tft-row select, .tft-row input {
+      width: 100%;
+      font-size: 0.9rem;
+      min-height: 44px;
+    }
+  }
 </style>

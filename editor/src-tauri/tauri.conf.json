@@ -39,6 +39,10 @@
       "resources/circuitpython.uf2": "circuitpython.uf2",
       "resources/firmware": "firmware",
       "resources/lib": "lib"
+    },
+    "android": {
+      "minSdkVersion": 29,
+      "versionCode": 1
     }
   }
 }

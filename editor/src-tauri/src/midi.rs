@@ -3,6 +3,12 @@
 //! The Kemper Player is USB-MIDI only and the MIDI Captain pedal is a USB
 //! device (not a host), so the two cannot talk directly - the PC must relay
 //! MIDI both ways. This is the in-editor equivalent of tools/midi_bridge.py:
+//!
+//! Desktop-only: uses the midir crate (winmm on Windows, CoreMIDI on macOS,
+//! ALSA on Linux). Not compiled on Android -- the midir Android NDK backend
+//! requires a powered USB-C hub for simultaneous Kemper + pedal connections,
+//! which is a niche mobile setup. See docs/plans/kind-jumping-pike.md Phase 2.
+#![cfg(not(target_os = "android"))]
 //! it forwards every message (SYSEX included - that carries the Kemper
 //! bidirectional protocol) between the Player and the pedal, dropping only
 //! clock / active-sensing to keep the link quiet.

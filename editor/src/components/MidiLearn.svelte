@@ -263,4 +263,13 @@
   .empty-state__title { font-size: 1.05rem; font-weight: 600; color: var(--text); margin-bottom: 0.45rem; }
   .empty-state__hint  { margin: 0; color: var(--text-muted); font-size: 0.85rem; line-height: 1.55; }
   .empty-state__hint em { font-style: normal; color: var(--text); font-weight: 500; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 767px) {
+    table { font-size: 0.75rem; }
+    table th, table td { padding: 0.35rem 0.4rem; }
+    .midilearn { padding: 0.4rem; }
+    .captures { max-height: 40vh; overflow-y: auto; }
+    .bridge { flex-wrap: wrap; gap: 0.3rem; }
+  }
 </style>
