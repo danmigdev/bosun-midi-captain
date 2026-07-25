@@ -273,6 +273,20 @@
   let unsubDisc: (() => void) | null = null;
 
   onMount(async () => {
+    // Detect Android status bar height. On Android the WebView extends
+    // behind the system status bar, so we measure the offset of a fixed
+    // top:0 element to get the actual inset and set a CSS variable.
+    try {
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;pointer-events:none;z-index:-1";
+      document.body.appendChild(probe);
+      const inset = probe.getBoundingClientRect().top;
+      probe.remove();
+      if (inset > 0) {
+        document.documentElement.style.setProperty("--status-bar-height", `${inset}px`);
+      }
+    } catch {}
+
     unsubMsg  = await onFirmwareMessage(handleMessage);
     unsubDisc = await onDisconnected(async () => {
       connected = false; learning = false; deviceInfo = null;
@@ -1761,6 +1775,10 @@
 
   .app {
     display: flex; flex-direction: column; height: 100vh;
+    /* Status bar inset: env() works on iOS and modern Android WebViews.
+       Fallback: we set a JS-driven --status-bar-height custom property
+       via platform.ts's android-lifecycle module. */
+    padding-top: var(--status-bar-height, env(safe-area-inset-top, 0px));
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;

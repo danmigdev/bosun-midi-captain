@@ -31,3 +31,4 @@ Thumbs.db
 # Android signing keys (supplied via GitHub Secrets for CI)
 *.keystore
 *.jks
+release/
