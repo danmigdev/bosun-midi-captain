@@ -217,7 +217,7 @@ def _empty_device_json():
         "auto_momentary_ms": 500,
         "long_press_actions": {},
         "autosave": {"enabled": False, "debounce_ms": 2000},
-        "leds": {"brightness": 64},
+        "leds": {"brightness": 64, "dim": 4},
         "tft": {"brightness": 80, "theme_color": "#00ff88", "rotation": 180, "rowstart": 80, "colstart": 0},
         "expression": [
             {"jack": 1, "enabled": False, "invert": False,

@@ -977,21 +977,22 @@ class Captain:
         up with the bank's color (from device.preset_navigation.bank_colors,
         falling back to a neutral grey if not configured). The switch
         pointing at the active slot is full bright; the others are dimmed
-        by `dim_factor`. Called after leds.render_patch so it overrides the
+        with the same proportional formula used for latched-off LEDs
+        (leds.dim). Called after leds.render_patch so it overrides the
         LEDs of those switches."""
         nav = self.device.get("preset_navigation") or {}
         sw_map = nav.get("switches") or {}
         if not sw_map:
             return
-        dim_factor = max(1, int(nav.get("dim_factor", 4)))
         bank_colors = nav.get("bank_colors") or {}
         bank_color = bank_colors.get(str(self.current_bank)) or "#888888"
         available_slots = {p["slot"] for p in self.patches.list()
                            if p["bank"] == self.current_bank}
         bright_rgb = parse_hex(bank_color)
-        dim_rgb = (bright_rgb[0] // dim_factor,
-                   bright_rgb[1] // dim_factor,
-                   bright_rgb[2] // dim_factor)
+        d = self.leds.dim
+        dim_rgb = ((bright_rgb[0] * d + 127) // 255,
+                   (bright_rgb[1] * d + 127) // 255,
+                   (bright_rgb[2] * d + 127) // 255)
         for sw_name, target_slot in sw_map.items():
             target_slot = int(target_slot)
             if target_slot not in available_slots:

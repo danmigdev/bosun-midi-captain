@@ -1,0 +1,29 @@
+{
+  "name": "LEAD",
+  "tft_color": "#3ecb6e",
+  "on_enter": {
+    "messages": [
+      {"type": "headrush_rig", "rig": 5, "channel": 1}
+    ]
+  },
+  "bindings": [
+    {
+      "switch": "3",
+      "mode": "latched",
+      "label": "MOD",
+      "led": {"on": "#e8c84f"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "headrush_block", "block": 2, "state": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "headrush_block", "block": 2, "state": "off", "channel": 1}
+          ]
+        }
+      }
+    }
+  ]
+}

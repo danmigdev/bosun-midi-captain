@@ -1,16 +1,19 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Offline tests for the Bosun firmware plugins.
 
-Covers the four device profiles under firmware/lib/plugins/:
-  - generic_midi.py  (program_change_bank, cc_toggle)
-  - line6_helix.py   (preset, snapshot, footswitch table with the FS6 gap,
-                      tap tempo, tuner, looper, update_context)
-  - ampero.py        (cross-plugin self-consistency)
-  - kemper.py        (cross-plugin self-consistency)
+Covers the five device profiles under firmware/lib/plugins/:
+  - generic_midi.py   (program_change_bank, cc_toggle)
+  - line6_helix.py    (preset, snapshot, footswitch table with the FS6 gap,
+                       tap tempo, tuner, looper, update_context)
+  - ampero.py         (cross-plugin self-consistency)
+  - kemper.py         (cross-plugin self-consistency)
+  - headrush_core.py  (rig load/step, bank step, scene, block, footswitch,
+                       expression, looper, drums, tempo, tuner, FS mode,
+                       practice tool, misc toggles, update_context)
 
 Two flavours of test:
   1) Targeted dispatch checks that pin down exact CC numbers / ordering for
-     generic_midi and line6_helix.
+     generic_midi, line6_helix, and headrush_core.
   2) A CROSS-PLUGIN self-consistency sweep over every plugin's MESSAGE_TYPES:
      summary placeholders resolve to declared params, enum defaults are valid
      members, and each message type is dispatchable with its own declared
@@ -37,10 +40,11 @@ from pathlib import Path
 FIRMWARE_LIB = Path(__file__).resolve().parent.parent / "firmware" / "lib"
 sys.path.insert(0, str(FIRMWARE_LIB))
 
-import plugins.generic_midi as generic_midi   # noqa: E402
-import plugins.line6_helix as line6_helix     # noqa: E402
-import plugins.ampero as ampero               # noqa: E402
-import plugins.kemper as kemper               # noqa: E402
+import plugins.generic_midi as generic_midi       # noqa: E402
+import plugins.line6_helix as line6_helix         # noqa: E402
+import plugins.ampero as ampero                   # noqa: E402
+import plugins.kemper as kemper                   # noqa: E402
+import plugins.headrush_core as headrush_core     # noqa: E402
 
 
 # ---------------- test harness (same reporting style as bilateral_test) ----------------
@@ -218,9 +222,240 @@ def _():
     assert ctx["tuner"] == "off", ctx
 
 
-# =================== 3) CROSS-PLUGIN self-consistency ===================
+# =================== 3) headrush_core.py dispatch ===================
 
-ALL_PLUGINS = [generic_midi, line6_helix, ampero, kemper]
+@test("headrush: headrush_rig -> PC = rig-1 (1-based -> 0-based)")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_rig", "channel": 1, "rig": 42}, m)
+    assert m.sent == [("pc", 1, 41)], m.sent
+
+
+@test("headrush: headrush_rig_step up -> CC17=127, down -> CC16=127")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_rig_step", "channel": 1, "direction": "up"}, m)
+    assert m.sent == [("cc", 1, 17, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_rig_step", "channel": 1, "direction": "down"}, m)
+    assert m.sent == [("cc", 1, 16, 127)], m.sent
+
+
+@test("headrush: headrush_bank_step up -> CC19=127, down -> CC18=127")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_bank_step", "channel": 1, "direction": "up"}, m)
+    assert m.sent == [("cc", 1, 19, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_bank_step", "channel": 1, "direction": "down"}, m)
+    assert m.sent == [("cc", 1, 18, 127)], m.sent
+
+
+@test("headrush: headrush_scene 1 -> CC21, scene 10 -> CC30")
+def _():
+    cases = [(1, 21), (5, 25), (10, 30)]
+    for scene, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_scene", "channel": 1, "scene": scene}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"scene {scene} -> {m.sent}"
+
+
+@test("headrush: headrush_block on/off uses CC75-88 for blocks 1-14")
+def _():
+    # Block 1 -> CC75, Block 14 -> CC88
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_block", "channel": 1, "block": 1, "state": "on"}, m)
+    assert m.sent == [("cc", 1, 75, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_block", "channel": 1, "block": 14, "state": "off"}, m)
+    assert m.sent == [("cc", 1, 88, 0)], m.sent
+
+
+@test("headrush: headrush_footswitch 1 press -> CC49=127, FS5 release -> CC53=0")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_footswitch", "channel": 1, "fs": 1, "action": "press"}, m)
+    assert m.sent == [("cc", 1, 49, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_footswitch", "channel": 1, "fs": 5, "action": "release"}, m)
+    assert m.sent == [("cc", 1, 53, 0)], m.sent
+
+
+@test("headrush: headrush_expression -> CC1 with the given value")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_expression", "channel": 1, "value": 100}, m)
+    assert m.sent == [("cc", 1, 1, 100)], m.sent
+
+
+@test("headrush: headrush_looper actions map to correct CCs")
+def _():
+    cases = [
+        ("half_speed",   65), ("double_speed", 66),
+        ("half_loop",    67), ("double_loop",  68),
+        ("start_stop",   69), ("record",       70),
+        ("insert",       71), ("peel",         72),
+        ("mute",         73), ("reverse",      74),
+    ]
+    for action, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_looper", "channel": 1, "action": action}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"looper {action} -> {m.sent}"
+
+
+@test("headrush: headrush_drums actions map to correct CCs")
+def _():
+    cases = [
+        ("open_close", 31), ("play_stop", 42), ("fill", 43),
+        ("kit_next", 33), ("volume_up", 39), ("accent", 47),
+    ]
+    for action, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_drums", "channel": 1, "action": action}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"drums {action} -> {m.sent}"
+
+
+@test("headrush: headrush_tempo tap -> CC64, increase -> CC13, decrease -> CC12")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_tempo", "channel": 1, "action": "tap"}, m)
+    assert m.sent == [("cc", 1, 64, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_tempo", "channel": 1, "action": "increase"}, m)
+    assert m.sent == [("cc", 1, 13, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_tempo", "channel": 1, "action": "decrease"}, m)
+    assert m.sent == [("cc", 1, 12, 127)], m.sent
+
+
+@test("headrush: headrush_tuner sends CC92 (toggle)")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_tuner", "channel": 1, "state": "on"}, m)
+    assert m.sent == [("cc", 1, 92, 127)], m.sent
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_tuner", "channel": 1, "state": "off"}, m)
+    assert m.sent == [("cc", 1, 92, 127)], m.sent   # toggle CC, same value either way
+
+
+@test("headrush: headrush_fs_mode maps stomp/hybrid/setlist/rig/5rig to CC94-98")
+def _():
+    cases = [("stomp", 94), ("hybrid", 95), ("setlist", 96), ("rig", 97), ("5rig", 98)]
+    for mode, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_fs_mode", "channel": 1, "mode": mode}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"mode {mode} -> {m.sent}"
+
+
+@test("headrush: headrush_practice actions map to correct CCs")
+def _():
+    cases = [
+        ("open_close", 102), ("play_pause", 103), ("stop", 104),
+        ("pitch_down", 111), ("pitch_up", 112),
+    ]
+    for action, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_practice", "channel": 1, "action": action}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"practice {action} -> {m.sent}"
+
+
+@test("headrush: headrush_misc actions map to correct CCs")
+def _():
+    cases = [
+        ("hands_free", 90), ("looper_page", 91), ("lock_screen", 93), ("mic_dry", 89),
+    ]
+    for action, cc in cases:
+        m = FakeMidi()
+        headrush_core.dispatch({"type": "headrush_misc", "channel": 1, "action": action}, m)
+        assert m.sent == [("cc", 1, cc, 127)], f"misc {action} -> {m.sent}"
+
+
+@test("headrush: headrush_pedal_switch sends CC14 (A/B toggle)")
+def _():
+    m = FakeMidi()
+    headrush_core.dispatch({"type": "headrush_pedal_switch", "channel": 1}, m)
+    assert m.sent == [("cc", 1, 14, 127)], m.sent
+
+
+@test("headrush: update_context sets headrush_rig and headrush_scene")
+def _():
+    ctx = {}
+    headrush_core.update_context({"type": "headrush_rig", "rig": 42}, ctx)
+    assert ctx["headrush_rig"] == 42, ctx
+    headrush_core.update_context({"type": "headrush_scene", "scene": 5}, ctx)
+    assert ctx["headrush_scene"] == 5, ctx
+
+
+@test("headrush: on_midi_in ignores non-PC status")
+def _():
+    called = []
+
+    class MockApp:
+        device = {"headrush_core": {"auto_follow_pc": True}}
+
+    headrush_core.on_midi_in("din", 1, 0xB0, [20, 127], MockApp())
+    # CC message should not trigger switch_patch
+    # (can't assert on a method that wasn't called, but we verify no crash)
+
+
+@test("headrush: on_midi_in skips when auto_follow_pc is disabled")
+def _():
+    class MockApp:
+        device = {"headrush_core": {"auto_follow_pc": False}}
+        switch_patch = None  # not callable -- would crash if reached
+
+    # Should return early without trying to switch
+    headrush_core.on_midi_in("din", 1, 0xC0, [5], MockApp())
+
+
+@test("headrush: on_midi_in PC lookup matches channel+pc and switches patch")
+def _():
+    switched = []
+
+    class MockApp:
+        device = {"headrush_core": {"auto_follow_pc": True}}
+        midi_learn_table = {
+            "pc_to_patch": [
+                {"channel": 1, "bank_msb": 0, "pc": 5, "captain_patch": "3/2"},
+                {"channel": 2, "bank_msb": 0, "pc": 5, "captain_patch": "4/1"},
+            ],
+        }
+
+        def switch_patch(self, bank, slot, source=None):
+            switched.append((bank, slot, source))
+
+    headrush_core.on_midi_in("din", 1, 0xC0, [5], MockApp())
+    assert switched == [(3, 2, "midi_in")], switched
+
+
+@test("headrush: on_midi_in PC lookup with non-zero bank_msb is skipped")
+def _():
+    switched = []
+
+    class MockApp:
+        device = {"headrush_core": {"auto_follow_pc": True}}
+        midi_learn_table = {
+            "pc_to_patch": [
+                # This entry has bank_msb=1 -- HeadRush Core never sends
+                # bank MSB, so this should NOT match.
+                {"channel": 1, "bank_msb": 1, "pc": 5, "captain_patch": "5/1"},
+                {"channel": 1, "bank_msb": 0, "pc": 7, "captain_patch": "2/3"},
+            ],
+        }
+
+        def switch_patch(self, bank, slot, source=None):
+            switched.append((bank, slot, source))
+
+    headrush_core.on_midi_in("din", 1, 0xC0, [5], MockApp())
+    assert switched == [], f"bank_msb=1 should not match; got {switched}"
+    # PC 7 should still match (bank_msb=0)
+    headrush_core.on_midi_in("din", 1, 0xC0, [7], MockApp())
+    assert switched == [(2, 3, "midi_in")], switched
+
+
+# =================== 4) CROSS-PLUGIN self-consistency ===================
+
+ALL_PLUGINS = [generic_midi, line6_helix, ampero, kemper, headrush_core]
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 

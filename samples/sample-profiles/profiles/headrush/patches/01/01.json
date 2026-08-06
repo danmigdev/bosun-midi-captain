@@ -1,0 +1,47 @@
+{
+  "name": "ACOUSTIC",
+  "tft_color": "#3a8eff",
+  "on_enter": {
+    "messages": [
+      {"type": "headrush_rig", "rig": 1, "channel": 1}
+    ]
+  },
+  "bindings": [
+    {
+      "switch": "4",
+      "mode": "latched",
+      "label": "MOD",
+      "led": {"on": "#ff8a00"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "headrush_block", "block": 2, "state": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "headrush_block", "block": 2, "state": "off", "channel": 1}
+          ]
+        }
+      }
+    },
+    {
+      "switch": "up",
+      "mode": "latched",
+      "label": "DLY",
+      "led": {"on": "#00bcd4"},
+      "actions": {
+        "toggle_on": {
+          "messages": [
+            {"type": "headrush_block", "block": 3, "state": "on", "channel": 1}
+          ]
+        },
+        "toggle_off": {
+          "messages": [
+            {"type": "headrush_block", "block": 3, "state": "off", "channel": 1}
+          ]
+        }
+      }
+    }
+  ]
+}

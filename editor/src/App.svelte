@@ -36,6 +36,7 @@
     fallbackManifest,
     isConnected,
     listPorts,
+    tcpConnect,
     midiBridgeStart,
     midiBridgeStop,
     midiBridgeStatus,
@@ -732,8 +733,13 @@
       try { await disconnect(); } catch {}
       if (manualMode) {
         if (!selectedPort) throw new Error("pick a port first");
-        await connect(selectedPort);
-        connectedPortName = selectedPort;
+        if (selectedPort.startsWith("tcp://")) {
+          await tcpConnect(selectedPort.replace("tcp://", ""));
+          connectedPortName = selectedPort;
+        } else {
+          await connect(selectedPort);
+          connectedPortName = selectedPort;
+        }
       } else {
         connectedPortName = await autoConnect();
       }
@@ -1167,10 +1173,30 @@
     if (visibleNav.length && !visibleNav.some(n => n.id === page)) page = "home";
   });
 
+  // Mobile layout detection. We can't use window.innerWidth in $state init
+  // because Tauri WebView may report 0 or wrong value. $effect runs once
+  // after mount with the real viewport size, then on every resize.
+  let mobileMenuOpen = $state(false);
+  let isMobile = $state(window.innerWidth > 0 ? window.innerWidth <= 767 : true);
+  function toggleMobileMenu() { mobileMenuOpen = !mobileMenuOpen; }
+
+  $effect(() => {
+    const check = () => { isMobile = window.innerWidth <= 767; };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  });
+
 </script>
 
-<div class="app">
+<div class="app" class:mobile={isMobile}>
   <header class="topbar">
+    <!-- Mobile hamburger button -->
+    <button class="hamburger" onclick={toggleMobileMenu} aria-label="Menu">
+      <span class="ham-line"></span>
+      <span class="ham-line"></span>
+      <span class="ham-line"></span>
+    </button>
     <div class="brand">
       <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
         <!-- stylised anchor - nod to "bosun" / boatswain -->
@@ -1300,15 +1326,19 @@
         <button class="fallback-banner__retry" onclick={retryManifest}>Retry</button>
       </div>
     {/if}
+    <!-- Mobile sidebar overlay -->
+    {#if isMobile}
+      <div class="sidebar-overlay" class:open={mobileMenuOpen} onclick={toggleMobileMenu}></div>
+    {/if}
     <div class="shell">
-      <nav class="sidebar">
+      <nav class="sidebar" class:open={mobileMenuOpen} style={isMobile && !mobileMenuOpen ? "display:none" : ""}>
         {#each navGroups as grp}
           {#if grp.label}
             <div class="navgroup-label">{grp.label}</div>
           {/if}
           {#each grp.items as item}
             <button class="navitem" class:active={page === item.id}
-                    onclick={() => page = item.id}>
+                    onclick={() => { page = item.id; mobileMenuOpen = false; }}>
               <span class="icon">{item.icon}</span>
               <span class="lbl">{item.label}</span>
               {#if item.id === "patches" && dirtyIds.length > 0}
@@ -1775,10 +1805,8 @@
 
   .app {
     display: flex; flex-direction: column; height: 100vh;
-    /* Status bar inset: env() works on iOS and modern Android WebViews.
-       Fallback: we set a JS-driven --status-bar-height custom property
-       via platform.ts's android-lifecycle module. */
     padding-top: var(--status-bar-height, env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 16px);
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
@@ -2162,77 +2190,55 @@
   .muted { color: #9aa1ad; }
   .err { color: #ef9b9b; font-size: 0.85rem; }
 
-  /* ---------- mobile layout (Android / narrow viewport) ---------- */
-  @media (max-width: 767px) {
-    /* Stack the topbar vertically, hide non-essential controls */
-    .topbar {
-      flex-wrap: wrap;
-      gap: 0.35rem;
-      padding: 0.35rem 0.5rem;
-    }
-    .topbar .grow { display: none; }
-    .topbar .wordmark { font-size: 0.95rem; }
-    .uiscale { display: none; }
-
-    /* Sidebar becomes a compact bottom navigation bar */
-    .shell {
-      flex-direction: column-reverse;
-    }
-    .sidebar {
-      flex-direction: row;
-      flex-shrink: 0;
-      width: 100%;
-      padding: 0.25rem 0.2rem;
-      gap: 0;
-      border-right: none;
-      border-top: 1px solid var(--border);
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    .sidebar .navgroup-label { display: none; }
-    .navitem {
-      flex-direction: column;
-      gap: 0.15rem;
-      padding: 0.35rem 0.4rem;
-      min-width: 3rem;
-      border-radius: 6px;
-      font-size: 0.65rem;
-    }
-    .navitem .icon { font-size: 1.1rem; }
-    .navitem .lbl { font-size: 0.6rem; }
-
-    .content {
-      flex: 1;
-      padding: 0.4rem;
-      overflow-y: auto;
-    }
-
-    /* Toast closer to top on mobile (under the topbar) */
-    .toast {
-      top: 3rem;
-      right: 0.4rem;
-      left: 0.4rem;
-      min-width: 0;
-      max-width: none;
-    }
-
-    /* Welcome card full-width */
-    .welcome .card {
-      margin: 1rem 0.5rem;
-      padding: 1.2rem;
-    }
-
-    /* Page headers stacked */
-    .pageHead {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.4rem;
-    }
-
-    /* Toolbar wraps tighter */
-    .toolbar { gap: 0.35rem; }
-
-    /* Connpill smaller */
-    .connpill { font-size: 0.72rem; padding: 0.15rem 0.5rem; }
+  /* ---------- mobile layout (JS-driven, works on Android WebView) ---------- */
+  .app.mobile .topbar {
+    flex-wrap: wrap; gap: 0.35rem; padding: 0.35rem 0.5rem;
   }
+  .app.mobile .topbar .grow { display: none; }
+  .app.mobile .topbar .wordmark { font-size: 0.95rem; }
+  .app.mobile .uiscale { display: none; }
+  .app.mobile .hamburger {
+    display: flex; flex-direction: column; gap: 4px;
+    background: transparent; border: none; cursor: pointer;
+    padding: 6px; margin-right: 4px;
+  }
+  .ham-line { width: 20px; height: 2px; background: var(--text); border-radius: 1px; }
+
+  .app.mobile .sidebar {
+    display: none;
+  }
+  .app.mobile .sidebar.open {
+    display: flex; position: fixed; top: 0; left: 0;
+    width: 270px; height: 100vh; z-index: 300;
+    flex-direction: column;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-modal);
+    padding: 1rem 0.5rem; gap: 0.15rem;
+    overflow-y: auto;
+  }
+  .app.mobile .sidebar-overlay {
+    display: none; position: fixed; inset: 0;
+    z-index: 299; background: rgba(0,0,0,0.4);
+  }
+  .app.mobile .sidebar-overlay.open { display: block; }
+  .app.mobile .sidebar .navgroup-label {
+    display: block; font-size: 0.65rem;
+    padding: 0.5rem 0.5rem 0.15rem;
+  }
+  .app.mobile .navitem {
+    flex-direction: row; gap: 0.5rem;
+    padding: 0.55rem 0.65rem; border-radius: 6px;
+    font-size: 0.85rem; align-items: center;
+  }
+  .app.mobile .navitem .icon { font-size: 1rem; min-width: 1.3rem; text-align: center; }
+  .app.mobile .navitem .lbl { font-size: 0.82rem; }
+  .app.mobile .content { flex: 1; padding: 0.4rem; overflow-y: auto; }
+  .app.mobile .toast { top: 3rem; right: 0.4rem; left: 0.4rem; min-width: 0; max-width: none; }
+  .app.mobile .welcome .card { margin: 1rem 0.5rem; padding: 1.2rem; }
+  .app.mobile .pageHead { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+  .app.mobile .toolbar { gap: 0.35rem; }
+  .app.mobile .connpill { font-size: 0.72rem; padding: 0.15rem 0.5rem; }
+  .sidebar-overlay { display: none; }
+  .hamburger { display: none; }
 </style>
