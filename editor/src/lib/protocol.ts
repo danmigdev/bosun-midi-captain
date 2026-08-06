@@ -421,7 +421,13 @@ export const ACTION_KEYS_BY_MODE: Record<BindingMode, string[]> = {
 
 
 export async function listPorts(): Promise<PortInfo[]> {
-  return invoke<PortInfo[]>("list_ports");
+  const serial = await invoke<PortInfo[]>("list_ports");
+  const tcp = await invoke<PortInfo[]>("tcp_list_ports").catch(() => []);
+  return [...serial, ...tcp];
+}
+
+export async function tcpConnect(addr: string): Promise<void> {
+  await invoke("tcp_connect", { addr });
 }
 
 // ---- USB-MIDI bridge (Kemper Player <-> pedal) ----
