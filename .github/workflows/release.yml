@@ -104,6 +104,13 @@ jobs:
         working-directory: editor
         run: npm install --no-audit --no-fund
 
+      - name: Compute release display name
+        id: ver
+        shell: bash
+        run: |
+          v="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "label=${v#v}" >> "$GITHUB_OUTPUT"
+
       # Windows keeps the project's portable (no-installer) format.
       - name: Build - Windows portable zip
         if: matrix.name == 'windows'
@@ -137,7 +144,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          name: Bosun ${{ github.ref_name }}
+          name: Bosun ${{ steps.ver.outputs.label }}
           files: ${{ steps.art.outputs.file }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: false
@@ -180,6 +187,13 @@ jobs:
       - name: Install node deps
         working-directory: editor
         run: npm install --no-audit --no-fund
+
+      - name: Compute release display name
+        id: ver
+        shell: bash
+        run: |
+          v="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "label=${v#v}" >> "$GITHUB_OUTPUT"
 
       - name: Provision bundled firmware resources
         shell: bash
@@ -239,7 +253,7 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          name: Bosun ${{ github.ref_name }}
+          name: Bosun ${{ steps.ver.outputs.label }}
           files: release/bosun.apk
           tag_name: ${{ github.ref_name }}
           draft: false
