@@ -1150,17 +1150,41 @@ class Captain:
         fingerprint ran on every single tick regardless of whether a push
         was even due - real, always-on CPU tax that competed with the same
         loop's USB-MIDI/data-CDC servicing for time (2026-08-14: reported as
-        Stage updates and Kemper-block LEDs lagging well behind real time)."""
-        if now_ms - getattr(self, "_last_context_push_ms", 0) < 1000:
+        Stage updates and Kemper-block LEDs lagging well behind real time).
+
+        The 1 Hz throttle (_last_context_check_ms) advances unconditionally
+        on every check, regardless of outcome - it exists purely to bound
+        how often this runs per the perf note above. The separate
+        "delivered" bookkeeping (_last_context_fp) is a DIFFERENT gate: it
+        is only committed AFTER actually attempting the send while
+        connected - never while port.connected is False. protocol._send()
+        silently no-ops in that case, which is the normal state for the
+        first several ticks after every boot - and every USB-MIDI/data-CDC
+        self-heal reboots the RP2040 via DTR, so this race re-happens on
+        every reconnect, not just the initial one. Tying the fingerprint
+        commit to the throttle timer instead of to whether we even tried
+        to send while connected (2026-08-15: confirmed live) meant the
+        very first push after a reboot got marked "sent" while
+        port.connected was still False, and Stage Mode then received no
+        CONTEXT push again until some LATER unrelated field in
+        display_context happened to change too - on a quiet rig with
+        nothing changing, that could be indefinitely.
+
+        See the comment further below on why the JSON encode is dry-run
+        here before calling protocol._send(), instead of just calling it
+        and trusting it worked."""
+        if now_ms - getattr(self, "_last_context_check_ms", 0) < 1000:
+            return
+        self._last_context_check_ms = now_ms
+        port = self.protocol.port
+        if port is None or not port.connected:
             return
         ctx = self.display_context
         # Build a cheap fingerprint - just key count + repr of key-value pairs
         fp = (len(ctx), tuple(sorted((str(k), str(v)) for k, v in ctx.items())))
         if fp == getattr(self, "_last_context_fp", None):
             return
-        self._last_context_fp = fp
-        self._last_context_push_ms = now_ms
-        # Build a JSON-safe copy and stream it
+        # Build a JSON-safe copy
         safe = {}
         for k, v in ctx.items():
             try:
@@ -1169,10 +1193,40 @@ class Captain:
                 safe[k] = v
             except Exception:
                 safe[k] = str(v)
+        # protocol._send() never raises - it catches every exception
+        # internally (including MemoryError) and only prints "[protocol]
+        # _send EXC" to the REPL, so it cannot signal failure back here,
+        # and its own single gc.collect()-and-retry on json.dumps() isn't
+        # always enough right after a big Kemper rig-change SYSEX burst
+        # leaves the heap freshly fragmented (2026-08-15: confirmed live,
+        # twice - a CONTEXT push right after a rig change hit MemoryError
+        # both with and without an extra proactive gc.collect() beforehand,
+        # and because _send() swallows that silently, this function had no
+        # way to know the push actually failed and would commit the
+        # fingerprint as "delivered" anyway - permanently losing that
+        # state change until the next unrelated one). So dry-run the same
+        # encode here first, with our own gc.collect()-and-retry: on
+        # failure, return WITHOUT committing _last_context_fp, so the next
+        # 1 Hz tick retries the same state instead of losing it. Once this
+        # succeeds, _send()'s own internal (redundant but harmless)
+        # re-encode of the same now-uncontested payload is essentially
+        # guaranteed to succeed too.
+        obj = {"type": "CONTEXT", "context": safe}
         try:
-            self.protocol._send({"type": "CONTEXT", "context": safe})
-        except Exception:
-            pass
+            import json as _j
+            _j.dumps(obj)
+        except MemoryError:
+            try:
+                import gc as _gc
+                _gc.collect()
+            except Exception:
+                pass
+            try:
+                _j.dumps(obj)
+            except MemoryError:
+                return
+        self.protocol._send(obj)
+        self._last_context_fp = fp
 
     def find_binding(self, switch_name):
         """Return the current patch's binding for the given switch, or
