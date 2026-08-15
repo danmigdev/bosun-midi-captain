@@ -160,6 +160,16 @@ def _patch_with_block(switch_name, block):
 
 # =================== Kemper bilateral tests ===================
 
+def _reset_published():
+    """Clear the per-field publish-dedup cache so each test starts fresh.
+    Also clears the settle window: on_midi_in now opens it on a bare PC
+    (kemper.py) too, not just the rig-name SysEx - a leftover open window
+    from an earlier test's PC would silently swallow this test's
+    set_switch_latched calls (_BIDIR_STATE is module-global, not per-test)."""
+    kemper._BIDIR_STATE["published"] = {}
+    kemper._BIDIR_STATE["settle_until_ms"] = 0
+
+
 @test("kemper: CC 19 (block C) at 127 -> set_switch_latched('4', True)")
 def _():
     app = FakeApp(
@@ -295,6 +305,7 @@ def _():
     # bidirectional are no longer user options - a kemper profile is always
     # fully synced (gated only by the presence of the `kemper` section). A
     # device.json still carrying the old disabling flags must sync anyway.
+    _reset_published()
     app = FakeApp(
         bindings={"4": _patch_with_block("4", "C")},
         kemper_cfg={"enabled": False, "auto_follow_effects": False,
@@ -316,6 +327,7 @@ def _():
         (22, "X"), (24, "Mod"), (27, "Delay"), (29, "Reverb"),
     ]
     for cc, block in cases:
+        _reset_published()
         app = FakeApp(
             bindings={"sw": _patch_with_block("sw", block)},
             kemper_cfg={"enabled": True, "midi_channel": 1,
@@ -353,14 +365,9 @@ def _kemper_sysex_string_response(page, addr, ascii_bytes):
             0x03, 0x00, page, addr] + list(ascii_bytes)
 
 
-def _reset_published():
-    """Clear the per-field publish-dedup cache so each test starts fresh."""
-    kemper._BIDIR_STATE["published"] = {}
-    kemper._BIDIR_STATE["settle_until_ms"] = 0
-
-
 @test("kemper: SYSEX $01 response for block C on -> set_switch_latched")
 def _():
+    _reset_published()
     app = FakeApp(
         bindings={"4": _patch_with_block("4", "C")},
         kemper_cfg={"enabled": True, "midi_channel": 1,
@@ -373,6 +380,7 @@ def _():
 
 @test("kemper: SYSEX $01 response value=0 -> latched off")
 def _():
+    _reset_published()
     app = FakeApp(
         bindings={"4": _patch_with_block("4", "C")},
         kemper_cfg={"enabled": True, "midi_channel": 1,
@@ -388,6 +396,7 @@ def _():
     # Even though the message arrives on "channel 0" (which would normally
     # be filtered out), SYSEX is still processed because it's not a
     # channel-voice message.
+    _reset_published()
     app = FakeApp(
         bindings={"4": _patch_with_block("4", "C")},
         kemper_cfg={"enabled": True, "midi_channel": 1,

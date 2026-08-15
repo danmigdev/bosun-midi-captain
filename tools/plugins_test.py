@@ -413,7 +413,7 @@ def _():
     switched = []
 
     class MockApp:
-        device = {"headrush_core": {"auto_follow_pc": True}}
+        device = {"headrush_core": {"enabled": True, "auto_follow_pc": True}}
         midi_learn_table = {
             "pc_to_patch": [
                 {"channel": 1, "bank_msb": 0, "pc": 5, "captain_patch": "3/2"},
@@ -433,7 +433,7 @@ def _():
     switched = []
 
     class MockApp:
-        device = {"headrush_core": {"auto_follow_pc": True}}
+        device = {"headrush_core": {"enabled": True, "auto_follow_pc": True}}
         midi_learn_table = {
             "pc_to_patch": [
                 # This entry has bank_msb=1 -- HeadRush Core never sends
