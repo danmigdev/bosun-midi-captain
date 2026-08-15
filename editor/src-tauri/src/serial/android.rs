@@ -49,6 +49,21 @@ const WRITE_ONLY_STALL_THRESHOLD: u32 = 5;
 /// got to). See `call_with_timeout` in android_helpers.rs.
 const IO_CALL_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// How long the link may sit completely idle - no outbound command
+/// queued, no unsolicited firmware push - before the I/O thread sends
+/// its own lightweight PING to prove the link is still alive. Kept
+/// comfortably below the 15 s stall threshold so a keepalive always has
+/// time to land and reset `last_ok` before that timer would misfire.
+/// Needed because StageView deliberately stopped polling GET_CONTEXT on
+/// a timer (see its module comment) in favour of the firmware's
+/// change-triggered `_push_context` - so on Stage, with nothing changing
+/// on the pedal, minutes can pass with zero legitimate traffic, which
+/// the wall-clock stall check otherwise can't tell apart from a dead
+/// link (2026-08-15: confirmed live - a full reconnect cycle, including
+/// a DTR-triggered USB re-enumeration that tears down the Kemper MIDI
+/// bridge, was firing every ~15-30 s purely from Stage-view idleness).
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(6);
+
 
 // --------------------- shared app state ---------------------
 
@@ -156,6 +171,7 @@ pub async fn connect(
     let (sync_tx, sync_rx) = std::sync::mpsc::channel::<bool>();
 
     thread::spawn(move || {
+        eprintln!("[io] thread started");
         let mut accum = Vec::<u8>::with_capacity(8192);
         let mut path = path.clone();
         let mut first_cycle = true;
@@ -199,41 +215,70 @@ pub async fn connect(
                 // IOException on a Kotlin worker thread, which kills the
                 // whole app (2026-08-14 disconnect crash).
                 eprintln!("[io] stall recovery: closing and reopening");
-                let _ = close(
-                    app_for_thread.clone(),
-                    app_for_thread.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                    path.clone(),
-                );
+                // Every plugin call below is wrapped in call_with_timeout -
+                // the same Android USB-stack hang that write()/read() in
+                // the main loop already guard against (see IO_CALL_TIMEOUT's
+                // doc comment) can just as easily wedge close()/
+                // available_ports()/open() during recovery. Confirmed live
+                // (2026-08-15, second occurrence): the thread logged this
+                // exact line and then went silent forever - no reopen
+                // attempt, no re-sync, nothing - because the unguarded
+                // close() or available_ports() call below never returned.
+                let close_app = app_for_thread.clone();
+                let close_path = path.clone();
+                let close_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                    close(
+                        close_app.clone(),
+                        close_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
+                        close_path,
+                    )
+                });
+                if let Err(timeout_msg) = close_result {
+                    eprintln!("[io] close hung: {}", timeout_msg);
+                }
                 std::thread::sleep(Duration::from_millis(1500));
 
                 let mut reopened = false;
-                match available_ports(
-                    app_for_thread.clone(),
-                    app_for_thread.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                    None::<bool>,
-                ) {
-                    Ok(ports) => {
+                let ports_app = app_for_thread.clone();
+                let ports_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                    available_ports(
+                        ports_app.clone(),
+                        ports_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
+                        None::<bool>,
+                    )
+                });
+                match ports_result {
+                    Ok(Ok(ports)) => {
                         let mut names: Vec<String> = ports.keys().cloned().collect();
                         sort_ports_desc(&mut names);
                         for name in names {
                             let name_for_log = name.clone();
-                            match open(
-                                app_for_thread.clone(),
-                                app_for_thread.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                                name,
-                                115_200,
-                                Some(DataBits::Eight), Some(FlowControl::None),
-                                Some(Parity::None), Some(StopBits::One),
-                                Some(1000u64),
-                            ) {
-                                Ok(p) => { path = p; reopened = true; break; }
-                                Err(e) => {
+                            let open_app = app_for_thread.clone();
+                            let open_name = name.clone();
+                            let open_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                                open(
+                                    open_app.clone(),
+                                    open_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
+                                    open_name,
+                                    115_200,
+                                    Some(DataBits::Eight), Some(FlowControl::None),
+                                    Some(Parity::None), Some(StopBits::One),
+                                    Some(1000u64),
+                                )
+                            });
+                            match open_result {
+                                Ok(Ok(p)) => { path = p; reopened = true; break; }
+                                Ok(Err(e)) => {
                                     eprintln!("[io] reopen {} failed: {}", name_for_log, e);
+                                }
+                                Err(timeout_msg) => {
+                                    eprintln!("[io] reopen {} hung: {}", name_for_log, timeout_msg);
                                 }
                             }
                         }
                     }
-                    Err(e) => eprintln!("[io] re-enumerate failed: {}", e),
+                    Ok(Err(e)) => eprintln!("[io] re-enumerate failed: {}", e),
+                    Err(timeout_msg) => eprintln!("[io] re-enumerate hung: {}", timeout_msg),
                 }
                 if !reopened {
                     eprintln!("[io] reopen failed on all ports");
@@ -259,22 +304,39 @@ pub async fn connect(
             let mut synced = false;
             while std::time::Instant::now() < sentinel_deadline && !synced {
                 if *stop_for_thread.lock().unwrap() { break; }
-                let _ = write(
-                    app_for_thread.clone(),
-                    app_for_thread.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                    path.clone(),
-                    ping_line.clone(),
-                );
+                // Same hang class as the recovery path above and the main
+                // loop's write()/read() - wrap both plugin calls so a
+                // wedged PING or ACK read can't freeze the thread before
+                // it ever reaches the instrumented main loop.
+                let ping_app = app_for_thread.clone();
+                let ping_path = path.clone();
+                let ping_line_for_call = ping_line.clone();
+                let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                    write(
+                        ping_app.clone(),
+                        ping_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
+                        ping_path,
+                        ping_line_for_call,
+                    )
+                });
+                if let Err(timeout_msg) = write_result {
+                    eprintln!("[io] sentinel write hung: {}", timeout_msg);
+                }
                 let mut deadline = std::time::Instant::now() + Duration::from_secs(3);
                 while std::time::Instant::now() < deadline && !synced {
-                    match read(
-                        app_for_thread.clone(),
-                        app_for_thread.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                        path.clone(),
-                        Some(100u64),
-                        Some(4096usize),
-                    ) {
-                        Ok(data) if !data.is_empty() => {
+                    let read_app = app_for_thread.clone();
+                    let read_path = path.clone();
+                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                        read(
+                            read_app.clone(),
+                            read_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
+                            read_path,
+                            Some(100u64),
+                            Some(4096usize),
+                        )
+                    });
+                    match read_result {
+                        Ok(Ok(data)) if !data.is_empty() => {
                             accum.extend_from_slice(data.as_bytes());
                             if marker_found(&accum, &sync_id) {
                                 synced = true;
@@ -283,8 +345,12 @@ pub async fn connect(
                                 accum.drain(..accum.len() - 8192);
                             }
                         }
-                        Ok(_) => break,
-                        Err(_) => break,
+                        Ok(Ok(_)) => break,
+                        Ok(Err(_)) => break,
+                        Err(timeout_msg) => {
+                            eprintln!("[io] sentinel read hung: {}", timeout_msg);
+                            break;
+                        }
                     }
                 }
                 if !synced {
@@ -362,7 +428,14 @@ pub async fn connect(
                 // the firmware stalls and the response is truncated.
                 // Received data within the last 500 ms = stream in flight.
                 if last_ok.elapsed() > Duration::from_millis(500) {
-                    let cmd: Option<String> = outbox_for_thread.lock().unwrap().pop_front();
+                    let queued: Option<String> = outbox_for_thread.lock().unwrap().pop_front();
+                    let (cmd, is_keepalive) = match queued {
+                        Some(data) => (Some(data), false),
+                        None if last_ok.elapsed() > KEEPALIVE_IDLE => {
+                            (Some("{\"type\":\"PING\",\"id\":\"__keepalive\"}".to_string()), true)
+                        }
+                        None => (None, false),
+                    };
                     if let Some(data) = cmd {
                         let mut line = data;
                         if !line.ends_with('\n') { line.push('\n'); }
@@ -377,7 +450,11 @@ pub async fn connect(
                             Ok(Ok(_)) => {
                                 last_ok = std::time::Instant::now();
                                 writes_since_last_read += 1;
-                                eprintln!("[io] write ok, writes_since_last_read={}", writes_since_last_read);
+                                if is_keepalive {
+                                    eprintln!("[io] keepalive ping sent");
+                                } else {
+                                    eprintln!("[io] write ok, writes_since_last_read={}", writes_since_last_read);
+                                }
                             }
                             Ok(Err(e)) => {
                                 let msg = format!("{}", e);
@@ -387,7 +464,9 @@ pub async fn connect(
                                     eprintln!("[io] fatal write error: {}", reason);
                                     break 'main;
                                 }
-                                outbox_for_thread.lock().unwrap().push_front(line_for_retry);
+                                if !is_keepalive {
+                                    outbox_for_thread.lock().unwrap().push_front(line_for_retry);
+                                }
                             }
                             Err(timeout_msg) => {
                                 // The write() call itself never returned - the
