@@ -142,6 +142,9 @@ class FakeApp:
     def apply_midi_learn(self, table):
         self.midi_learn_table = table
 
+    def _poll_switches_mid_op(self):
+        self.mid_op_poll_count = getattr(self, "mid_op_poll_count", 0) + 1
+
 
 class _FakePatchStore:
     def __init__(self):
@@ -261,6 +264,23 @@ def _():
     # And called write at least 8 times (the stall limit).
     assert port.write_call_count >= 8, port.write_call_count
     # AND it must not have hung the test - if we get here we're fine.
+
+
+@test("_send: a stalled port re-polls switches on every retry (not just MIDI)")
+def _():
+    # Regression: this loop had the exact same shape as midi._tx_usb's
+    # stalled-write retry (see midi_tx_test.py) but with NO poll_hook and a
+    # much larger worst case - each write() can block up to write_timeout
+    # (200ms) and this retries up to 8 times, so a switch_pressed EVENT (or
+    # any other response - ACK, the 1Hz Stage CONTEXT push) sent while the
+    # host is slow to drain the data CDC could swallow a footswitch tap the
+    # same way a stalled MIDI write could (found 2026-08-15 chasing that bug).
+    port = FakePort(max_per_write=0)
+    p, _ = build_protocol(port)
+    p._send({"type": "EVENT", "event": "switch_pressed", "switch": "1"})
+    assert port.write_call_count >= 8, port.write_call_count
+    assert p.app.mid_op_poll_count >= 8, \
+        f"expected a mid-op switch poll per retry, got {getattr(p.app, 'mid_op_poll_count', 0)}"
 
 
 @test("_send: port=None is a no-op (no crash)")

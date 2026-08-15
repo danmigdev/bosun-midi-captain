@@ -104,6 +104,13 @@ class MidiEngine:
         # loop work and CDC traffic during a burst, so the app only wires this
         # while the monitor panel is open.
         self.tx_monitor = None
+        # Optional callback invoked on every retry spin of a stalled USB write
+        # (see _tx_usb). Captain wires this to a passive switch re-poll so a
+        # footswitch press-and-release that happens entirely inside a blocked
+        # write - up to the ~10 ms budget below - still gets its debounce
+        # state advanced instead of the pin transition going completely
+        # unobserved until the next main-loop tick.
+        self.poll_hook = None
 
     # ------------- outbound ----------------
 
@@ -175,7 +182,16 @@ class MidiEngine:
                 if w is None:
                     w = len(chunk)
                 if w == 0:
-                    # Buffer full - tiny yield, then retry while still in budget.
+                    # Buffer full. Give the caller a chance to re-sample switch
+                    # pins before the tiny yield - without this, a footswitch
+                    # tap that lands entirely inside this retry loop is
+                    # invisible to the main loop (it only reads pins once per
+                    # tick, and this loop can run for up to ~10 ms straight).
+                    if self.poll_hook is not None:
+                        try:
+                            self.poll_hook()
+                        except Exception:
+                            pass                  # must never break MIDI TX
                     time.sleep(0.0005)
                     continue
                 sent += w

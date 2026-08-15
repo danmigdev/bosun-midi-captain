@@ -21,6 +21,7 @@ SUITES = [
     "preview_tuner_test.py",        # app-level preset preview + tuner exit-on-press
     "setlist_test.py",              # app-level setlist navigation (device-aware setlist)
     "midi_parser_test.py",          # MIDI stream parser (running status, realtime, SYSEX)
+    "midi_tx_test.py",              # MIDI outbound TX retry loop + switch poll_hook interleave
     "protocol_test.py",             # USB CDC protocol handlers + partial-write streaming
     "expression_test.py",           # expression-pedal calibration / curves / deadband
     "plugins_test.py",              # plugin dispatch + cross-plugin manifest consistency

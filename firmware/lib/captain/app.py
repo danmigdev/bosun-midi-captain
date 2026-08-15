@@ -36,6 +36,19 @@ _REFRESH_MAX_DEFER_MS = 250
 # gate that actually paces the tuner.
 _TUNER_REFRESH_MS = 30
 
+# Target main-loop period. run() sleeps only the REMAINDER of this budget
+# after tick_once() - not a flat amount - so a tick that already ran long
+# (a TFT render, a stalled MIDI write) doesn't tack on more dead time on top
+# of a stall that already delayed the next switch poll. A fast, empty tick
+# still sleeps close to the full budget, so idle CPU/power use is unchanged.
+_TICK_BUDGET_MS = 5
+
+# A tick this long or longer is counted in slow_tick_count (see tick_once /
+# stats). Picked well above a normal empty tick but comfortably under a
+# realistic minimum footswitch tap, so the counter tracks ticks long enough
+# to plausibly swallow a press, not routine jitter.
+_SLOW_TICK_THRESHOLD_MS = 15
+
 _MIDI_TYPE_NAME = {
     0x80: "note_off",
     0x90: "note_on",
@@ -62,6 +75,10 @@ class Captain:
         self.leds = Leds(brightness=self._led_brightness(self.device),
                          dim=self._led_dim(self.device))
         self.midi = MidiEngine()
+        # See _poll_switches_mid_op: lets a stalled USB-MIDI write re-sample
+        # switch pins instead of the main loop being blind to them for the
+        # whole retry budget.
+        self.midi.poll_hook = self._poll_switches_mid_op
         self.patches = PatchStore(
             autosave_enabled=autosave.get("enabled", True),
             autosave_debounce_ms=autosave.get("debounce_ms", 2000),
@@ -171,6 +188,26 @@ class Captain:
         # Last hold-indicator text shown, so we only refresh the TFT when it
         # actually changes.
         self._last_hold_effect = ""
+        # Triggers captured by _poll_switches_mid_op (a switch edge observed
+        # while the loop was stuck retrying a stalled USB-MIDI write, not
+        # during the normal top-of-tick scan). Queued rather than fired
+        # immediately - firing here would run a binding's action chain
+        # re-entrantly, nested inside whatever action chain caused the
+        # stalled write in the first place. Drained at the top of the next
+        # _tick_body instead, same as any other tick's triggers.
+        self._pending_triggers = []
+        # Per-tick timing, so real hardware runs can be measured instead of
+        # guessed at - see tick_once / stats. Answers "how bad are the
+        # blocking stalls really" for tuning _TICK_BUDGET_MS and friends.
+        self._last_tick_ms = 0
+        self.max_tick_ms = 0
+        self.slow_tick_count = 0
+        # Per-section breakdown of the worst tick ever seen for each named
+        # phase of _tick_body (see _bump_section) - answers "WHICH part of a
+        # slow tick is actually slow" instead of just "some tick somewhere
+        # was slow" (max_tick_ms alone can't distinguish a 400ms TFT render
+        # from a 30ms recurring cost elsewhere; this can).
+        self._section_max_ms = {}
 
         self.patches.on_dirty_changed = self._emit_dirty_state
         self.patches.on_saved = self._emit_saved
@@ -225,7 +262,13 @@ class Captain:
                     _wdt.feed()
                 except Exception:
                     pass
-            time.sleep(0.005)
+            # Sleep only the REMAINDER of the tick budget (see
+            # _TICK_BUDGET_MS) rather than a flat amount, so a tick that
+            # already ran long - a TFT render, a stalled MIDI write - doesn't
+            # tack more dead time on top of a stall that already delayed the
+            # next switch poll.
+            if self._last_tick_ms < _TICK_BUDGET_MS:
+                time.sleep((_TICK_BUDGET_MS - self._last_tick_ms) / 1000.0)
 
     def tick_once(self):
         """One main-loop iteration, made exception-safe.
@@ -237,7 +280,13 @@ class Captain:
         propagated out of run(), code.py exited, and the USB data CDC went
         dead, so the editor saw "not connected". We now catch per-iteration
         and keep the loop (and the connection) alive. Verified by
-        tools/firmware_stability_test.py."""
+        tools/firmware_stability_test.py.
+
+        Also times itself (see _last_tick_ms / max_tick_ms / slow_tick_count
+        in stats()) - the only way to know, on real hardware, how close the
+        blocking operations in a tick actually come to swallowing a
+        footswitch tap, instead of guessing from source-level cost estimates."""
+        t0 = self._now_ms()
         try:
             self._tick_body()
         except Exception as e:
@@ -245,20 +294,43 @@ class Captain:
                 print("loop error:", e)
             except Exception:
                 pass
+        self._last_tick_ms = self._now_ms() - t0
+        if self._last_tick_ms > self.max_tick_ms:
+            self.max_tick_ms = self._last_tick_ms
+        if self._last_tick_ms >= _SLOW_TICK_THRESHOLD_MS:
+            self.slow_tick_count += 1
+
+    def _bump_section(self, name, dt):
+        """Record dt (ms) as the new worst-case for named _tick_body phase
+        `name` if it beats the running max. See _section_max_ms."""
+        if dt > self._section_max_ms.get(name, 0):
+            self._section_max_ms[name] = dt
 
     def _tick_body(self):
         self.loop_iters += 1
+        _pt = self._now_ms()
+        # Fire anything _poll_switches_mid_op queued up during the previous
+        # tick's blocking work (a stalled MIDI write) before this tick's own
+        # scan - see _pending_triggers.
+        if self._pending_triggers:
+            pending, self._pending_triggers = self._pending_triggers, []
+            for name, action_key in pending:
+                self._fire(name, action_key)
+        _t = self._now_ms(); self._bump_section("pending_triggers", _t - _pt); _pt = _t
         msg = self.protocol.poll()
         if msg is not None:
             self.protocol_cmd_count += 1
             self.protocol.handle(msg)
+        _t = self._now_ms(); self._bump_section("protocol", _t - _pt); _pt = _t
         now_ms = self._now_ms()
         # Boot splash just expired: render the real screen once (renders were
         # suppressed while the splash was held).
         if self._splash_until_ms and now_ms >= self._splash_until_ms:
             self._splash_until_ms = 0
             self._refresh_display()
+        _t = self._now_ms(); self._bump_section("splash_render", _t - _pt); _pt = _t
         self.patches.tick(now_ms)
+        _t = self._now_ms(); self._bump_section("patches_tick", _t - _pt); _pt = _t
         # Tuner exit-on-press: snapshot whether the tuner splash is up BEFORE any
         # switch fires. On the first press edge this tick, dismiss the tuner
         # (device + local) so one stomp both leaves the tuner AND does the
@@ -280,6 +352,7 @@ class Captain:
                 exited_tuner = True
             for action_key in triggers:
                 self._fire(sw.name, action_key)
+        _t = self._now_ms(); self._bump_section("switch_scan", _t - _pt); _pt = _t
         # Auto-momentary hold indicator: while a latched+auto-momentary switch is
         # held past the threshold (acting momentarily), show its hold_text on the
         # TFT; clear on release. Only mark a refresh when the text changes, so it
@@ -300,15 +373,18 @@ class Captain:
             self._last_hold_effect = hold_text
             self.display_context["hold_effect"] = hold_text
             self._mark_display_dirty()
+        _t = self._now_ms(); self._bump_section("hold_indicator", _t - _pt); _pt = _t
         for port, channel, status, data in self.midi.poll():
             self.midi_rx_count += 1
             if self._midi_monitor:
                 self._emit_midi_mon("in", port, channel, status, data)
             self._handle_midi_in(port, channel, status, data)
+        _t = self._now_ms(); self._bump_section("midi_poll", _t - _pt); _pt = _t
         # Plugins that need a heartbeat (e.g. Kemper bidirectional
         # beacon) hook here. The check is cheap when no plugin
         # opts in.
         self.plugins.tick(self, now_ms)
+        _t = self._now_ms(); self._bump_section("plugins_tick", _t - _pt); _pt = _t
         # Expression pedals: sample the jacks (throttled) and dispatch a MIDI
         # message for each jack that moved. Cheap no-op when no jack is enabled.
         # These are plain cc / plugin continuous-control messages, so they don't
@@ -317,11 +393,13 @@ class Captain:
             m = dict(message)
             m["value"] = value
             self.runner.run_message(m)
+        _t = self._now_ms(); self._bump_section("expression", _t - _pt); _pt = _t
         # Preset-preview auto-resolve: the user stopped scrolling past the
         # timeout, so commit (or cancel) the previewed patch. Commit runs a full
         # switch_patch, which marks the display dirty for the deferred render.
         if self._preview is not None and now_ms >= self._preview["until_ms"]:
             self._resolve_preview_timeout()
+        _t = self._now_ms(); self._bump_section("preview", _t - _pt); _pt = _t
         # Deferred TFT render: fire the one slow render only after the inbound
         # MIDI burst has gone quiet (no message for _REFRESH_QUIET_MS), or at
         # the hard cap. The fast ticks until then keep draining USB-MIDI, so the
@@ -333,6 +411,7 @@ class Captain:
                 or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
             self._refresh_due_ms = 0
             self._refresh_display()
+        _t = self._now_ms(); self._bump_section("tft_render", _t - _pt); _pt = _t
         # Deferred LED repaint, on the same quiet-drain gate as the TFT render.
         # Runs off apply_global's heap peak (a tick or two later, once the churn
         # is reclaimed) so a leds.dim change from a settings save applies live
@@ -346,14 +425,46 @@ class Captain:
                 self._paint_preset_nav_leds()
             except Exception as e:
                 print("deferred LED repaint failed:", e)
+        _t = self._now_ms(); self._bump_section("led_repaint", _t - _pt); _pt = _t
         # Advance any marquee (scrolling) labels. Cheap no-op when no label
         # overflows; it only moves each scrolling label's .x (a small dirty
         # region), so it doesn't block the loop the way a full render does.
         self.display.tick(now_ms)
+        _t = self._now_ms(); self._bump_section("display_tick", _t - _pt); _pt = _t
         # Periodic context push for the Stage Mode editor view (tablet display).
         # Send the current display_context over the data port every ~1s when it
         # changed, so the frontend can show live Kemper/Ampero/HeadRush state.
         self._push_context(now_ms)
+        _t = self._now_ms(); self._bump_section("push_context", _t - _pt); _pt = _t
+
+    def _poll_switches_mid_op(self):
+        """Re-sample switch pins from inside a blocking sub-operation (right
+        now: MidiEngine's USB write retry loop, see midi.poll_hook). This is
+        the ONLY thing that runs while that loop spins for up to ~10 ms - a
+        quick footswitch tap that starts and ends entirely inside that
+        window is otherwise invisible, since the normal scan in _tick_body
+        only reads pins once per tick, before and after the send.
+
+        Deliberately narrower than the top-of-tick scan: advances each
+        switch's debounce state and emits the press/release protocol event
+        (so the editor's live indicator doesn't miss it), but only QUEUES
+        triggers into _pending_triggers rather than firing them - calling
+        _fire() here would run a binding's action chain re-entrantly, nested
+        inside whatever action chain caused this stall in the first place.
+        Also skips the tuner-exit-on-press and hold-indicator bookkeeping;
+        those are cosmetic and stay correct enough once picked up on the
+        next normal tick."""
+        now_ms = self._now_ms()
+        for sw in self.switches.switches:
+            mode = self._mode_index.get(sw.name, "tap")
+            raw_edge, triggers = sw.poll(now_ms, mode)
+            if raw_edge is not None:
+                self.protocol.emit_event(
+                    "switch_pressed" if raw_edge == "press" else "switch_released",
+                    switch=sw.name,
+                )
+            for action_key in triggers:
+                self._pending_triggers.append((sw.name, action_key))
 
     def stats(self):
         # No gc.collect() here: STATS is a diagnostic readout (Dashboard /
@@ -372,6 +483,10 @@ class Captain:
             "mem_free":           gc.mem_free(),
             "mem_alloc":          gc.mem_alloc(),
             "loop_iters":         self.loop_iters,
+            "last_tick_ms":       self._last_tick_ms,
+            "max_tick_ms":        self.max_tick_ms,
+            "slow_tick_count":    self.slow_tick_count,
+            "section_max_ms":     self._section_max_ms,
             "midi_rx_count":      self.midi_rx_count,
             "midi_tx_count":      getattr(self.midi, "tx_count", 0),
             "usb_tx_dropped":     getattr(self.midi, "usb_tx_dropped", 0),

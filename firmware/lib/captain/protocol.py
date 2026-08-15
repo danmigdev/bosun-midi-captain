@@ -167,6 +167,20 @@ class Protocol:
                 n = self.port.write(view)
                 if not n:
                     stalls += 1
+                    # Each blocked write() can itself take up to
+                    # write_timeout (200ms) before returning 0, and this
+                    # loop retries up to 8 times - unlike midi._tx_usb's
+                    # bounded ~10ms retry, this had NO poll_hook and no cap
+                    # tighter than ~1.6s worst case. Every protocol response
+                    # goes through here, including the switch_pressed/
+                    # switch_released EVENT emitted for every footswitch tap
+                    # - a slow host draining the data CDC could silently
+                    # eat a press exactly the way a stalled MIDI write could
+                    # (2026-08-15, found while chasing the same symptom).
+                    try:
+                        self.app._poll_switches_mid_op()
+                    except Exception:
+                        pass
                     continue
                 view = view[n:]
                 stalls = 0

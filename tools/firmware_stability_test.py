@@ -315,6 +315,85 @@ def test_loop_survives_subcomponent_exceptions():
     check("tick_once runs cleanly 50x on a healthy build", raised is None, "raised %r" % raised)
 
 
+def test_switch_press_survives_midi_stall():
+    """A binding's on_enter chain sends CC; while that USB write is stalled
+    (host endpoint buffer full), a footswitch on a DIFFERENT switch is
+    pressed and released. Before poll_hook existed, the main loop only read
+    pins once per tick - a press timed entirely inside that stall (up to the
+    ~10ms retry budget in midi._tx_usb) was silently lost, matching the
+    real-world "sometimes needs 2-3 tries" report. Proves it's captured
+    (real production wiring: midi.poll_hook -> Captain._poll_switches_mid_op
+    -> _pending_triggers) and fires on the next tick instead of vanishing."""
+    cap = Captain()
+    cap.patches.put_patch(1, 1, {
+        "name": "TEST",
+        "bindings": [
+            {"switch": "1", "mode": "tap",
+             "actions": {"press": {"messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 127}]}}},
+            {"switch": "2", "mode": "tap",
+             "actions": {"press": {"messages": [{"type": "cc", "channel": 1, "cc": 30, "value": 127}]}}},
+        ],
+    }, cap._now_ms())
+    cap.switch_patch(1, 1, source="editor")
+    switches_by_name = {sw.name: sw for sw in cap.switches.switches}
+
+    # Controllable clock: advances by 6ms on every call, so each poll_hook
+    # invocation - and the SwitchFsm.poll() inside it - sees a fresh,
+    # monotonically increasing timestamp comfortably past the 5ms debounce
+    # window in a single step. Needed because _tx_usb's retry loop paces
+    # itself with real time.sleep(0.0005) calls, and Windows' sleep
+    # granularity is far coarser than that (see midi_tx_test.py) - real
+    # elapsed wall time between retries isn't reliable in this offline test.
+    clock = [0]
+    cap._now_ms = lambda: clock.__setitem__(0, clock[0] + 6) or clock[0]
+
+    class _StallingUsbOut:
+        """write() returns 0 (buffer full) for the first `stall_calls`
+        attempts, driving switch "2"'s pin through a full press/release
+        cycle entirely within that window - never seen by a normal tick's
+        scan, only by poll_hook's mid-stall re-polls."""
+
+        def __init__(self, stall_calls=4):
+            self.stall_calls = stall_calls
+            self.calls = 0
+
+        def write(self, data):
+            self.calls += 1
+            # Pressed for the first 2 calls, released from the 3rd on.
+            switches_by_name["2"].io.value = self.calls >= 3
+            return 0 if self.calls <= self.stall_calls else len(data)
+
+    cap.midi.usb_out = _StallingUsbOut()
+
+    fired = []
+    orig_fire = cap._fire
+
+    def spy_fire(name, action_key):
+        fired.append((name, action_key))
+        orig_fire(name, action_key)
+
+    cap._fire = spy_fire
+
+    # Switch "1"'s own press sends the CC whose write stalls; switch "2"'s
+    # invisible-to-the-tick press/release must ride along via poll_hook. Two
+    # ticks: the FSM's 5ms debounce needs a raw-change tick to record the
+    # transition and a later tick to commit it (see fsm_test.py) - it never
+    # fires on the very first poll after the pin moves.
+    switches_by_name["1"].io.value = False
+    cap.tick_once()
+    cap.tick_once()
+    switches_by_name["1"].io.value = True
+
+    check("switch 2's press (entirely inside the MIDI stall) was queued, not lost",
+          bool(cap._pending_triggers), "pending=%r" % cap._pending_triggers)
+
+    # Drain: the next tick must fire whatever poll_hook queued.
+    cap.midi.usb_out = None  # stop stalling so this tick doesn't stall again
+    cap.tick_once()
+    check("switch 2's queued press fired on the next tick",
+          any(name == "2" for name, _ in fired), "fired=%r" % fired)
+
+
 # ---------------- C. MIDI parser robustness ----------------
 
 def test_midi_parser_fuzz():
@@ -351,6 +430,7 @@ def main():
     test_protocol_fuzz()
     print("B. main-loop resilience")
     test_loop_survives_subcomponent_exceptions()
+    test_switch_press_survives_midi_stall()
     print("C. MIDI parser robustness")
     test_midi_parser_fuzz()
     print("\n%d passed, %d failed" % (PASS, FAIL))
