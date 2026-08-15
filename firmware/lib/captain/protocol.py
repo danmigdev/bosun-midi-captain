@@ -125,6 +125,32 @@ class Protocol:
     def emit_event(self, event, **fields):
         payload = {"type": "EVENT", "event": event}
         payload.update(fields)
+        # _send() never raises - it swallows every exception, including
+        # MemoryError, and only prints to the REPL (see its own comment
+        # below) - so a send failing from heap pressure right after a big
+        # inbound Kemper SYSEX burst (exactly when a footswitch-triggered
+        # patch_switched is most likely to fire) silently drops this EVENT
+        # with zero visible signal, and the editor never learns the patch
+        # actually changed - e.g. Stage's switch labels then keep showing
+        # the previous patch's bindings indefinitely (2026-08-15/16:
+        # confirmed live). Dry-run the encode first, with a
+        # gc.collect()-and-retry - the identical fix already applied to
+        # _push_context() for the same failure class. If it still can't be
+        # encoded even after that, there is no queue to retry this into,
+        # so drop it - but that at least makes the COMMON case (encoding
+        # succeeds) reliable instead of silently racing heap fragmentation
+        # on every single event.
+        try:
+            json.dumps(payload)
+        except MemoryError:
+            try:
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                json.dumps(payload)
+            except MemoryError:
+                return
         self._send(payload)
 
     def _send(self, obj):
