@@ -54,4 +54,13 @@ the data-CDC connection instead of the MIDI relay.
    logcat for any `[io] fatal read error`/`close hung` - compare frequency against
    tonight's baseline (roughly 1 per 60-90s) before declaring this reliable.
 
-## Status: in progress, started 2026-08-15 23:13
+## Status: RESOLVED, 2026-08-16 (commit `07d83c1`)
+
+Built and verified live on the phone rig. One follow-up bug found during
+verification and fixed separately (commit `4390369`): `protocol.
+emit_event()` had the same unprotected-`_send()` vulnerability as
+`_push_context()` (fixed in `656ffd3`) - a `patch_switched` EVENT lost to
+heap fragmentation right after a big Kemper SYSEX burst explained the
+"Stage shows the wrong patch's switch labels" reports, separate from the
+transport work in this doc. Verified live: 9 rapid switch presses, full
+event chain every time, no gaps.

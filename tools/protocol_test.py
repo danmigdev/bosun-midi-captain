@@ -200,6 +200,20 @@ def build_protocol(port=None):
     return p, port
 
 
+def drain_background(p, max_steps=10000):
+    """GET_MANIFEST/GET_GLOBAL now stream via a resumable generator
+    (protocol._start_background/pump_background) so the main loop can
+    interleave other requests instead of blocking for the whole multi-KB
+    response - see the 2026-08-16 fix. handle() only runs the first slice;
+    tests that want the complete response drain the rest here, same as
+    _tick_body does one step at a time in the real firmware."""
+    steps = 0
+    while p._bg_gen is not None:
+        p.pump_background()
+        steps += 1
+        assert steps < max_steps, "background generator never finished"
+
+
 # ---------------- _send tests ----------------
 
 @test("_send: retries json.dumps after gc.collect when first attempt MemoryErrors")
@@ -410,6 +424,7 @@ def _():
     port = FakePort()
     p, _ = build_protocol(port)
     p.handle({"type": "GET_MANIFEST", "id": "m"})
+    drain_background(p)
     resp = json.loads(bytes(port.written).strip())
     assert resp["type"] == "MANIFEST", resp
     assert resp["id"] == "m"
@@ -518,6 +533,7 @@ def _():
     config.load_device_for = lambda pid: other_dev if pid == "ampero01" else {}
     try:
         p.handle({"type": "GET_GLOBAL", "id": "g", "profile": "ampero01"})
+        drain_background(p)
     finally:
         config.profile_exists = orig_exists
         config.load_device_for = orig_load
@@ -536,6 +552,7 @@ def _():
     config.profile_exists = lambda pid: False
     try:
         p.handle({"type": "GET_GLOBAL", "id": "g", "profile": "ghost"})
+        drain_background(p)
     finally:
         config.profile_exists = orig
     resp = json.loads(bytes(port.written).strip())
@@ -547,6 +564,7 @@ def _():
     port = FakePort()
     p, _ = build_protocol(port)
     p.handle({"type": "GET_GLOBAL", "id": "g"})
+    drain_background(p)
     resp = json.loads(bytes(port.written).strip())
     assert resp["type"] == "GLOBAL"
     assert resp["device"] == p.app.device

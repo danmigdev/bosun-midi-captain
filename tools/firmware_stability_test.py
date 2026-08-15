@@ -167,6 +167,20 @@ def check(name, ok, detail=""):
         print("  FAIL %s %s" % (name, detail))
 
 
+def drain_background(proto, max_steps=10000):
+    """GET_MANIFEST/GET_GLOBAL stream via a resumable generator
+    (protocol._start_background/pump_background - 2026-08-16) so a barrage
+    of handle() calls with no tick_once() in between leaves it (and every
+    _send() response queued behind its still-open wire line - see _send())
+    unfinished. Drain it the same way _tick_body does, one step per call,
+    before reading back what the firmware wrote."""
+    steps = 0
+    while proto._bg_gen is not None:
+        proto.pump_background()
+        steps += 1
+        assert steps < max_steps, "background generator never finished"
+
+
 def responses():
     """Drain + parse the JSON lines the firmware wrote to the fake CDC."""
     txt = bytes(usb_cdc.data.out).decode("utf-8", "replace")
@@ -227,6 +241,7 @@ def test_protocol_barrage():
         raised = e
     check("handle() never raises across valid+malformed barrage", raised is None,
           "raised %r" % raised)
+    drain_background(proto)
 
     resp = responses()
     by_id = {r.get("id"): r for r in resp}

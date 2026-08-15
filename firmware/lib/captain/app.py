@@ -322,6 +322,12 @@ class Captain:
             self.protocol_cmd_count += 1
             self.protocol.handle(msg)
         _t = self._now_ms(); self._bump_section("protocol", _t - _pt); _pt = _t
+        # Advance one slice of an in-flight background response (GET_MANIFEST/
+        # GET_GLOBAL - see protocol._start_background). Runs after poll()/
+        # handle() above so a request that arrived while the background one
+        # was mid-flight gets read and dispatched first.
+        self.protocol.pump_background()
+        _t = self._now_ms(); self._bump_section("protocol_bg", _t - _pt); _pt = _t
         now_ms = self._now_ms()
         # Boot splash just expired: render the real screen once (renders were
         # suppressed while the splash was held).

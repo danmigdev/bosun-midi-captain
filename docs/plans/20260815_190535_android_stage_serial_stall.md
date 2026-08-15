@@ -1,5 +1,59 @@
 # Android Stage view / serial I/O silent-stall investigation
 
+## Follow-up (2026-08-16): GET_MANIFEST/GET_GLOBAL blocked the whole main loop
+
+After the native serial driver and `emit_event` fixes (see
+`20260815_231301_android_native_serial_driver.md`), live testing still
+showed GET_PATCH responses arriving 11s-60s late, or apparently never, right
+after opening Stage or switching rigs. Added `[timing]` start/elapsed prints
+around every `handle()` dispatch and captured real hardware timing: a single
+`GET_MANIFEST` dispatch took **5.25 s** end to end, and a `GET_PATCH` sent
+94 ms later didn't even start processing until the manifest finished -
+because `_get_manifest`/`_get_global`/`_stream_value` write their entire
+multi-KB response inline via `_write_bytes` with **no yielding at all**, so
+`handle()` (and therefore `tick_once()`, and therefore `protocol.poll()`
+picking up anything else already sitting in `_rx_buf`) doesn't return until
+the whole thing is sent. Every GET_MANIFEST fetch - which fires on every
+Stage/editor connect - froze footswitch polling, MIDI processing, and every
+other queued protocol request for its full multi-second duration.
+
+Fixed (commit follows this doc update) by converting `_get_manifest`,
+`_get_global`, and the shared `_stream_value` helper into resumable
+generators (`_get_manifest_gen`/`_get_global_gen`), yielding at the same
+points that were already `gc.collect()`-ing for heap safety. `handle()` now
+calls `protocol._start_background()`, which runs only the first slice
+inline and stores the generator; `Captain._tick_body()` (app.py) calls the
+new `protocol.pump_background()` once per tick, after `poll()`/`handle()`,
+advancing one slice at a time so anything else queued gets serviced first.
+
+This surfaced a second, more serious bug during testing (caught by
+`firmware_stability_test.py`'s `test_protocol_barrage`, not by hand-testing):
+since the background generator's response has no trailing newline until it
+fully completes, any *other* `_send()` response written while a background
+line was still open landed in the middle of it, corrupting both into
+unparseable garbage on the editor's line-delimited JSON parser. Fixed by
+making `_send()` queue (`self._pending_out`) instead of writing directly
+whenever `self._bg_gen is not None`, and flushing the queue the instant the
+background line closes (`pump_background`'s `StopIteration` path) or gets
+sealed off with a forced newline if a second background request replaces an
+unfinished one (`_start_background`).
+
+Verified live on the desktop rig: GET_PATCH now dispatches and answers in
+under 100 ms even while a GET_MANIFEST is mid-flight (previously blocked for
+the manifest's entire ~5-7 s transfer), and all three responses (MANIFEST,
+PATCH, CONTEXT) arrive as clean, correctly-parsed JSON with no corruption.
+`tools/protocol_test.py` (41/41) and `tools/firmware_stability_test.py`
+(17/17, after updating two tests to drain the background generator the same
+way `_tick_body` does before reading back responses) both green. Firmware
+bumped to 0.5.36.
+
+Residual, accepted tradeoff: if GET_PATCH (or any other request) is sent
+while GET_MANIFEST/GET_GLOBAL is in flight, its *answer* is still deferred
+until the background response finishes - but the firmware itself (switches,
+MIDI, Kemper comms) stays fully responsive throughout, which is the part
+that mattered. GET_MANIFEST only fires once per connection in normal use, so
+this should be rare outside of reconnect churn.
+
 ## Status: RESOLVED (2026-08-15, later same day)
 
 Three separate, real bugs were chained together to produce the "Stage

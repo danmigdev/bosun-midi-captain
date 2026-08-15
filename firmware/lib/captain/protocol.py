@@ -2,6 +2,7 @@ import binascii
 import gc
 import json
 import os
+import time
 
 import usb_cdc
 
@@ -30,6 +31,15 @@ class Protocol:
         self.port = usb_cdc.data
         self._rx_buf = bytearray()
         self._uploads = {}                        # path -> open file
+        # In-flight resumable background response (GET_MANIFEST/GET_GLOBAL -
+        # see _start_background/pump_background). At most one at a time.
+        self._bg_gen = None
+        # Other _send() responses queued because they arrived while a
+        # background line was still open on the wire (no trailing newline
+        # yet) - writing them immediately would land mid-line and corrupt
+        # both messages. Flushed the instant the background line closes.
+        # See _send()'s _bg_gen check and _flush_pending.
+        self._pending_out = []
         if self.port is not None:
             # Without a write timeout, usb_cdc.write blocks forever when
             # the host stops reading - the entire firmware main loop
@@ -176,6 +186,22 @@ class Protocol:
                 except Exception:
                     pass
                 data = json.dumps(obj).encode() + b"\n"
+            if self._bg_gen is not None:
+                # A background response (GET_MANIFEST/GET_GLOBAL - see
+                # _start_background/pump_background) has an open line on the
+                # wire right now: it has written some bytes but not yet its
+                # own trailing newline, because pump_background() only
+                # advances it one slice per tick. Writing this response's
+                # bytes immediately would land in the MIDDLE of that
+                # unterminated line, corrupting BOTH into unparseable
+                # garbage on the editor's line-delimited JSON parser
+                # (confirmed 2026-08-16 by firmware_stability_test.py:
+                # test_protocol_barrage - a PUT_GLOBAL ACK sent while a
+                # GET_GLOBAL background line was open vanished entirely).
+                # Queue it - pump_background() flushes everything queued
+                # here the instant the background line closes.
+                self._pending_out.append(data)
+                return
             # CircuitPython's usb_cdc.write honors write_timeout (set to
             # 0.2s in __init__ to keep the main loop from wedging on a
             # dead host) and may return a partial byte count when the
@@ -249,7 +275,7 @@ class Protocol:
         try:
             if   t == "PING":              self._send({"type": "ACK", "id": mid, "fw": VERSION})
             elif t == "GET_DEVICE_INFO":   self._device_info(mid)
-            elif t == "GET_GLOBAL":        self._get_global(mid, msg)
+            elif t == "GET_GLOBAL":        self._start_background(self._get_global_gen(mid, msg))
             elif t == "PUT_GLOBAL":        self._put_global(mid, msg)
             elif t == "LIST_PATCHES":      self._list_patches(mid, msg)
             elif t == "GET_PATCH":         self._get_patch(mid, msg)
@@ -264,7 +290,7 @@ class Protocol:
             elif t == "STOP_MIDI_LEARN":   self._stop_learn(mid)
             elif t == "GET_MIDI_LEARN":    self._get_midi_learn(mid, msg)
             elif t == "PUT_MIDI_LEARN":    self._put_midi_learn(mid, msg)
-            elif t == "GET_MANIFEST":      self._get_manifest(mid)
+            elif t == "GET_MANIFEST":      self._start_background(self._get_manifest_gen(mid))
             elif t == "STATS":             self._stats(mid)
             elif t == "SET_MIDI_MONITOR":  self._set_midi_monitor(mid, msg)
             elif t == "PUT_FILE_BEGIN":    self._put_file_begin(mid, msg)
@@ -347,7 +373,7 @@ class Protocol:
             return (None, False)
         return (pid, False)
 
-    def _get_global(self, mid, msg):
+    def _get_global_gen(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
         if not use_active and pid is None:
             return                           # _resolve_profile already sent ERROR
@@ -357,7 +383,7 @@ class Protocol:
         # colours + all settings) can exceed a single contiguous allocation on
         # the RP2040 heap and MemoryError, which left the editor with no device
         # config at all (empty Screen-layout / Settings, hanging layout saves).
-        # Same fix as _get_manifest. See _stream_value.
+        # Same fix as _get_manifest_gen. See _stream_value.
         import gc
         if self.port is None or not self.port.connected:
             return
@@ -369,10 +395,70 @@ class Protocol:
             w(b',"profile":')
             w(json.dumps(pid or "").encode())
             w(b',"device":')
-            self._stream_value(w, device, gc)
+            yield from self._stream_value(w, device, gc)
             w(b'}\n')
         except Exception as e:
             print("[protocol] _send EXC type=GLOBAL err=%s" % type(e).__name__)
+
+    def _start_background(self, gen):
+        """Register a resumable generator-based response (GET_MANIFEST,
+        GET_GLOBAL - see _get_manifest_gen/_get_global_gen) to be advanced a
+        step at a time from the main loop instead of run to completion
+        inline. Both of those responses stream multi-KB payloads via
+        _write_bytes/_stream_value with no yielding at all, which measured
+        5.25 s of dead time on real hardware for a 22 KB manifest (2026-08-
+        16, see the [timing] instrumentation in handle()) - during which
+        tick_once() never returns, so protocol.poll() never runs again and
+        every other queued request (notably GET_PATCH right after a
+        patch_switched EVENT - Stage Mode's exact symptom) sits unread in
+        _rx_buf for the entire duration, plus footswitch polling and MIDI
+        processing are frozen too. Run the first slice immediately (matches
+        the old function's immediate-start feel and surfaces a
+        _resolve_profile error with no extra delay); pump_background()
+        advances the rest, one slice per tick, interleaved with normal
+        poll()/handle() dispatch (their _send() responses queue rather than
+        write while our line is open - see _send()). A second background
+        request arriving before the first finishes (e.g. the editor's
+        GET_MANIFEST retry watchdog firing again after a slow response -
+        getManifestAwait in protocol.ts) would otherwise abandon the first
+        generator mid-line, leaving an unterminated partial JSON object on
+        the wire for the new one's bytes to run onto - seal it off with a
+        bare newline first so it becomes its own harmless (dropped as
+        bad_json) line instead."""
+        if self._bg_gen is not None:
+            self._write_bytes(b"\n")
+            self._bg_gen = None
+            self._flush_pending()
+        self._bg_gen = gen
+        self.pump_background()
+
+    def pump_background(self):
+        """Advance the in-flight background generator (if any) by one step.
+        Call once per main-loop tick, after protocol.poll()/handle() so a
+        request that arrived while the generator was mid-flight gets
+        dispatched before we spend more time on the background one."""
+        if self._bg_gen is None:
+            return
+        try:
+            next(self._bg_gen)
+        except StopIteration:
+            self._bg_gen = None
+            self._flush_pending()
+        except Exception as e:
+            self._bg_gen = None
+            print("[protocol] background gen EXC err=%s" % type(e).__name__)
+            self._flush_pending()
+
+    def _flush_pending(self):
+        """Write out every _send() response that queued while the
+        background line was open (see _send()'s _bg_gen check), now that
+        the line has closed (or been sealed off - see _start_background)
+        and the wire is safe to write to again."""
+        if not self._pending_out:
+            return
+        pending, self._pending_out = self._pending_out, []
+        for data in pending:
+            self._write_bytes(data)
 
     def _list_patches(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
@@ -520,13 +606,20 @@ class Protocol:
 
     def _stream_value(self, w, v, gc, depth=0):
         """Write `v` as JSON directly to the port, one nested entry at a time.
-        Mirrors _get_manifest's per-field streaming but for arbitrary nested
-        JSON: dict/list are emitted element by element with a gc.collect between
-        the outer entries, so peak allocation is a single leaf rather than the
-        whole tree. Used where json.dumps of the full object MemoryErrors on the
-        RP2040 heap (e.g. GET_GLOBAL's device dict: TFT layout + expression +
-        25-bank preset colours). Collecting only at the top two levels keeps the
-        gc count sane while still bounding the peak."""
+        Mirrors _get_manifest_gen's per-field streaming but for arbitrary
+        nested JSON: dict/list are emitted element by element with a
+        gc.collect between the outer entries, so peak allocation is a single
+        leaf rather than the whole tree. Used where json.dumps of the full
+        object MemoryErrors on the RP2040 heap (e.g. GET_GLOBAL's device
+        dict: TFT layout + expression + 25-bank preset colours). Collecting
+        only at the top two levels keeps the gc count sane while still
+        bounding the peak.
+
+        A generator: yields once per gc.collect() point below (same
+        granularity picked for heap safety doubles as the pump_background()
+        resume granularity - see _start_background) so a caller driving this
+        from the main loop can interleave other work between entries instead
+        of blocking for the whole structure."""
         if isinstance(v, dict):
             w(b'{')
             first = True
@@ -535,10 +628,11 @@ class Protocol:
                 first = False
                 w(json.dumps(k).encode())
                 w(b':')
-                self._stream_value(w, sv, gc, depth + 1)
+                yield from self._stream_value(w, sv, gc, depth + 1)
                 if depth < 2:
                     sv = None
                     gc.collect()
+                    yield
             w(b'}')
         elif isinstance(v, list):
             w(b'[')
@@ -546,20 +640,26 @@ class Protocol:
             for el in v:
                 w(b'' if first else b',')
                 first = False
-                self._stream_value(w, el, gc, depth + 1)
+                yield from self._stream_value(w, el, gc, depth + 1)
                 if depth < 2:
                     gc.collect()
+                    yield
             w(b']')
         else:
             w(json.dumps(v).encode())
 
-    def _get_manifest(self, mid):
+    def _get_manifest_gen(self, mid):
         # The full manifest (every plugin's MESSAGE_TYPES + config/recipe
         # schemas) can exceed the RP2040 heap when json.dumps'd in one
         # allocation -> MemoryError, which left the editor with no plugins
         # (only "generic"). Stream it instead: emit the JSON piece by piece,
         # serializing a single field at a time and collecting garbage between
         # pieces, so peak allocation is one field rather than the whole tree.
+        #
+        # A generator - see _start_background/pump_background: yields once
+        # per gc.collect() point so the ~22 KB response (measured 5.25 s of
+        # main-loop-blocking write time, 2026-08-16) doesn't stall every
+        # other queued request for its whole duration.
         import gc
         if self.port is None or not self.port.connected:
             return
@@ -574,7 +674,7 @@ class Protocol:
             # heap (observed 2026-08-13: the manifest died after the first
             # 44 bytes and the unterminated fragment corrupted the next
             # JSON line on the host). Same fix as the plugin fields below.
-            self._stream_value(w, messages.CORE_MESSAGE_TYPES, gc)
+            yield from self._stream_value(w, messages.CORE_MESSAGE_TYPES, gc)
             w(b',"plugins":{')
             first_plugin = True
             for name, entry in self.app.plugins.iter_manifest():
@@ -606,14 +706,17 @@ class Protocol:
                             w(json.dumps(sv).encode())
                             sv = None
                             gc.collect()
+                            yield
                         w(b'}')
                     else:
                         w(json.dumps(v).encode())
                     v = None
                     gc.collect()
+                    yield
                 w(b'}')
                 entry = None
                 gc.collect()
+                yield
             w(b'}}\n')
         except Exception as e:
             print("[protocol] _send EXC type=MANIFEST err=%s" % type(e).__name__)
