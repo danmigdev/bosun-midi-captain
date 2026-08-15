@@ -398,7 +398,28 @@ class Protocol:
         except OSError:
             self._send({"type": "ERROR", "id": mid, "error": "not_found", "bank": bank, "slot": slot})
             return
-        self._send({"type": "PATCH", "id": mid, "bank": bank, "slot": slot, "patch": patch, "profile": pid or ""})
+        obj = {"type": "PATCH", "id": mid, "bank": bank, "slot": slot, "patch": patch, "profile": pid or ""}
+        # _send() never raises and only retries its own json.dumps() once
+        # on MemoryError - not always enough for a patch with many
+        # bindings, and this response is exactly what Stage Mode needs
+        # promptly right after a patch_switched EVENT to refresh its
+        # switch labels (2026-08-15/16: confirmed live - GET_PATCH
+        # responses arriving many seconds late or not at all, right after
+        # the identical failure class was already fixed for _push_context
+        # and emit_event). Same fix: dry-run the encode with our own
+        # gc.collect()-and-retry before handing off to _send().
+        try:
+            json.dumps(obj)
+        except MemoryError:
+            try:
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                json.dumps(obj)
+            except MemoryError:
+                return
+        self._send(obj)
 
     def _get_midi_learn(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
