@@ -1,4 +1,5 @@
-"""HeadRush Core MIDI plugin.
+"""
+HeadRush Core MIDI plugin.
 
 MIDI implementation verified against the official HeadRush Core User Guide
 v5.1.0. The Core receives MIDI CC and PC messages on its 5-pin DIN MIDI
@@ -22,6 +23,18 @@ This is enough for tier-beta auto-follow: Bosun listens for the PC, looks
 up the matching captain patch in the midi_learn table, and switches to it.
 Block/tuner/expression state can never be mirrored because the Core never
 broadcasts it.
+
+CC-to-LED feedback (per-rig MIDI Out commands)
+----------------------------------------------
+The Core does NOT natively broadcast CC messages on block toggle or rig
+load. However, it supports per-rig MIDI Out commands: up to 5 user-defined
+messages (CC, PC, or Note) sent on rig load, scene activation, or
+footswitch press, configured in Hardware Assign > MIDI Messages per rig.
+
+When those messages include CC values matching the patch's latched toggle
+bindings (e.g. CC 30=0 to force a switch LED off), Bosun updates the
+switch LED in real time without firing its action chain -- so the pedals
+and the Core stay visually in sync after a rig change.
 
 If the user also configures per-rig MIDI Out commands (up to 5 messages on
 rig load, scene activation, or footswitch press), those will arrive as
@@ -130,6 +143,41 @@ _PRACTICE_VALUES  = list(_PRACTICE_CC.keys())
 _FS_MODE_VALUES   = list(_FS_MODE_CC.keys())
 _MISC_VALUES      = list(_MISC_CC.keys())
 
+
+# -- CC-to-LED index ----------------------------------------------------------
+# Built when a patch loads by scanning latched bindings that send raw CC
+# messages. Maps (channel, cc) -> switch_name so inbound CC can update the
+# matching latched switch's LED state without firing its action chain.
+# For the HeadRush Core this is driven by per-rig MIDI Out commands (up to 5
+# user-defined messages sent on rig load / scene activation / footswitch
+# press), configured in Hardware Assign > MIDI Messages per rig.
+
+_CC_INDEX = {}  # (channel, cc) -> switch_name
+
+
+def _build_cc_index(app):
+    """Scan the current patch's latched bindings for raw CC toggles.
+    Build an index so inbound CC messages can mirror device state to LEDs
+    without firing the switch's action chain.
+
+    Only indexes bindings in latched mode whose toggle_on/toggle_off
+    messages use the raw "cc" type. Scene switches (tap mode) and plugin
+    message types (headrush_block, etc.) are excluded -- those use
+    different CC numbers or have their own feedback paths."""
+    _CC_INDEX.clear()
+    for sw_name, binding in app.current_bindings():
+        if binding.get("mode") != "latched":
+            continue
+        for action in (binding or {}).get("actions", {}).values():
+            for msg in action.get("messages", []):
+                if msg.get("type") == "cc":
+                    ch = msg.get("channel", 1)
+                    cc = msg.get("cc")
+                    if cc is not None:
+                        _CC_INDEX[(ch, cc)] = sw_name
+
+
+# -- self-description for the editor -----------------------------------------
 
 MESSAGE_TYPES = {
     "headrush_rig": {
@@ -344,20 +392,51 @@ def update_context(msg, ctx):
         ctx["headrush_scene"] = int(msg.get("scene", 1))
 
 
-# -- inbound MIDI: auto-follow rig changes ----------------------------------
+# -- patch-load hook: rebuild CC index ---------------------------------------
+
+def on_patch_loaded(app):
+    """Rebuild the CC-to-switch index when a new patch becomes active.
+    Called by the core after on_enter has run and LEDs have been painted,
+    so the index always reflects the currently active bindings."""
+    _build_cc_index(app)
+
+
+# -- inbound MIDI: CC LED feedback + auto-follow rig changes ------------------
 
 def on_midi_in(port, channel, status, data, app):
-    """Tier-beta auto-follow: when the HeadRush Core sends a PC on rig load
+    """Bidirectional MIDI: mirror device state into Bosun LEDs and auto-follow
+    rig changes.
+
+    CC feedback (status 0xB0): when the Core sends a CC that matches a
+    latched raw-CC toggle binding, update that switch's LED state without
+    firing its action chain. This keeps the Captain's LEDs in sync with the
+    Core's actual block states. The Core natively sends NO CC; this path is
+    driven by per-rig MIDI Out commands (up to 5 user-defined messages on
+    rig load / scene activation / footswitch press, configured in Hardware
+    Assign > MIDI Messages per rig).
+
+    PC auto-follow (status 0xC0): when the Core sends a PC on rig load
     (requires "Prog Change Send" enabled in Global Settings > MIDI and a
     MIDI PROG number assigned to the rig), look the (channel, PC) pair up
     in the captain's midi_learn table and load the matching captain patch.
 
     The Core does NOT send bank MSB before PC, so we only match on channel
-    and PC number. Bank MSB in the midi_learn table must be 0 for the
-    lookup to succeed."""
+    and PC number. Bank MSB in the midi_learn table must be 0."""
+    cfg = (app.device or {}).get("headrush_core") or {}
+    if not cfg.get("enabled"):
+        return
+
+    # -- CC: update latched switch LED from inbound block state ----------
+    if status == 0xB0 and len(data) >= 2:
+        cc, value = data[0], data[1]
+        sw_name = _CC_INDEX.get((channel, cc))
+        if sw_name:
+            app.set_switch_latched(sw_name, value >= 64)
+        return
+
+    # -- PC: auto-follow rig changes -------------------------------------
     if status != 0xC0 or not data:
         return
-    cfg = (app.device or {}).get("headrush_core") or {}
     if not cfg.get("auto_follow_pc"):
         return
     pc = data[0]

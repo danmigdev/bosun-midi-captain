@@ -45,6 +45,67 @@ function handleDiscardedOrSaved(
   }
 }
 
+type PatchSwitchedEvent = {
+  type: "EVENT";
+  event: "patch_switched";
+  bank: number;
+  slot: number;
+};
+
+interface DeviceInfoCmd {
+  getPatch: (bank: number, slot: number) => Promise<unknown>;
+}
+
+/**
+ * Mirrors the App.svelte handleMessage branch for "patch_switched" (fired
+ * by every app.switch_patch() call in firmware/lib/captain/app.py -
+ * editor-initiated navigation, a local switch press, AND a long-press
+ * captain_bank_step / bank_step()). Keep in sync with src/App.svelte.
+ */
+function handlePatchSwitched(
+  msg: PatchSwitchedEvent,
+  deviceInfo: { bank: number; slot: number } | null,
+  cmd: DeviceInfoCmd,
+): { bank: number; slot: number } | null {
+  if (msg.event !== "patch_switched") return deviceInfo;
+  const bank = msg.bank, slot = msg.slot;
+  const next = deviceInfo ? { ...deviceInfo, bank, slot } : deviceInfo;
+  cmd.getPatch(bank, slot).catch(() => {});
+  return next;
+}
+
+describe("App handleMessage: patch_switched event", () => {
+  // Regression for "long-press DOWN to bank 2, Stage keeps showing the
+  // previous bank's patch" (2026-08-14). The handler itself is correct in
+  // isolation (this test passes against the current code) and so is
+  // StageView's reaction to a deviceInfo prop change (see
+  // StageView.test.ts "bank/patch change while mounted") - so a report of
+  // Stage staying stale after a bank-step points at the EVENT never
+  // reaching the frontend at all (transport/link issue), not this handler.
+  it("updates deviceInfo's bank/slot and re-fetches the new patch, for ANY source (local switch, bank-step, editor)", () => {
+    const cmd = { getPatch: vi.fn(() => Promise.resolve({})) };
+    const next = handlePatchSwitched(
+      { type: "EVENT", event: "patch_switched", bank: 2, slot: 4 },
+      { bank: 1, slot: 1 },
+      cmd,
+    );
+    expect(next).toEqual({ bank: 2, slot: 4 });
+    expect(cmd.getPatch).toHaveBeenCalledWith(2, 4);
+  });
+
+  it("does nothing when deviceInfo isn't loaded yet", () => {
+    const cmd = { getPatch: vi.fn(() => Promise.resolve({})) };
+    const next = handlePatchSwitched(
+      { type: "EVENT", event: "patch_switched", bank: 2, slot: 4 },
+      null,
+      cmd,
+    );
+    expect(next).toBeNull();
+    // Still fetches the patch even with no deviceInfo to update yet.
+    expect(cmd.getPatch).toHaveBeenCalledWith(2, 4);
+  });
+});
+
 describe("App handleMessage: discarded / saved events", () => {
   let cmd: { getPatch: ReturnType<typeof vi.fn>; listPatches: ReturnType<typeof vi.fn> };
 

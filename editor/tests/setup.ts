@@ -29,3 +29,15 @@ afterEach(() => {
   try { localStorage.clear(); } catch {}
   vi.restoreAllMocks();
 });
+
+// jsdom has no ResizeObserver; StageView's marquee action creates one
+// on mount.  Provide a no-op stub so component tests render.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class NoopResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as unknown as { ResizeObserver: typeof NoopResizeObserver }).ResizeObserver =
+    NoopResizeObserver;
+}

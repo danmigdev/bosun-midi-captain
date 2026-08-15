@@ -18,6 +18,7 @@
     patch_link?: { implicit_by_position?: boolean; locked_slots?: number[] };
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number; dim?: number };
+    preset_navigation?: { switches?: Record<string, number>; bank_colors?: Record<string, string> };
     tft?: { brightness?: number; theme_color?: string; rotation?: number; rowstart?: number; colstart?: number };
     expression?: ExpressionConfig[];
     [k: string]: unknown;
@@ -80,6 +81,8 @@
       w.expression = w.expression.map(e => withExpressionDefaults(e));
     }
     if (!w.long_press_actions) w.long_press_actions = {};
+    if (!w.preset_navigation) w.preset_navigation = {};
+    if (!w.preset_navigation.switches) w.preset_navigation.switches = {};
     if (w.tuner_exit_on_press === undefined) w.tuner_exit_on_press = true;
     if (!w.preview) w.preview = { timeout_ms: 1500, on_timeout: "commit" };
     if (!w.patch_link) w.patch_link = {};
@@ -193,6 +196,27 @@
   function onBankDownChange(e: Event) {
     _setBankStepSwitch(-1, (e.target as HTMLSelectElement).value);
   }
+
+  // Preset-navigation row: device.preset_navigation.switches maps a switch
+  // name to the slot (within the CURRENT bank) it jumps to. It's a
+  // device-wide overlay, not a patch binding - the firmware only applies it
+  // to a switch when the active patch declares no binding of its own for
+  // that switch (per-patch bindings always win), so the same switch can act
+  // as a plain effect toggle in one patch and a rig-select in another.
+  function navSlotValue(sw: string): string {
+    const v = working.preset_navigation?.switches?.[sw];
+    return v === undefined ? "" : String(v);
+  }
+  function setNavSlot(sw: string, raw: string) {
+    const switches = { ...(working.preset_navigation?.switches ?? {}) };
+    const n = raw.trim() === "" ? NaN : Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      delete switches[sw];
+    } else {
+      switches[sw] = n;
+    }
+    working.preset_navigation = { ...(working.preset_navigation ?? {}), switches };
+  }
 </script>
 
 {#if !device}
@@ -243,6 +267,28 @@
             {#each SWITCH_NAMES as s}<option value={s}>{s}</option>{/each}
           </select>
         </label>
+      </div>
+    </section>
+
+    <section class="block">
+      <h3>Preset navigation row</h3>
+      <p class="hint">
+        Dedicate switches to jump straight to a rig slot within the current
+        bank: pressing loads that slot, its LED shows the bank colour (bright
+        on the active slot, dimmed on the others), and Stage view shows that
+        slot's patch name instead of "-". Applies only when the current
+        patch leaves that switch unbound - a patch that binds the switch to
+        something else always takes priority. Leave blank for a normal,
+        patch-bound switch.
+      </p>
+      <div class="grid">
+        {#each SWITCH_NAMES as sw}
+          <label>{sw.toUpperCase()}
+            <input type="number" min="1" placeholder="unmapped"
+                   value={navSlotValue(sw)}
+                   oninput={(e) => setNavSlot(sw, e.currentTarget.value)} />
+          </label>
+        {/each}
       </div>
     </section>
 

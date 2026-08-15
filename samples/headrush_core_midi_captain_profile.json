@@ -1,0 +1,195 @@
+{
+  "format": "bosun-config-backup",
+  "version": 2,
+  "generated_at": "2026-08-07T00:00:00.000000",
+  "profile_label": "HeadRush Core + MIDI Captain Guide",
+  "kind": "headrush_core",
+  "device": {
+    "version": 1,
+    "device_name": "MIDI Captain",
+    "long_press_ms": 600,
+    "double_tap_window_ms": 250,
+    "auto_momentary_on_hold": false,
+    "auto_momentary_ms": 500,
+    "autosave": {
+      "enabled": false,
+      "debounce_ms": 2000
+    },
+    "leds": {
+      "brightness": 64,
+      "dim": 96
+    },
+    "tft": {
+      "brightness": 80,
+      "theme_color": "#00bcd4",
+      "rotation": 180,
+      "rowstart": 80,
+      "colstart": 0,
+      "layout": [
+        {
+          "field": "patch_name",
+          "halign": "left",
+          "valign": "top",
+          "x": 0,
+          "y": 0,
+          "size": 5,
+          "color": "#ffffff",
+          "font": "system",
+          "scroll": true
+        }
+      ]
+    },
+    "expression": [
+      {
+        "jack": 1,
+        "calibration": { "min": 0, "max": 1023 }
+      },
+      {
+        "jack": 2,
+        "calibration": { "min": 0, "max": 1023 }
+      }
+    ],
+    "headrush_core": {
+      "enabled": true,
+      "auto_follow_pc": true,
+      "usb_out_channel": 1
+    }
+  },
+  "patches": [
+    {
+      "bank": 1,
+      "slot": 1,
+      "patch": {
+        "name": "HeadRush Core",
+        "tft_color": "#00bcd4",
+        "bindings": [
+          {
+            "_comment": "Top row -- Scene select (CC 20 = 0..4). Tap mode: each press sends the CC.",
+            "switch": "A",
+            "mode": "tap",
+            "label": "ACOUSTIC",
+            "actions": {
+              "press": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 0}]
+              }
+            }
+          },
+          {
+            "switch": "B",
+            "mode": "tap",
+            "label": "CLEAN",
+            "actions": {
+              "press": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 1}]
+              }
+            }
+          },
+          {
+            "switch": "C",
+            "mode": "tap",
+            "label": "CRUNCH",
+            "actions": {
+              "press": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 2}]
+              }
+            }
+          },
+          {
+            "switch": "D",
+            "mode": "tap",
+            "label": "HEAVY",
+            "actions": {
+              "press": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 3}]
+              }
+            }
+          },
+          {
+            "switch": "up",
+            "mode": "tap",
+            "label": "LEAD",
+            "actions": {
+              "press": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 20, "value": 4}]
+              }
+            }
+          },
+          {
+            "_comment": "Bottom row -- Effect toggles (CC 30..34). Latched mode: press toggles LED + sends CC 127 / 0.",
+            "switch": "1",
+            "mode": "latched",
+            "label": "MOD",
+            "led": {"on": "#ff8a00"},
+            "actions": {
+              "toggle_on": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 30, "value": 127}]
+              },
+              "toggle_off": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 30, "value": 0}]
+              }
+            }
+          },
+          {
+            "switch": "2",
+            "mode": "latched",
+            "label": "DELAY WET",
+            "led": {"on": "#00bcd4"},
+            "actions": {
+              "toggle_on": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 31, "value": 127}]
+              },
+              "toggle_off": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 31, "value": 0}]
+              }
+            }
+          },
+          {
+            "switch": "3",
+            "mode": "latched",
+            "label": "FLANGER",
+            "led": {"on": "#c08aff"},
+            "actions": {
+              "toggle_on": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 32, "value": 127}]
+              },
+              "toggle_off": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 32, "value": 0}]
+              }
+            }
+          },
+          {
+            "switch": "4",
+            "mode": "latched",
+            "label": "HARM",
+            "led": {"on": "#3ecb6e"},
+            "actions": {
+              "toggle_on": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 33, "value": 127}]
+              },
+              "toggle_off": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 33, "value": 0}]
+              }
+            }
+          },
+          {
+            "switch": "down",
+            "mode": "latched",
+            "label": "BOOST",
+            "led": {"on": "#ef6b6b"},
+            "actions": {
+              "toggle_on": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 34, "value": 127}]
+              },
+              "toggle_off": {
+                "messages": [{"type": "cc", "channel": 1, "cc": 34, "value": 0}]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "midi_learn": {
+    "pc_to_patch": []
+  }
+}

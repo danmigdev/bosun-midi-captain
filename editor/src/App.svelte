@@ -25,6 +25,7 @@
   import PedalSimulator from "./components/PedalSimulator.svelte";
   import DeviceImport from "./components/DeviceImport.svelte";
   import SetlistView from "./components/SetlistView.svelte";
+  import StageView from "./components/StageView.svelte";
   import { IS_ANDROID } from "./lib/platform";
   import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
   import type { SetlistItem } from "./lib/setlists";
@@ -42,6 +43,8 @@
     midiBridgeStatus,
     type BridgeStatus,
     onDisconnected,
+    onReconnecting,
+    onReconnected,
     onFirmwareMessage,
     patchIdOf,
     type FirmwareMessage,
@@ -109,6 +112,12 @@
   let _pollInFlight = false;
   let _stockSerialMisses = 0;
   const STOCK_SERIAL_RETRIES_BEFORE_PROMPT = 3;
+  // On Android, opening the USB CDC port triggers a CircuitPython soft-reset.
+  // After a failed attempt we must wait for the firmware to reboot (~3 s)
+  // before retrying, otherwise the next openDeviceFd hits a stale /dev node
+  // and crashes the serial plugin with a FATAL IOException.
+  let _androidRetryCooldownUntil = $state(0);
+  const ANDROID_RETRY_COOLDOWN_MS = 4000;
   // Triggered by the topbar "Update firmware" button. Streams the bundled
   // firmware tree to the connected pedal via PUT_FILE - no MSC drive
   // dance required. The MSC-drive Installer modal is only used for the
@@ -256,8 +265,8 @@
   // "Plugin features unavailable" banner and lets us tell a genuine manifest
   // from the stand-in so a later real MANIFEST response can replace it.
   let manifestFallbackActive = $state(false);
-  const MANIFEST_MAX_RETRIES = 5;
-  const MANIFEST_RETRY_MS = 3000;
+  const MANIFEST_MAX_RETRIES = 10;
+  const MANIFEST_RETRY_MS = 4000;
   let _manifestTimer: ReturnType<typeof setTimeout> | undefined;
 
   let globalDevice = $state<Record<string, unknown> | null>(null);
@@ -272,6 +281,8 @@
 
   let unsubMsg: (() => void) | null = null;
   let unsubDisc: (() => void) | null = null;
+  let unsubReconnecting: (() => void) | null = null;
+  let unsubReconnected: (() => void) | null = null;
 
   onMount(async () => {
     // Detect Android status bar height. On Android the WebView extends
@@ -298,6 +309,30 @@
       // releases it so the next autoConnect goes through cleanly.
       try { await disconnect(); } catch {}
     });
+    // Android only: the backend I/O thread self-heals a stall by closing
+    // and reopening the port, which reboots the pedal via DTR and
+    // re-enumerates its USB device - including the Kemper<->Captain
+    // USB-MIDI interface BosunMidiBridge relays through. Android's
+    // MidiManager tears that bridge down when the interface vanishes
+    // (BosunMidiBridge.kt's DeviceCallback.onDeviceRemoved), and nothing
+    // used to bring it back - the recovery never touched `connected` (it
+    // can't: flipping it to false would route through the !connected
+    // welcome screen and away from whatever page - e.g. Stage - was on
+    // screen, and the actual serial link comes back on its own without
+    // user action). Restart the bridge explicitly once the link is back;
+    // the live CONTEXT/EVENT stream (and Stage view's subscription to it)
+    // resumes on its own as soon as data flows again. Toasts here are
+    // diagnostic (this self-heal used to be invisible) rather than routing
+    // changes, so they don't disturb whatever page is on screen.
+    unsubReconnecting = await onReconnecting(() => {
+      showToast("info", "Pedal link recovering…");
+    });
+    unsubReconnected = await onReconnected(async () => {
+      await refetchAll();
+      _bridgeAutoDone = false;
+      void startBridge(true);
+      showToast("ok", "Pedal reconnected");
+    });
     connected = await isConnected();
     if (connected) {
       // Re-fetch the world (after HMR, after a fresh window, after Tauri
@@ -311,14 +346,12 @@
     // in (no error toast) - the user can still connect manually. The watchdog
     // starts automatically via the `connected` $effect below.
     if (!connected && !manualMode) {
-      // Show the "Connecting…" indicator while autoConnect runs. The Rust
-      // command is async (off the UI thread) so the window stays responsive.
       busy = true;
       try {
         connectedPortName = await autoConnect();
         connected = true;
         await refetchAll();
-      } catch { /* no pedal present - stay disconnected */ }
+      } catch { /* no pedal or bridge - stay disconnected */ }
       finally { busy = false; }
     }
 
@@ -464,7 +497,8 @@
       // Go back one logical step
       if (page === "editor" || page === "settings" || page === "tft" ||
           page === "learn" || page === "setlist" || page === "recipes" ||
-          page === "expression" || page === "monitor" || page === "mirror") {
+          page === "expression" || page === "monitor" || page === "mirror" ||
+          page === "stage") {
         page = "patches";
         return true;
       }
@@ -570,8 +604,18 @@
   });
 
   // Manifest retry watchdog. Triggers once when we're connected but no
-  // manifest has arrived yet. Each tick re-sends GET_MANIFEST until either
-  // it lands (handler clears the timer) or we hit MANIFEST_MAX_RETRIES.
+  // manifest has arrived yet. Each tick AWAITS one GET_MANIFEST attempt
+  // (the manifest is the largest response in the protocol - 22 KB+,
+  // streamed field-by-field - so it can legitimately take well past a
+  // normal request's timeout on a busy link) and only schedules the next
+  // attempt once this one has actually settled, arrived or genuinely timed
+  // out. The previous version fired a bare setTimeout every
+  // MANIFEST_RETRY_MS with no idea whether an earlier request was still in
+  // flight: under load, each 22 KB re-stream took longer than the 4 s
+  // retry clock, so requests piled up overlapping in the firmware's queue -
+  // every one costing it a full re-stream that competed with USB-MIDI
+  // servicing for the same main-loop time, making a slow link slower and
+  // plausibly starving Kemper MIDI processing outright (2026-08-15).
   $effect(() => {
     // The manifest is global (works with no profile), so retry it regardless -
     // it's needed to populate plugin kinds/fields even before a profile exists.
@@ -580,10 +624,9 @@
       return;
     }
     if (_manifestTimer !== undefined) return;   // already scheduled
-    _manifestTimer = setTimeout(function tick() {
-      if (manifest || !connected) {
-        _manifestTimer = undefined; return;
-      }
+    let cancelled = false;
+    async function tick() {
+      if (manifest || !connected || cancelled) { _manifestTimer = undefined; return; }
       if (manifestRetries >= MANIFEST_MAX_RETRIES) {
         manifestGaveUp = true;
         // Install the core-only fallback so the editor stays usable (Patches,
@@ -597,9 +640,12 @@
         return;
       }
       manifestRetries += 1;
-      cmd.getManifest().catch(() => {});
+      try { await cmd.getManifestAwait(); } catch { /* timed out or errored - fall through to the next attempt */ }
+      if (manifest || !connected || cancelled) { _manifestTimer = undefined; return; }
       _manifestTimer = setTimeout(tick, MANIFEST_RETRY_MS);
-    }, MANIFEST_RETRY_MS);
+    }
+    _manifestTimer = setTimeout(tick, MANIFEST_RETRY_MS);
+    return () => { cancelled = true; };
   });
 
   function retryManifest() {
@@ -625,7 +671,7 @@
   });
 
   onDestroy(() => {
-    unsubMsg?.(); unsubDisc?.(); stopWatchdog();
+    unsubMsg?.(); unsubDisc?.(); unsubReconnecting?.(); unsubReconnected?.(); stopWatchdog();
     if (_manifestTimer !== undefined) clearTimeout(_manifestTimer);
     if (_toastTimer !== undefined) clearTimeout(_toastTimer);
     if (unflashedPollHandle) clearInterval(unflashedPollHandle);
@@ -697,13 +743,20 @@
       // of missing firmware: retry quietly across ticks and only prompt after
       // several consecutive misses. Drives/bootloader can't be probed this way.
       if (stockSerial) {
+        // Respect Android retry cooldown after a failed attempt.
+        if (_androidRetryCooldownUntil && Date.now() < _androidRetryCooldownUntil) return;
         try {
           connectedPortName = await autoConnect();
           connected = true;
           _stockSerialMisses = 0;
+          _androidRetryCooldownUntil = 0;
           await refetchAll();
           return;
-        } catch { /* no bosun protocol yet - maybe still booting */ }
+        } catch {
+          if (IS_ANDROID) {
+            _androidRetryCooldownUntil = Date.now() + ANDROID_RETRY_COOLDOWN_MS;
+          }
+        }
         if (connected || showInstaller) return;
         _stockSerialMisses += 1;
         if (_stockSerialMisses < STOCK_SERIAL_RETRIES_BEFORE_PROMPT) return;
@@ -785,6 +838,7 @@
     try { bridge = await midiBridgeStatus(); } catch { /* leave as-is */ }
   }
   async function startBridge(auto = false) {
+    _bridgeManuallyStopped = false;
     try {
       bridge = await midiBridgeStart();
       showToast("ok", `MIDI bridge on: ${bridge.kemper_port} <-> ${bridge.pedal_port}`);
@@ -797,12 +851,79 @@
       await refreshBridge();
     }
   }
+  // Set on an explicit user Stop click; cleared on any start (auto or
+  // manual). Guards the health-check below from fighting a deliberate
+  // "I turned it off" - only a bridge that died on its OWN gets auto-healed.
+  let _bridgeManuallyStopped = false;
   async function stopBridge() {
     try { await midiBridgeStop(); } catch { /* ignore */ }
+    _bridgeManuallyStopped = true;
     await refreshBridge();
   }
   // Reflect the real backend state whenever the Learn page opens.
   $effect(() => { if (page === "learn" && connected) void refreshBridge(); });
+
+  // Stage setups need the Kemper <-> pedal relay whenever both devices
+  // are on the USB bus, so auto-start the bridge on every connect
+  // (best-effort: without a Kemper it just stays off).  Resets on
+  // disconnect so a later reconnect tries again.
+  let _bridgeAutoDone = false;
+  $effect(() => {
+    // A fresh connection gets a fresh chance to auto-start, regardless of
+    // whether a previous connection's session ended with the bridge
+    // manually stopped.
+    if (!connected) { _bridgeAutoDone = false; _bridgeManuallyStopped = false; return; }
+    if (_bridgeAutoDone) return;
+    _bridgeAutoDone = true;
+    // Give refetchAll a moment to finish before probing MIDI devices.
+    const t = setTimeout(() => { void startBridge(true); }, 2500);
+    return () => clearTimeout(t);
+  });
+
+  // The Kotlin MIDI bridge (Android) can die independently of the data-CDC
+  // link's own health: Android's MidiManager tears it down whenever EITHER
+  // bridged device's USB-MIDI interface vanishes for ANY reason, not just
+  // the data-CDC stall-recovery reboot this app already recovers from (see
+  // firmware-reconnected above). If the bridge dies for some OTHER reason
+  // while the data channel stays healthy, there is no stall to trigger that
+  // existing auto-restart, and the bridge stays dead until the user
+  // manually restarts it or relaunches the app (2026-08-15: confirmed live
+  // - a Kemper front-panel rig change stopped reaching Captain entirely,
+  // with the data channel otherwise responsive and no stall logged).
+  // Poll the real backend status independently and self-heal - unless the
+  // user explicitly turned it off, which this must not fight.
+  $effect(() => {
+    if (!connected) return;
+    const iv = setInterval(async () => {
+      if (_bridgeManuallyStopped) return;
+      try {
+        const status = await midiBridgeStatus();
+        bridge = status;
+        if (!status.active) void startBridge(true);
+      } catch { /* ignore - transient IPC hiccup, try again next tick */ }
+    }, 10000);
+    return () => clearInterval(iv);
+  });
+
+  // The PATCH_LIST response can be delayed by the MANIFEST stream (the
+  // firmware processes requests sequentially and the 22 KB manifest
+  // takes several seconds).  When the user opens Patches, always
+  // re-request so the grid fills in even if the refetchAll response
+  // was lost or raced the navigation.  The effect depends only on
+  // `page`/`connected`, so it fires once per navigation.
+  //
+  // Stage needs the same refresh for its preset-navigation row: it labels
+  // switches from `patches` (bank/slot -> name), but only ever fetches the
+  // CURRENT patch (GET_PATCH), never the full list. Patches created after
+  // `patches` was last populated (refetchAll on connect, or an earlier visit
+  // to this same Patches page) stayed invisible to Stage - e.g. slots 2-5
+  // filled in during a session after Stage was already open would show "-"
+  // forever, even with a correct preset_navigation mapping and a live
+  // firmware that has every patch (2026-08-14).
+  $effect(() => {
+    if ((page !== "patches" && page !== "stage") || !connected) return;
+    void cmd.listPatches();
+  });
 
   async function updateMidiLearn(table: MidiLearnTable) {
     midiLearnTable = table;
@@ -885,10 +1006,16 @@
     }
   });
 
-  // Lazy-fetch device config the first time Settings opens.
+  // Lazy-fetch device config the first time Settings OR Stage opens. Stage
+  // needs it too: preset_navigation (the rig-select row's switch->slot
+  // mapping) lives in globalDevice, and refetchAll()'s own GET_GLOBAL is
+  // gated behind `hasProfile` resolving from LIST_PROFILES - a fresh
+  // connect that goes straight to Stage without ever visiting Settings
+  // could reach Stage with globalDevice still null, showing "-" on every
+  // preset-nav switch despite a correct, saved mapping (2026-08-14).
   let settingsRequested = $state(false);
   $effect(() => {
-    if (page === "settings" && connected && !globalDevice && !settingsRequested) {
+    if ((page === "settings" || page === "stage") && connected && !globalDevice && !settingsRequested) {
       settingsRequested = true;
       cmd.getGlobal().catch(() => {});
     }
@@ -965,6 +1092,10 @@
         manifestGaveUp = false;
         manifestFallbackActive = false;
         if (_manifestTimer !== undefined) { clearTimeout(_manifestTimer); _manifestTimer = undefined; }
+        break;
+      case "CONTEXT":
+        // Stage Mode: display_context streamed from firmware.
+        // Handled by the subscriber + StageView component directly.
         break;
       case "GLOBAL":
         globalDevice = msg.device;
@@ -1129,6 +1260,7 @@
   type NavGroup = "" | "build" | "device" | "system";
   const CORE_NAV: NavItem[] = [
     { id: "home",     label: "Home",         icon: "⌂", group: "" },
+    { id: "stage",    label: "Stage",        icon: "◉", group: "" },
     { id: "patches",  label: "Patches",      icon: "▣", group: "build" },
     { id: "editor",   label: "Editor",       icon: "✎", group: "build" },
     { id: "setlist",  label: "Setlist",      icon: "≣", group: "build" },
@@ -1189,7 +1321,8 @@
 
 </script>
 
-<div class="app" class:mobile={isMobile}>
+<div class="app" class:mobile={isMobile} class:stage={page === "stage"}>
+  {#if page !== "stage"}
   <header class="topbar">
     <!-- Mobile hamburger button -->
     <button class="hamburger" onclick={toggleMobileMenu} aria-label="Menu">
@@ -1221,6 +1354,18 @@
     <div class="grow"></div>
 
     {#if connected}
+      <!-- MIDI bridge (Kemper <-> pedal relay). Independent from MIDI Learn:
+           Learn auto-starts it for capture, but the stage setup needs it
+           running whenever both devices are on the bus. -->
+      <button class="topbtn"
+              class:primary={bridge.active}
+              class:ghost={!bridge.active}
+              onclick={() => { void (bridge.active ? stopBridge() : startBridge()); }}
+              title={bridge.active
+                ? `Bridge on: ${bridge.kemper_port} <-> ${bridge.pedal_port}`
+                : "Start the MIDI bridge (Kemper <-> pedal)"}>
+        {bridge.active ? "Bridge ON" : "Bridge OFF"}
+      </button>
       <ProfilePicker {manifest} />
 
       <!-- Firmware update: desktop-only (needs the bundled UF2 + firmware
@@ -1275,6 +1420,7 @@
       {/if}
     </button>
   </header>
+  {/if}
 
   {#if !connected}
     <main class="welcome">
@@ -1628,6 +1774,8 @@
               {/each}
             {/if}
           </div>
+        {:else if page === "stage"}
+          <StageView {deviceInfo} {manifest} device={globalDevice} {connected} {patches} onExit={() => page = "home"} />
         {/if}
       </main>
     </div>
@@ -1753,7 +1901,7 @@
   }
 
   :global(body) { background: var(--bg); color: var(--text); margin: 0; overflow: hidden; }
-  :global(html, body, #app) { height: 100vh; }
+  :global(html, body, #app) { height: 100vh; height: 100dvh; }
 
   /* Global button baseline. Components keep their own styles when they
      declare a class (.topbtn, .scalebtn, .themetoggle, .navitem, ...);
@@ -1804,9 +1952,9 @@
   }
 
   .app {
-    display: flex; flex-direction: column; height: 100vh;
+    display: flex; flex-direction: column; height: 100vh; height: 100dvh;
     padding-top: var(--status-bar-height, env(safe-area-inset-top, 0px));
-    padding-bottom: env(safe-area-inset-bottom, 16px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
@@ -1926,6 +2074,7 @@
     flex: 1; display: flex; align-items: center; justify-content: center;
     padding: 2rem;
     background: var(--welcome-gradient), var(--bg);
+    overflow-y: auto;
   }
   .card {
     background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
@@ -1983,10 +2132,11 @@
   /* ---------- main shell ---------- */
   .shell { flex: 1; display: flex; min-height: 0; }
   .sidebar {
-    width: 190px; flex-shrink: 0;
+    width: 190px; flex-shrink: 0; max-height: 100%;
     background: var(--bg-elevated); border-right: 1px solid var(--border);
     display: flex; flex-direction: column; padding: 0.55rem 0.45rem;
     gap: 0.12rem;
+    overflow-y: auto;
   }
   .navitem {
     position: relative;
@@ -2187,8 +2337,8 @@
   .ts { color: var(--text-dim); flex-shrink: 0; }
   .msg { color: var(--text-soft); word-break: break-all; }
 
-  .muted { color: #9aa1ad; }
-  .err { color: #ef9b9b; font-size: 0.85rem; }
+  .muted { color: var(--text-muted); }
+  .err { color: var(--err); font-size: 0.85rem; }
 
   /* ---------- mobile layout (JS-driven, works on Android WebView) ---------- */
   .app.mobile .topbar {
@@ -2241,4 +2391,19 @@
   .app.mobile .connpill { font-size: 0.72rem; padding: 0.15rem 0.5rem; }
   .sidebar-overlay { display: none; }
   .hamburger { display: none; }
+
+  /* Landscape: welcome card scrolls when Advanced expands past viewport */
+  @media (orientation: landscape) {
+    .welcome { align-items: flex-start; padding: 1rem; }
+    .welcome .card { margin: 0 auto; }
+  }
+
+  /* ---------- Stage Mode: full-screen immersive ---------- */
+  .app.stage .topbar { display: none; }
+  .app.stage .shell { flex-direction: column; }
+  .app.stage .sidebar { display: none; }
+  .app.stage .content {
+    flex: 1; padding: 0; overflow: hidden;
+    max-width: none; margin: 0;
+  }
 </style>

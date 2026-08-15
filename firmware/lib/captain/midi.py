@@ -200,7 +200,20 @@ class MidiEngine:
                     if status == 0xF0:
                         self.sysex_rx_count = getattr(self, "sysex_rx_count", 0) + 1
         if self.usb_in is not None:
-            data = self.usb_in.read(32)
+            # 256, not 32: a Kemper rig change bursts far more than 32 bytes
+            # in one shot (multiple effect-block CCs plus a SysEx rig-name
+            # response), and read() is non-blocking - it returns whatever is
+            # already buffered, never waits for the requested count. Capping
+            # it at 32 meant a big burst could outrun how much we drained
+            # per tick, overflowing usb_midi's own internal buffer and
+            # losing bytes - worst case truncating a SYSEX mid-message,
+            # which leaves the parser stuck in "inside SYSEX" and swallows
+            # whatever legitimate message comes right after it as garbage
+            # payload. Symptom (2026-08-15): Kemper block-state CCs (top-row
+            # effect LEDs) went stale after a rig change, and rig selection
+            # itself sometimes silently failed to register - both explained
+            # by a corrupted/lost message during the post-change burst.
+            data = self.usb_in.read(256)
             if data:
                 for ch, status, dlist in self._usb_parser.feed(data):
                     events.append(("usb", ch, status, dlist))

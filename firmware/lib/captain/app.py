@@ -2,6 +2,12 @@ import gc
 import time
 
 from . import VERSION, config
+
+# Hardware watchdog timeout. Must exceed the longest legitimate single
+# operation (profile switch, settings save, big TFT render) but stay
+# short enough that a wedged loop self-recovers quickly.  The RP2040
+# hardware watchdog tops out at 8.3 s in CircuitPython.
+WATCHDOG_TIMEOUT_S = 8
 from .bindings import BindingRunner, SwitchArray
 from .board import LED_INDEX_PER_SWITCH
 from .display import Display
@@ -180,13 +186,45 @@ class Captain:
         # brand screen stays visible instead of being overwritten instantly.
         self._splash_until_ms = self._now_ms() + 2000
         self.leds.idle_pattern()
-        self.switch_patch(self.current_bank, self.current_slot, source="boot")
+        # If a plugin's target device is itself authoritative for the
+        # current rig (e.g. a Kemper with bidirectional tracking), don't
+        # push bosun's last-remembered patch onto it on power-up - that
+        # would silently override whatever the user has loaded directly on
+        # the device. Load the patch locally (bindings/LEDs/display) but
+        # skip on_enter's outbound MIDI; the device's own state broadcast,
+        # once the bidirectional link comes up, then corrects
+        # current_bank/current_slot through the normal external-rig-change
+        # follow path (source="midi_in") instead of bosun dictating it.
+        fire = not self.plugins.wants_authoritative_boot(self)
+        self.switch_patch(self.current_bank, self.current_slot, source="boot", fire_on_enter=fire)
 
     def run(self):
         self.boot()
         print("Captain " + VERSION + " ready")
+
+        # Hardware watchdog: if the main loop ever wedges (display render
+        # OOM, a SYSEX storm from the MIDI bridge, ...), the RP2040 resets
+        # itself within WATCHDOG_TIMEOUT_S instead of staying frozen until
+        # someone power-cycles it.  The editor's auto-reconnect + the
+        # Kemper beacon re-init recover the link automatically, so a wedge
+        # degrades to a ~10 s blip.  Enabled AFTER boot() (which takes
+        # longer than the timeout).
+        try:
+            import microcontroller
+            wdt = microcontroller.watchdog
+            wdt.timeout = WATCHDOG_TIMEOUT_S
+            wdt.mode = microcontroller.WatchDogMode.RESET
+            _wdt = wdt
+        except Exception:
+            _wdt = None
+
         while True:
             self.tick_once()
+            if _wdt is not None:
+                try:
+                    _wdt.feed()
+                except Exception:
+                    pass
             time.sleep(0.005)
 
     def tick_once(self):
@@ -304,7 +342,7 @@ class Captain:
                 or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
             self._leds_due_ms = 0
             try:
-                self.leds.render_patch(self.current_patch, self.switches.switches)
+                self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
                 self._paint_preset_nav_leds()
             except Exception as e:
                 print("deferred LED repaint failed:", e)
@@ -312,9 +350,23 @@ class Captain:
         # overflows; it only moves each scrolling label's .x (a small dirty
         # region), so it doesn't block the loop the way a full render does.
         self.display.tick(now_ms)
+        # Periodic context push for the Stage Mode editor view (tablet display).
+        # Send the current display_context over the data port every ~1s when it
+        # changed, so the frontend can show live Kemper/Ampero/HeadRush state.
+        self._push_context(now_ms)
 
     def stats(self):
-        gc.collect()
+        # No gc.collect() here: STATS is a diagnostic readout (Dashboard /
+        # Maintenance panels), polled every 1-5 s from up to four different
+        # UI locations, and a full mark-and-sweep is a genuine, non-trivial
+        # main-loop stall (not "free") - forcing one on every single poll,
+        # purely to make mem_free a little fresher, competed directly with
+        # USB-MIDI/data-CDC servicing for main-loop time (2026-08-15).
+        # CircuitPython already collects automatically under real memory
+        # pressure, and every other GC-sensitive path in this file
+        # (apply_global, _get_global, ...) already calls collect() at its
+        # own strategic points - mem_free here is just slightly less
+        # freshly-swept than "right now", not stale or wrong.
         return {
             "uptime_ms":          self._now_ms() - self._boot_ms,
             "mem_free":           gc.mem_free(),
@@ -379,8 +431,19 @@ class Captain:
         self.current_slot = slot
         self.last_patch_switch_ms = t0
         # A local switch arms the plugins' echo window; an inbound-echo-driven
-        # switch (source="midi_in") must NOT, or it would re-arm forever.
-        if source != "midi_in":
+        # switch (source="midi_in") must NOT, or it would re-arm forever. Also
+        # gated on fire_on_enter: a load that sent no outbound MIDI (e.g.
+        # boot() deferring to an authoritative Kemper - see
+        # wants_authoritative_boot) has nothing to echo, so arming the window
+        # here would make the very NEXT inbound state announcement from the
+        # device look like a self-echo and get swallowed by the branch above
+        # instead of being followed - the current patch would then stay
+        # stuck on whatever boot loaded, forever, even though the device
+        # itself is on a different rig (2026-08-15: TFT correctly showed the
+        # Kemper's real rig name, but the switch/effect layout stayed on the
+        # boot patch's - the rig-name string broadcast bypasses switch_patch
+        # entirely, so only this echo-window miscount hid the symptom there).
+        if source != "midi_in" and fire_on_enter:
             self.last_local_switch_ms = t0
         self.current_patch = self.patches.get(bank, slot)
         self._reindex_patch()
@@ -408,7 +471,7 @@ class Captain:
         # have landed. The incoming deltas also update changed switches live.
         if source == "midi_in":
             self.plugins.on_patch_loaded(self)
-        self.leds.render_patch(self.current_patch, self.switches.switches)
+        self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
         self._paint_preset_nav_leds()
         self.display_context["patch_name"] = (self.current_patch or {}).get("name", "")
         self.display_context["bank"] = bank
@@ -495,7 +558,7 @@ class Captain:
                         and new_mode == "latched"
                         and prev_latched.get(sw.name)):
                     sw.latched_on = True
-            self.leds.render_patch(self.current_patch, self.switches.switches)
+            self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
             self._paint_preset_nav_leds()
 
     def put_binding(self, bank, slot, binding):
@@ -714,7 +777,7 @@ class Captain:
         self._reindex_patch()
         self.switches.reset_all()
         self.plugins.on_patch_loaded(self)
-        self.leds.render_patch(self.current_patch, self.switches.switches)
+        self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
         self._paint_preset_nav_leds()
 
     def apply_global(self, device):
@@ -961,6 +1024,41 @@ class Captain:
             cap = _TUNER_REFRESH_MS if tuner_on else _REFRESH_MAX_DEFER_MS
             self._refresh_due_ms = self._now_ms() + cap
 
+    def _push_context(self, now_ms):
+        """Push the current display_context over the data port for the editor's
+        Stage Mode. Throttled to ~1 Hz and only when state actually changed.
+
+        Called unconditionally from every main-loop tick (100+ times/s), so
+        the throttle check MUST run before any per-key work: this used to
+        build the "cheap" fingerprint (str() + sort over every context
+        entry) first and check the 1 s gate second, meaning the O(n log n)
+        fingerprint ran on every single tick regardless of whether a push
+        was even due - real, always-on CPU tax that competed with the same
+        loop's USB-MIDI/data-CDC servicing for time (2026-08-14: reported as
+        Stage updates and Kemper-block LEDs lagging well behind real time)."""
+        if now_ms - getattr(self, "_last_context_push_ms", 0) < 1000:
+            return
+        ctx = self.display_context
+        # Build a cheap fingerprint - just key count + repr of key-value pairs
+        fp = (len(ctx), tuple(sorted((str(k), str(v)) for k, v in ctx.items())))
+        if fp == getattr(self, "_last_context_fp", None):
+            return
+        self._last_context_fp = fp
+        self._last_context_push_ms = now_ms
+        # Build a JSON-safe copy and stream it
+        safe = {}
+        for k, v in ctx.items():
+            try:
+                import json as _j
+                _j.dumps({k: v})
+                safe[k] = v
+            except Exception:
+                safe[k] = str(v)
+        try:
+            self.protocol._send({"type": "CONTEXT", "context": safe})
+        except Exception:
+            pass
+
     def find_binding(self, switch_name):
         """Return the current patch's binding for the given switch, or
         None. Plugins use this when they need to inspect a binding to
@@ -978,11 +1076,15 @@ class Captain:
         falling back to a neutral grey if not configured). The switch
         pointing at the active slot is full bright; the others are dimmed
         with the same proportional formula used for latched-off LEDs
-        (leds.dim). Called after leds.render_patch so it overrides the
-        LEDs of those switches."""
+        (leds.dim). Called after leds.render_patch(show=False) so it overrides
+        the LEDs of those switches before the combined frame reaches the
+        hardware in one .show() - two separate .show() calls would put a real
+        all-black frame on the wire in between, which reads as this row
+        blinking on every repaint."""
         nav = self.device.get("preset_navigation") or {}
         sw_map = nav.get("switches") or {}
         if not sw_map:
+            self.leds.strip.show()
             return
         bank_colors = nav.get("bank_colors") or {}
         bank_color = bank_colors.get(str(self.current_bank)) or "#888888"

@@ -6,7 +6,7 @@ pedal is exactly as it was before bosun was ever installed, and provide a
 reusable script to do it on demand.
 
 ## Source of truth
-`C:\Users\danmigdev\Desktop\midi_captain_backup_20260617.zip` - a full snapshot
+`~\Desktop\midi_captain_backup_20260617.zip` - a full snapshot
 of the stock `CIRCUITPY` drive:
 - root: `boot.py`, `code.py` (`import pyswitch.process`), `config.py`,
   `communication.py`, `display.py`, `inputs.py`, `fxcap.txt`, `boot_out.txt`

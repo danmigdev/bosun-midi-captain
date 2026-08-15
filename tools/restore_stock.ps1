@@ -51,7 +51,7 @@
 
 [CmdletBinding()]
 param(
-    [string] $BackupZip = "C:\Users\danmigdev\Desktop\midi_captain_backup_20260617.zip",
+    [string] $BackupZip = "$env:USERPROFILE\Desktop\midi_captain_backup_20260617.zip",
     [string] $Port,
     [switch] $ManualBootloader,
     [switch] $SkipNuke,

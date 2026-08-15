@@ -77,7 +77,11 @@ class FakeApp:
         self.current_bank = bank
         self.current_slot = slot
         self.last_patch_switch_ms = t0
-        if source != "midi_in":
+        # Gated on fire_on_enter too: a load that sent no outbound MIDI
+        # (e.g. boot() deferring to an authoritative Kemper) has nothing to
+        # echo, so arming the window here would swallow the device's very
+        # next real state announcement as a false self-echo (2026-08-15).
+        if source != "midi_in" and fire_on_enter:
             self.last_local_switch_ms = t0
         self.current_patch = {"bank": bank, "slot": slot}
         return True
@@ -303,6 +307,124 @@ def test_beacon_emitted_on_tick():
               "beacon=%r" % (b,))
 
 
+def test_external_rig_change_opens_settle_window_before_repainting():
+    # Regression (2026-08-15 report): switching rig ON THE KEMPER flashed
+    # the Boost switch on (stale rig-1 cache) before correctly turning off,
+    # while the SAME rig change made from the Captain's own footswitch
+    # never flashed. Cause: switch_patch (called from the PC handler below)
+    # calls on_patch_loaded synchronously, which paints from _BLOCK_STATE
+    # immediately unless a settle window is already open. That window is
+    # normally opened by the rig-name SysEx (_handle_sysex) - but on a
+    # flat-list Player the bare PC arrives BEFORE the rig-name string, so
+    # the paint fired from whatever the previous rig's block cache still
+    # held. The PC handler must open the window itself, before calling
+    # switch_patch, so this premature paint defers to tick() like every
+    # other block delta.
+    reset_bidir()
+    app = FakeApp([], dict(CFG))
+    app.now_ms = 5000
+    kemper.on_midi_in(0, 1, 0xC0, [1], app)   # external rig change (flat PC=1 -> bank 1 slot 2)
+    check("the PC handler opens the settle window before switch_patch can repaint from a stale cache",
+          kemper._BIDIR_STATE["settle_until_ms"] > app.now_ms,
+          "settle_until_ms=%r now=%r" % (kemper._BIDIR_STATE["settle_until_ms"], app.now_ms))
+
+
+def test_boot_deferring_to_kemper_does_not_arm_a_false_echo_window():
+    # Regression (2026-08-15 report): after the boot-authority fix, the TFT
+    # correctly showed the Kemper's real rig name ("Crunch") on power-up -
+    # that field comes straight from the rig-name SysEx broadcast, bypassing
+    # switch_patch entirely. But the switch/effect layout stayed on the BOOT
+    # patch ("rig 1 acoustic") instead of following to Crunch. Cause: boot()
+    # calls switch_patch(source="boot", fire_on_enter=False) to load locally
+    # without pushing MIDI - but switch_patch armed the echo-suppression
+    # window regardless of fire_on_enter, so the Player's very first real PC
+    # (announcing it's actually on Crunch) arrived inside that window and
+    # got misread as "just the Player echoing our own boot load", which
+    # RE-CONFIRMS the stale bank/slot instead of following it.
+    reset_bidir()
+    app = FakeApp([], dict(CFG))
+    app.now_ms = 1000
+    # Mirrors boot(): loads bosun's persisted rig (bank 1 / slot 1 =
+    # "acoustic") but must fire no outbound MIDI.
+    app.switch_patch(1, 1, source="boot", fire_on_enter=False)
+    # The Player's first state announcement arrives 300 ms later - well
+    # inside the old (bugged) echo window, which is exactly the case that
+    # must now be FOLLOWED, not swallowed. PC 2 = flat rig 3 = bank 1 / rig
+    # 3 in bosun's 5-rig grouping = "Crunch".
+    app.now_ms = 1300
+    kemper.on_midi_in(0, 1, 0xC0, [2], app)
+    check("the Kemper's real rig (Crunch, bank 1 slot 3) is followed, not swallowed as a boot echo",
+          app.current_bank == 1 and app.current_slot == 3,
+          "current=%r/%r (stuck on boot patch would be 1/1)" % (app.current_bank, app.current_slot))
+
+
+def test_configured_kemper_wants_authoritative_boot():
+    # Regression (2026-08-15 report): on power-up bosun pushed its own
+    # last-remembered rig onto the Player (defaulting to whatever bank/slot
+    # 1 held), silently overriding a rig the user had dialed in directly on
+    # the device (Kemper on rig 3, powered on the Captain, both ended up on
+    # rig 1). A configured Kemper must claim boot authority so app.py skips
+    # that push and lets the beacon's own initial state broadcast set
+    # current_bank/current_slot instead.
+    #
+    # First version of this fix gated on cfg.get("bidirectional") - a
+    # config key that CONFIG_SCHEMA explicitly does NOT expose (bilateral
+    # sync is unconditional for any Kemper profile, not a user option), so
+    # this test's own fixture (CFG, which sets "bidirectional": True
+    # despite that not being a real field) made the bug look fixed while
+    # the real device.json - which never has that key - kept hitting
+    # False. Use a config WITHOUT the key, matching what config.py
+    # actually stores, to keep that regression from coming back unnoticed.
+    cfg = dict(CFG)
+    cfg.pop("bidirectional", None)
+    app = FakeApp([], cfg)
+    check("a configured Kemper (no bidirectional key, matching real device.json) wants authoritative boot",
+          kemper.wants_authoritative_boot(app) is True)
+
+
+def test_no_kemper_device_does_not_want_authoritative_boot():
+    app = FakeApp([], dict(CFG))
+    app.device = {}
+    check("no kemper device configured -> no boot authority claim",
+          kemper.wants_authoritative_boot(app) is False)
+
+
+def test_unconfirmed_link_retries_init_at_bounded_cadence():
+    # Regression (2026-08-15): while `confirmed` stays False (e.g. the
+    # Kemper's sensing replies never make it back through an Android
+    # USB-MIDI bridge), tick() used to send a full init beacon on EVERY
+    # call with no throttle - a real main loop can call tick() far more
+    # often than once per second, which flooded send_sysex() badly enough
+    # that the physical footswitches stopped responding.
+    reset_bidir()
+    app = FakeApp([], dict(CFG))
+    for now_ms in range(0, 5001, 10):          # simulate a tight 5s loop
+        kemper.tick(app, now_ms)
+    max_expected = (5000 // kemper._INIT_RETRY_MS) + 1
+    check("unconfirmed retries are bounded, not sent on every tick",
+          len(app.midi.sysex) <= max_expected,
+          "sent=%d, max_expected=%d" % (len(app.midi.sysex), max_expected))
+    check("at least one retry actually went out",
+          len(app.midi.sysex) >= 1, "sysex=%r" % app.midi.sysex)
+
+
+def test_confirmed_link_uses_normal_keepalive_cadence():
+    # Once the Player has confirmed the link, resends must fall back to
+    # the slower _BEACON_RESEND_MS keep-alive interval, not the faster
+    # unconfirmed-retry cadence - otherwise a confirmed link would keep
+    # spamming the Kemper too.
+    reset_bidir()
+    app = FakeApp([], dict(CFG))
+    kemper.tick(app, 0)                        # init beacon
+    feed_sysex(app, sensing())                 # confirms the link
+    sent_after_confirm = len(app.midi.sysex)
+    for now_ms in range(0, kemper._BEACON_RESEND_MS, 10):
+        kemper.tick(app, now_ms)
+    check("confirmed link sends no keep-alive before _BEACON_RESEND_MS elapses",
+          len(app.midi.sysex) == sent_after_confirm,
+          "sysex=%r" % app.midi.sysex)
+
+
 def main():
     print("Kemper plugin inbound handling (offline)\n")
     print("effect blocks")
@@ -321,6 +443,13 @@ def main():
     test_external_rig_change_is_still_followed()
     print("beacon")
     test_beacon_emitted_on_tick()
+    test_unconfirmed_link_retries_init_at_bounded_cadence()
+    test_confirmed_link_uses_normal_keepalive_cadence()
+    print("boot authority")
+    test_external_rig_change_opens_settle_window_before_repainting()
+    test_boot_deferring_to_kemper_does_not_arm_a_false_echo_window()
+    test_configured_kemper_wants_authoritative_boot()
+    test_no_kemper_device_does_not_want_authoritative_boot()
     print("\n%d passed, %d failed" % (PASS, FAIL))
     if FAILURES:
         print("\nFailures:")

@@ -313,6 +313,11 @@
         // which marks them dirty - with autosave off they'd sit unsaved until
         // a manual Save. Persist them now so import "just works".
         try { await cmd.saveNow(); } catch {}
+        // Let the firmware drain its flash-write queue before the editor
+        // refetches the patch list.  Without this pause a LIST_PATCHES sent
+        // immediately after SAVE_NOW can race the FAT writes and return a
+        // stale (or empty) list, making the user click Refresh manually.
+        await new Promise(r => setTimeout(r, 400));
         restoreMsg = `Overwrote active profile with ${backup.patches.length} patches.`;
       }
       pendingBackup = null;

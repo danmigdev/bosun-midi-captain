@@ -71,13 +71,19 @@ def main():
             for m in p_in.iter_pending():
                 if m.type in DROP:
                     continue
-                b_out.send(m)
-                n_pb += 1
+                try:
+                    b_out.send(m)
+                    n_pb += 1
+                except Exception as e:
+                    print("  [bridge] Player->pedal send error:", e)
             for m in b_in.iter_pending():
                 if m.type in DROP:
                     continue
-                p_out.send(m)
-                n_bp += 1
+                try:
+                    p_out.send(m)
+                    n_bp += 1
+                except Exception as e:
+                    print("  [bridge] pedal->Player send error:", e)
             now = time.time()
             if now - last_report >= 5.0:
                 print("  [bridge] Player->pedal %d msgs, pedal->Player %d msgs" % (n_pb, n_bp))

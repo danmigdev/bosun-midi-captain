@@ -240,6 +240,7 @@ class Protocol:
             elif t == "LED_PROBE":         self._led_probe(mid, msg)
             elif t == "LED_DUMP":          self._led_dump(mid, msg)
             elif t == "GET_RIG_INFO":      self._get_rig_info(mid, msg)
+            elif t == "GET_CONTEXT":       self._get_context(mid)
             else:                          self._send({"type": "ERROR", "id": mid, "error": "unknown_type", "of": t})
         except Exception as e:
             self._send({"type": "ERROR", "id": mid, "error": "exception", "detail": str(e), "of": t})
@@ -507,7 +508,12 @@ class Protocol:
             w(b'{"type":"MANIFEST","id":')
             w(json.dumps(mid).encode())
             w(b',"core_messages":')
-            w(json.dumps(messages.CORE_MESSAGE_TYPES).encode())
+            # Stream core_messages field-by-field too: json.dumps of the
+            # whole dict (~1.5 KB) MemoryErrors on the fragmented RP2040
+            # heap (observed 2026-08-13: the manifest died after the first
+            # 44 bytes and the unterminated fragment corrupted the next
+            # JSON line on the host). Same fix as the plugin fields below.
+            self._stream_value(w, messages.CORE_MESSAGE_TYPES, gc)
             w(b',"plugins":{')
             first_plugin = True
             for name, entry in self.app.plugins.iter_manifest():
@@ -550,6 +556,19 @@ class Protocol:
             w(b'}}\n')
         except Exception as e:
             print("[protocol] _send EXC type=MANIFEST err=%s" % type(e).__name__)
+
+    def _get_context(self, mid):
+        """Return the current display_context so a Stage Mode frontend can
+        show live Kemper/Ampero/HeadRush state on a tablet at full size."""
+        ctx = getattr(self.app, "display_context", {})
+        safe = {}
+        for k, v in ctx.items():
+            try:
+                json.dumps({k: v})
+                safe[k] = v
+            except Exception:
+                safe[k] = str(v)
+        self._send({"type": "CONTEXT", "id": mid, "context": safe})
 
     def _stats(self, mid):
         payload = {"type": "STATS", "id": mid}

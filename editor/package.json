@@ -1,6 +1,6 @@
 {
   "name": "bosun-editor",
-  "version": "0.5.1",
+  "version": "0.5.30",
   "description": "Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more).",
   "private": true,
   "type": "module",
@@ -25,13 +25,13 @@
     "@testing-library/svelte": "^5.3.1",
     "@testing-library/user-event": "^14.6.1",
     "@tsconfig/svelte": "^5.0.4",
-    "@vitest/ui": "^4.1.9",
+    "@vitest/ui": "^3.2.7",
     "jsdom": "^29.1.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tslib": "^2.6.0",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
-    "vitest": "^4.1.9"
+    "vitest": "^3.2.7"
   }
 }

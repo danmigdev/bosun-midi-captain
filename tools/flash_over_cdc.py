@@ -12,13 +12,14 @@ live file is replaced atomically.
 
 import base64
 import json
+import os
 import sys
 import time
 
 import serial
 import serial.tools.list_ports as list_ports
 
-REPO = r"C:\Users\danmigdev\Desktop\bosun"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = [
     (REPO + r"\firmware\lib\captain\__init__.py", "/lib/captain/__init__.py"),
     (REPO + r"\firmware\lib\captain\plugin.py",    "/lib/captain/plugin.py"),

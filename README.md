@@ -15,6 +15,7 @@ It is built for guitarists who drive a modeller or multi-effect (Kemper Player, 
 - [User manual](#user-manual)
   - [Connecting](#connecting)
   - [Home](#home)
+  - [Stage](#stage)
   - [Patches](#patches)
   - [Patch editor](#patch-editor)
   - [Quick setup](#quick-setup)
@@ -110,6 +111,17 @@ The Home screen is a dashboard:
 - **Quick actions**: shortcuts to Patches, the Editor and the Screen layout.
 
 The left sidebar is the main navigation, grouped by intent: **Build** (Patches, Editor, Setlist) for authoring your sounds, **Device** (Screen layout, MIDI Learn, Settings) for pedal-wide configuration, and **System** (Maintenance, Log) for diagnostics. **Disconnect** at the bottom releases the serial port.
+
+### Stage
+
+![Stage view](docs/ui-test-screenshots/44_stage.png)
+
+Stage is a full-screen, live mirror of the pedal meant to run on a tablet next to you at a gig, not for editing. It shows two rows of five:
+
+- **Top row**: the current patch's switches (`1`-`4`, `A`-`D`), coloured by each switch's LED and lit when latched on - a toggled effect (for example a Boost or Harmonizer bound to a Kemper effect slot) shows active here the instant it engages, whether you tapped the switch or a Kemper Player rig change turned it on or off. Unbound switches show a dash.
+- **Bottom row**: the preset-navigation switches (`up` / `down` and the bank letters), showing the patch in each slot of the current bank in its bank colour, with the active slot highlighted - a bank/slot combination with no patch falls back to the unbound look, mirroring the pedal's own LED.
+
+The header shows the current patch name and `BANK n · RIG n`. Everything updates from the pedal's own state, not the other way around: for a bidirectionally-tracked device like the Kemper Player, Stage (and the pedal itself) follow whatever rig is actually loaded on the device - including a rig changed directly on the device's own front panel - rather than asserting bosun's last-remembered one. A label wider than its box scrolls (marquee) instead of being clipped.
 
 ### Patches
 

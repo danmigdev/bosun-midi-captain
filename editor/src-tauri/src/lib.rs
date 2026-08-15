@@ -5,7 +5,10 @@
 
 mod export;
 mod midi;
+#[cfg(target_os = "android")]
+mod midi_android;
 mod serial;
+mod tcp_serial;
 
 #[cfg(not(target_os = "android"))]
 mod installer;
@@ -28,7 +31,9 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_serialplugin::init());
     }
 
-    // MIDI bridge: desktop-only (uses midir with winmm/CoreMIDI/ALSA).
+    // MIDI bridge state: desktop-only. The desktop backend keeps its midir
+    // connections here (winmm/CoreMIDI/ALSA); Android keeps the bridge state
+    // in the Kotlin BosunMidiBridge singleton instead (midi_android.rs).
     #[cfg(not(target_os = "android"))]
     {
         builder = builder.manage(midi::MidiState::default());
@@ -67,6 +72,8 @@ pub fn run() {
             midi::midi_bridge_start,
             midi::midi_bridge_stop,
             midi::midi_bridge_status,
+            tcp_serial::tcp_list_ports,
+            tcp_serial::tcp_connect,
         ]);
     }
 
@@ -84,6 +91,12 @@ pub fn run() {
             export::write_export_file,
             export::default_backup_folder,
             export::open_in_file_manager,
+            midi_android::midi_list_ports,
+            midi_android::midi_bridge_start,
+            midi_android::midi_bridge_stop,
+            midi_android::midi_bridge_status,
+            tcp_serial::tcp_list_ports,
+            tcp_serial::tcp_connect,
         ]);
     }
 

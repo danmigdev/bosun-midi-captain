@@ -272,6 +272,25 @@ _BEACON_ADDR_PAGE  = 0x40
 _BEACON_PARAM_SET  = 0x02
 _BEACON_LEASE_DIV2 = 0x05
 _BEACON_RESEND_MS  = 5000
+# While the link has never been confirmed (no sensing reply seen yet),
+# tick() retries the init beacon at this faster cadence instead of waiting
+# a full _BEACON_RESEND_MS - but still bounded. Without this bound the
+# retry fired on literally every main-loop tick as long as `confirmed`
+# stayed False (2026-08-15: happens whenever the Kemper's sensing replies
+# never make it back to the Captain, e.g. an Android USB-MIDI bridge that
+# never delivers them), flooding send_sysex() calls badly enough that the
+# physical footswitches stopped responding.
+_INIT_RETRY_MS = 1000
+# The Player pings every ~500 ms while the subscription lives.  If no
+# sensing frame arrives for this long the subscription is dead (bridge
+# restart, lease expiry) - force a full re-init.  Set well above the ping
+# cadence (3x _BEACON_RESEND_MS) so ordinary jitter or a dropped frame or
+# two (USB buffer overflow during a burst, a slow TFT render tick, ...)
+# doesn't false-trigger a re-init storm: every forced re-init makes the
+# Player re-broadcast full state including a rig Program Change echo,
+# which repaints the LED strip (2026-08-14: at 5000 ms this fired on
+# ordinary jitter every few seconds, flashing the preset-nav row).
+_SENSING_TIMEOUT_MS = 15000
 _FLAGS_INIT = 0x23   # init=1 + sysex=1 + tunemode=1
 _FLAGS_KEEPALIVE = 0x22   # sysex=1 + tunemode=1 (no init)
 
@@ -286,6 +305,8 @@ _BIDIR_STATE = {
     "last_beacon_ms": 0,
     "init_sent": False,
     "confirmed": False,
+    # Monotonic time of the last inbound sensing frame (0 = never).
+    "last_sensed_ms": 0,
     "published": {},   # field name -> last published value
     # While >0 and in the future, a rig change is "settling": the Player is
     # still streaming the new rig's effect-state broadcast (slow + ragged,
@@ -626,6 +647,18 @@ def on_midi_in(port, channel, status, data, app):
         # re-send the rig MIDI - that would make it reload and re-broadcast,
         # ping-ponging into a $41/echo storm that overruns the USB link and
         # drops the block replies (the real "still doesn't work" cause).
+        #
+        # Open the settle window BEFORE switch_patch: it calls
+        # on_patch_loaded synchronously, which paints from _BLOCK_STATE
+        # immediately unless a settle window is already open. Normally the
+        # rig-name SysEx opens that window (see _handle_sysex) - but on a
+        # flat-list Player this bare PC arrives BEFORE the rig-name string,
+        # so without this the paint fires from whatever the cache still
+        # held from the PREVIOUS rig (2026-08-15: switching rig ON THE
+        # KEMPER flashed Boost on, then off, while the identical change
+        # made from the Captain's own footswitch never flashed - that path
+        # paints from the target patch's own bound config, not this cache).
+        _BIDIR_STATE["settle_until_ms"] = app._now_ms() + _SETTLE_MS
         app.switch_patch(bank, rig_in_bank, source="midi_in", fire_on_enter=False)
 
 
@@ -665,6 +698,27 @@ def _apply_cache(app):
         block = _block_of_binding(binding)
         if block is not None and block in _BLOCK_STATE:
             app.set_switch_latched(sw_name, _BLOCK_STATE[block])
+
+
+def wants_authoritative_boot(app):
+    """The Player is the source of truth for the current rig: bidirectional
+    tracking is ALWAYS on for a Kemper profile (see CONFIG_SCHEMA - it is
+    not a user option, so there is no per-config flag to check here). The
+    rig can be changed directly on the device's own front panel while
+    bosun is off, and the bidirectional link's own initial state broadcast
+    (Bank Select + Program Change, sent once the beacon subscription comes
+    up) is what corrects current_bank/current_slot afterwards - see the
+    external-rig-change follow path. Boot must not race that by pushing
+    bosun's last-remembered rig onto the Player first.
+
+    2026-08-15 regression: this originally gated on cfg.get("bidirectional"),
+    a flag that was removed from CONFIG_SCHEMA precisely because bilateral
+    sync is unconditional now - so the check always read None/False and
+    boot kept pushing bosun's own rig onto the Player, overriding whatever
+    the user had dialed in by hand (reported: Kemper on rig 3, powered on
+    the Captain, both ended up on rig 1)."""
+    cfg = (app.device or {}).get("kemper")
+    return cfg is not None
 
 
 def on_patch_loaded(app):
@@ -824,7 +878,9 @@ def _handle_sysex(data, app, cfg):
 
     if fn == _FN_EXTENDED:
         # Sensing message - beacon was accepted, the Player is alive.
+        # Track the timestamp so tick() can detect a dead subscription.
         _BIDIR_STATE["confirmed"] = True
+        _BIDIR_STATE["last_sensed_ms"] = app._now_ms()
         _publish(app, {"kemper_connected": "on"})
         return
 
@@ -918,7 +974,31 @@ def tick(app, now_ms):
         _BIDIR_STATE["settle_until_ms"] = 0
         _apply_cache(app)
     init = not _BIDIR_STATE["init_sent"]
-    if not init and now_ms - _BIDIR_STATE["last_beacon_ms"] < _BEACON_RESEND_MS:
+    # If the init beacon was lost (e.g. the MIDI bridge on the host was
+    # not up yet when we booted), the Player never starts the bidirectional
+    # subscription and keep-alives alone won't start it. Re-send INIT until
+    # the link is confirmed by an inbound sensing message - bounded to
+    # _INIT_RETRY_MS below, not every tick.
+    unconfirmed_retry = not init and not _BIDIR_STATE["confirmed"]
+    if unconfirmed_retry:
+        init = True
+    # The subscription can die without us noticing a bridge restart: the
+    # host's MIDI relay closes/reopens, the lease expires, and the Player
+    # silently stops broadcasting.  The sensing pings (~500 ms cadence)
+    # then stop too - when none arrives for 15 s, force a full re-init
+    # (2026-08-14: without this the confirmed flag stayed latched forever
+    # and only a Kemper power-cycle recovered the link).
+    elif (not init and _BIDIR_STATE["confirmed"]
+          and _BIDIR_STATE["last_sensed_ms"]
+          and now_ms - _BIDIR_STATE["last_sensed_ms"] > _SENSING_TIMEOUT_MS):
+        _BIDIR_STATE["confirmed"] = False
+        _BIDIR_STATE["init_sent"] = False
+        _publish(app, {"kemper_connected": "off"})
+        init = True
+    if unconfirmed_retry:
+        if now_ms - _BIDIR_STATE["last_beacon_ms"] < _INIT_RETRY_MS:
+            return
+    elif not init and now_ms - _BIDIR_STATE["last_beacon_ms"] < _BEACON_RESEND_MS:
         return
     flags = _FLAGS_INIT if init else _FLAGS_KEEPALIVE
     app.midi.send_sysex(_KEMPER_MFR + (
@@ -929,6 +1009,13 @@ def tick(app, now_ms):
     ))
     _BIDIR_STATE["last_beacon_ms"] = now_ms
     _BIDIR_STATE["init_sent"] = True
+    # Publish block states to display_context for Stage Mode coloring.
+    # Wrapped in try/except so a transient error doesn't kill the beacon.
+    try:
+        for block, on in list(_BLOCK_STATE.items()):
+            app.update_context({"kemper_block_" + block: "on" if on else "off"})
+    except Exception:
+        pass
 
 
 def update_context(msg, ctx):

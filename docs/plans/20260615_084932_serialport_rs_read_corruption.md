@@ -121,7 +121,7 @@ swap and a clean MANIFEST round-trip, remove `__TRACE__` and the three
 ```powershell
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222 --remote-allow-origins=*"
-cd C:\Users\danmigdev\Desktop\midi_captain\editor
+cd ~\Desktop\midi_captain\editor
 npm run tauri dev    # leave running
 ```
 

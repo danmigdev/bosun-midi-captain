@@ -29,18 +29,18 @@ pub struct SerialHandle {
     // reader thread and send_command through an Arc without a Mutex.
     // This is the architectural fix that the serialport-rs build needed
     // a Mutex<Box<dyn ...>> for - serial2 gives it for free.
-    port: Arc<SerialPort>,
-    stop: Arc<Mutex<bool>>,
-    // Set to false by the reader thread when it exits (read error or
-    // stop request). Allows connect/auto_connect to detect a stale
-    // handle whose reader has died and clean up before retrying,
-    // instead of returning "already connected" forever.
-    alive: Arc<AtomicBool>,
+    pub port: Option<Arc<SerialPort>>,
+    pub path: String,
+    pub stop: Arc<Mutex<bool>>,
+    pub alive: Arc<AtomicBool>,
 }
 
 impl SerialHandle {
-    fn is_alive(&self) -> bool {
+    pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
+    }
+    pub fn stop_thread(&self) {
+        if let Ok(mut s) = self.stop.lock() { *s = true; }
     }
 }
 
@@ -219,7 +219,7 @@ pub async fn connect(
         alive_for_thread.store(false, Ordering::Release);
     });
 
-    *guard = Some(SerialHandle { port: port_shared, stop, alive });
+    *guard = Some(SerialHandle { port: Some(port_shared), path: port.clone(), stop, alive });
     Ok(())
 }
 
@@ -253,7 +253,7 @@ pub fn send_command(line: String, state: State<AppState>) -> Result<(), String> 
         if !handle.is_alive() {
             return Err("not connected".into());
         }
-        handle.port.clone()
+        handle.port.clone().ok_or("not connected")?
     };
     let write_result = (&*port_arc).write_all(line.as_bytes()).and_then(|_| {
         if !line.ends_with('\n') {

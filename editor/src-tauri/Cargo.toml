@@ -1,6 +1,6 @@
 [package]
 name = "bosun-editor"
-version = "0.5.1"
+version = "0.5.30"
 edition = "2021"
 description = "Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more)."
 
@@ -8,7 +8,7 @@ description = "Desktop editor for PaintAudio MIDI Captain controllers running Bo
 tauri-build = { version = "2", default-features = false, features = [] }
 
 [dependencies]
-tauri = { version = "2", default-features = false, features = ["wry"] }
+tauri = { version = "2", default-features = false, features = ["wry", "custom-protocol"] }
 tauri-plugin-shell = "2"
 # Persist and restore the main window size/position across launches.
 tauri-plugin-window-state = "2"
@@ -37,6 +37,9 @@ midir = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-serialplugin = "3"
+# JNI bridge to the Kotlin BosunMidiBridge singleton (Android MIDI relay).
+# Version matches the jni crate wry/tauri use so the types unify.
+jni = "0.21"
 
 [lib]
 name = "bosun_editor_lib"

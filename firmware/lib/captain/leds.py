@@ -100,8 +100,14 @@ class Leds:
                 self.strip[idx] = c
         self.strip.show()
 
-    def render_patch(self, patch, switches):
-        """Repaint every switch's LED ring from its binding's led + mode + latched state."""
+    def render_patch(self, patch, switches, show=True):
+        """Repaint every switch's LED ring from its binding's led + mode + latched
+        state. `show=False` lets a caller (app._paint_preset_nav_leds) overlay the
+        preset-navigation row into the same off-strip buffer before the first
+        `.show()` reaches the hardware - otherwise the two separate `.show()` calls
+        put a real, visible all-black frame on the wire between them, which reads
+        as the preset-nav row blinking on every repaint (patch load, Kemper rig
+        echo, ...)."""
         self.strip.fill((0, 0, 0))
         bindings_by_switch = {}
         for b in (patch or {}).get("bindings", []):
@@ -115,7 +121,8 @@ class Leds:
             rgb = self.scale(_color_for(binding, sw.latched_on, self.dim))
             for idx in LED_INDEX_PER_SWITCH.get(sw.name, ()):
                 self.strip[idx] = rgb
-        self.strip.show()
+        if show:
+            self.strip.show()
 
     def set_switch_state(self, switch_name, binding, latched_on):
         """Repaint a single switch - used after a latched toggle so we don't

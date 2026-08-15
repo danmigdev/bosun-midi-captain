@@ -389,6 +389,7 @@ export interface MidiInCapturedEvent {
 
 export type FirmwareMessage =
   | { type: "ACK"; id?: string; fw?: string }
+  | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
   | { type: "ERROR"; id?: string; error: string; of?: string; detail?: string }
   | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number } }
   | { type: "GLOBAL"; id?: string; device: Record<string, unknown> }
@@ -440,19 +441,15 @@ export type BridgeStatus = {
   pedal_port: string | null;
 };
 export async function midiListPorts(): Promise<MidiPorts> {
-  if (IS_ANDROID) return { inputs: [], outputs: [] };
   return invoke<MidiPorts>("midi_list_ports");
 }
 export async function midiBridgeStart(kemper?: string, pedal?: string): Promise<BridgeStatus> {
-  if (IS_ANDROID) return { active: false, kemper_port: null, pedal_port: null };
   return invoke<BridgeStatus>("midi_bridge_start", { kemper: kemper ?? null, pedal: pedal ?? null });
 }
 export async function midiBridgeStop(): Promise<void> {
-  if (IS_ANDROID) return;
   await invoke("midi_bridge_stop");
 }
 export async function midiBridgeStatus(): Promise<BridgeStatus> {
-  if (IS_ANDROID) return { active: false, kemper_port: null, pedal_port: null };
   return invoke<BridgeStatus>("midi_bridge_status");
 }
 export async function connect(port: string): Promise<void> {
@@ -665,6 +662,22 @@ export async function onDisconnected(handler: () => void): Promise<UnlistenFn> {
   return listen("firmware-disconnected", handler);
 }
 
+/** Android only: the I/O thread entered stall-recovery (closing and
+ *  reopening the port, which reboots the pedal via DTR and re-enumerates
+ *  its USB device - see serial/android.rs). The link is briefly down but
+ *  the backend is healing itself; unlike onDisconnected, nothing here
+ *  should call disconnect() (that would race the recovery thread). Fires
+ *  on desktop too but never triggers there - desktop.rs never emits it. */
+export async function onReconnecting(handler: () => void): Promise<UnlistenFn> {
+  return listen("firmware-reconnecting", handler);
+}
+
+/** Android only: pairs with onReconnecting - the stall-recovery episode
+ *  finished and the sentinel sync succeeded again. */
+export async function onReconnected(handler: () => void): Promise<UnlistenFn> {
+  return listen("firmware-reconnected", handler);
+}
+
 
 export const cmd = {
   ping:           () => send({ type: "PING",            id: nextId() }),
@@ -672,9 +685,25 @@ export const cmd = {
   getGlobal:      () => send({ type: "GET_GLOBAL",      id: nextId() }),
   putGlobal:      (device: Record<string, unknown>) => sendAndAwait({ type: "PUT_GLOBAL", device }, 4000),
   getManifest:    () => send({ type: "GET_MANIFEST",    id: nextId() }),
+  // Awaited variant for the retry watchdog (App.svelte): the manifest is by
+  // far the largest response in the protocol (22 KB+, streamed field-by-
+  // field on the firmware to stay under its heap limit - see
+  // protocol._get_manifest), so a busy/contended link can legitimately take
+  // well past the default 5 s. The watchdog needs to know when THIS
+  // specific attempt actually settles (arrived or genuinely timed out)
+  // before firing another - the fire-and-forget `getManifest` above gives
+  // no such signal, which is what let the naive fixed-4s-clock retry loop
+  // pile up overlapping GET_MANIFEST requests under load (2026-08-15): each
+  // one costs the firmware a full 22 KB re-stream, competing for the same
+  // main-loop time as USB-MIDI servicing, so retrying blind made a slow
+  // link slower and could plausibly starve MIDI processing outright.
+  getManifestAwait: () => sendAndAwait<{ type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }>(
+                    { type: "GET_MANIFEST" }, 10000),
+  getContext:     () => send({ type: "GET_CONTEXT",    id: nextId() }),
   listPatches:    () => send({ type: "LIST_PATCHES",    id: nextId() }),
   getPatch:       (bank: number, slot: number) => send({ type: "GET_PATCH",       id: nextId(), bank, slot }),
   switchPatch:    (bank: number, slot: number) => send({ type: "SWITCH_PATCH",    id: nextId(), bank, slot }),
+  deletePatch:    (bank: number, slot: number) => send({ type: "DELETE_PATCH",    id: nextId(), bank, slot }),
   putBinding:     (bank: number, slot: number, binding: Binding) =>
                     send({ type: "PUT_BINDING", id: nextId(), bank, slot, binding }),
   putPatch:       (bank: number, slot: number, patch: Patch) =>

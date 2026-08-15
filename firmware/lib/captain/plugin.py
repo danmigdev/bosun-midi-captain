@@ -103,6 +103,25 @@ class PluginRegistry:
                 except Exception as e:
                     print("plugin on_preview failed:", getattr(m, "NAME", "?"), "-", e)
 
+    def wants_authoritative_boot(self, app):
+        """True if any plugin wants boot() to defer to the target device's
+        own current state instead of pushing bosun's last-remembered patch
+        onto it. A Kemper with bidirectional tracking enabled is itself the
+        source of truth for what rig is loaded (the user can change rigs
+        directly on its front panel while bosun is off) - asserting bosun's
+        persisted rig on every power-up would silently override whatever
+        the device actually has loaded. Opt in by declaring
+        `wants_authoritative_boot(app) -> bool`. A throwing plugin doesn't
+        block boot (treated as False, same as not opting in)."""
+        for m in self._plugins.values():
+            if hasattr(m, "wants_authoritative_boot"):
+                try:
+                    if m.wants_authoritative_boot(app):
+                        return True
+                except Exception as e:
+                    print("plugin wants_authoritative_boot failed:", getattr(m, "NAME", "?"), "-", e)
+        return False
+
     def tuner_off(self, app):
         """Ask every plugin that has a tuner to leave tuner mode on the target
         device. Called when the user presses a footswitch while the tuner

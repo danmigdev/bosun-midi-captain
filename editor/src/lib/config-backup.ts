@@ -219,6 +219,24 @@ export async function importConfig(
   report({ phase: "device", total: 0, done: 0, current: "device.json" });
   await putRetry({ type: "PUT_GLOBAL", device: backup.device, ...profileArg });
 
+  // Clear every existing patch before writing the backup's patches.
+  // Without this step old patches at bank/slot positions not covered by
+  // the incoming backup survive the import, which looks like a "merge"
+  // when the user expects a full replacement.
+  if (!options.asNewProfile) {
+    let _id = 1;
+    const delRetry = async (msg: { type: string; [k: string]: unknown }) => {
+      try { await sendAndAwait({ id: String(_id++), ...msg }, 4000); } catch { /* skip */ }
+    };
+    try {
+      const existing = await sendAndAwait({ type: "LIST_PATCHES", id: String(_id++) }, 4000) as { patches?: Array<{ bank: number; slot: number }> };
+      for (const p of (existing.patches || [])) {
+        report({ phase: "patches", total: 0, done: 0, current: `clearing ${String(p.bank).padStart(2, "0")}/${String(p.slot).padStart(2, "0")}` });
+        await delRetry({ type: "DELETE_PATCH", bank: p.bank, slot: p.slot });
+      }
+    } catch { /* firmware < 0.5.2 doesn't have DELETE_PATCH */ }
+  }
+
   report({ phase: "patches", total: backup.patches.length, done: 0, current: "" });
   let done = 0;
   for (const { bank, slot, patch } of backup.patches) {

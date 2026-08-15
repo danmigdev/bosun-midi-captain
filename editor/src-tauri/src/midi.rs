@@ -2,40 +2,32 @@
 //!
 //! The Kemper Player is USB-MIDI only and the MIDI Captain pedal is a USB
 //! device (not a host), so the two cannot talk directly - the PC must relay
-//! MIDI both ways. This is the in-editor equivalent of tools/midi_bridge.py:
-//!
-//! Desktop-only: uses the midir crate (winmm on Windows, CoreMIDI on macOS,
-//! ALSA on Linux). Not compiled on Android -- the midir Android NDK backend
-//! requires a powered USB-C hub for simultaneous Kemper + pedal connections,
-//! which is a niche mobile setup. See docs/plans/kind-jumping-pike.md Phase 2.
-#![cfg(not(target_os = "android"))]
-//! it forwards every message (SYSEX included - that carries the Kemper
+//! MIDI both ways. This is the in-editor equivalent of tools/midi_bridge.py.
+//! It forwards every message (SYSEX included - that carries the Kemper
 //! bidirectional protocol) between the Player and the pedal, dropping only
 //! clock / active-sensing to keep the link quiet.
 //!
-//! It opens the devices' USB-MIDI interfaces, which are separate from the
-//! editor's CDC serial connection, so the bridge and the editor run together.
+//! Platform split: [`MidiPorts`] and [`BridgeStatus`] are shared by both
+//! backends. The desktop backend below uses the midir crate (winmm on
+//! Windows, CoreMIDI on macOS, ALSA on Linux); Android uses `midi_android`
+//! instead, which JNI-calls the Kotlin `BosunMidiBridge` singleton.
+//!
+//! The desktop backend opens the devices' USB-MIDI interfaces, which are
+//! separate from the editor's CDC serial connection, so the bridge and the
+//! editor run together. The Android NDK midir backend requires a powered
+//! USB-C hub for simultaneous Kemper + pedal connections, which is why
+//! Android delegates to Kotlin instead. See docs/plans/kind-jumping-pike.md
+//! Phase 2.
 
+use serde::Serialize;
+
+#[cfg(not(target_os = "android"))]
 use std::sync::Mutex;
 
+#[cfg(not(target_os = "android"))]
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput};
-use serde::Serialize;
+#[cfg(not(target_os = "android"))]
 use tauri::State;
-
-#[derive(Default)]
-pub struct MidiState {
-    pub bridge: Mutex<Option<BridgeHandle>>,
-}
-
-pub struct BridgeHandle {
-    // Holding the two input connections keeps the bridge alive; dropping them
-    // (set the Option to None) tears it down. Each input callback owns the
-    // matching output connection, so those are released here too.
-    _kemper_in: MidiInputConnection<()>,
-    _pedal_in: MidiInputConnection<()>,
-    kemper_port: String,
-    pedal_port: String,
-}
 
 #[derive(Serialize)]
 pub struct MidiPorts {
@@ -50,7 +42,25 @@ pub struct BridgeStatus {
     pub pedal_port: Option<String>,
 }
 
+#[cfg(not(target_os = "android"))]
+#[derive(Default)]
+pub struct MidiState {
+    pub bridge: Mutex<Option<BridgeHandle>>,
+}
+
+#[cfg(not(target_os = "android"))]
+pub struct BridgeHandle {
+    // Holding the two input connections keeps the bridge alive; dropping them
+    // (set the Option to None) tears it down. Each input callback owns the
+    // matching output connection, so those are released here too.
+    _kemper_in: MidiInputConnection<()>,
+    _pedal_in: MidiInputConnection<()>,
+    kemper_port: String,
+    pedal_port: String,
+}
+
 /// First port name that contains any of `needles` (case-insensitive).
+#[cfg(not(target_os = "android"))]
 fn find_name(names: &[String], needles: &[&str]) -> Option<String> {
     names
         .iter()
@@ -64,10 +74,12 @@ fn find_name(names: &[String], needles: &[&str]) -> Option<String> {
 /// Clock (0xF8) and active-sensing (0xFE) flood the link and aren't needed by
 /// the Kemper bidirectional protocol - everything else (notably SYSEX) is
 /// forwarded verbatim.
+#[cfg(not(target_os = "android"))]
 fn should_forward(msg: &[u8]) -> bool {
     !matches!(msg.first(), Some(0xF8) | Some(0xFE))
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn midi_list_ports() -> Result<MidiPorts, String> {
     let mi = MidiInput::new("bosun-scan-in").map_err(|e| e.to_string())?;
@@ -77,6 +89,7 @@ pub fn midi_list_ports() -> Result<MidiPorts, String> {
     Ok(MidiPorts { inputs, outputs })
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn midi_bridge_status(state: State<MidiState>) -> BridgeStatus {
     match state.bridge.lock() {
@@ -92,6 +105,7 @@ pub fn midi_bridge_status(state: State<MidiState>) -> BridgeStatus {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn midi_bridge_stop(state: State<MidiState>) {
     if let Ok(mut g) = state.bridge.lock() {
@@ -102,6 +116,7 @@ pub fn midi_bridge_stop(state: State<MidiState>) {
 /// Open the relay. `kemper` / `pedal` are optional substring hints to
 /// disambiguate when several MIDI devices are present; without them we
 /// auto-detect by the usual device names.
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn midi_bridge_start(
     state: State<MidiState>,
