@@ -1,6 +1,58 @@
 # Android Stage view / serial I/O silent-stall investigation
 
-## Status: paused, ready to resume
+## Status: RESOLVED (2026-08-15, later same day)
+
+Three separate, real bugs were chained together to produce the "Stage
+view never updates" symptom. All three found and fixed live on hardware
+in the resume session:
+
+1. **`de1919f`** (`editor/src-tauri/src/serial/android.rs`) - the
+   stall-recovery path (`close`/`open`/`available_ports`, sentinel
+   PING/ACK) called the serial plugin directly with no timeout, unlike
+   the main loop's write/read. When the Android USB stack wedged one of
+   those calls during recovery, the whole I/O thread froze **forever** -
+   confirmed live, twice, via a `[io] thread started` diagnostic added
+   per this doc's own suggested next step. This was the literal
+   permanent-freeze case. Wrapped every plugin call in the recovery and
+   sentinel-sync phases in `call_with_timeout`, matching the main loop.
+   Also added a lightweight idle keepalive PING (fired by the I/O thread
+   itself once idle >6s) because StageView had separately stopped
+   polling `GET_CONTEXT` on a timer earlier the same day, and the naive
+   15s wall-clock stall check couldn't tell legitimate protocol
+   idleness apart from a dead link - was forcing a disruptive
+   reconnect/USB-re-enumeration cycle every ~15-30s.
+2. **`656ffd3`** (`firmware/lib/captain/app.py`) - `_push_context()`
+   committed its "delivered" fingerprint unconditionally, even when
+   `protocol._send()` had silently no-op'd because the host hadn't
+   opened the data port yet (the normal state for the first several
+   ticks after every boot, and every self-heal reboots the RP2040 via
+   DTR). Once that happened the very first push after any reboot got
+   marked "sent" and Stage received nothing further until an unrelated
+   field changed too.
+3. Also found while verifying #2: `protocol._send()` never raises (it
+   swallows every exception including `MemoryError` and only prints to
+   the REPL), so a CONTEXT push failing from heap fragmentation right
+   after a big Kemper rig-change SYSEX burst was just as silently
+   "delivered" as far as `_push_context` knew. Fixed by dry-running the
+   JSON encode first (with its own gc.collect-and-retry) and only
+   committing the fingerprint on success.
+
+Verified live on the desktop rig (Captain on COM4, Kemper direct via
+`tools/midi_bridge.py`) across a dozen+ rig changes, including
+immediately after fresh reboots and back-to-back changes during heavy
+Kemper SYSEX bursts - CONTEXT now arrives within ~1s every time. Full
+`python tools/run_all_tests.py` battery and the Rust
+`android_helpers` unit tests both green.
+
+One test-tooling lesson from this session, in case it recurs: a
+throwaway Python script that redirects stdout to a file/pipe (not a
+TTY) gets FULLY buffered by default - `print()` without `flush=True` (or
+`sys.stdout.reconfigure(line_buffering=True)`) can sit invisibly in the
+process's internal buffer indefinitely. Cost a significant chunk of this
+session chasing a "CONTEXT never arrives" ghost that was actually just
+unflushed output in the diagnostic watcher script itself.
+
+## Status: paused, ready to resume (stale - see RESOLVED above)
 
 Session 2026-08-15 fixed two reliability bugs (both committed, tested, and
 validated live on hardware) and then found a third, separate one that needs

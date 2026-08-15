@@ -1,13 +1,14 @@
-// Android serial backend using tauri-plugin-serialplugin v3.
+// Android serial backend using a raw-USB JNI bridge (android_native.rs /
+// Kotlin BosunSerialBridge) instead of tauri-plugin-serialplugin.
 // Compiled only on Android targets.
 //
 // Architecture: a single I/O thread owns the port and serialises all
-// reads and writes.  The plugin's internal hub thread holds the port
-// mutex while polling for incoming data; because the Android USB stack
-// may not honour the 10 ms read timeout, that lock can be held
-// indefinitely.  By routing every write through the same thread we
-// avoid lock contention entirely: the thread writes any queued commands
-// immediately after each read cycle, while the hub's lock is released.
+// reads and writes.  All USB access happens via UsbDeviceConnection.
+// bulkTransfer(), Android's official synchronous transfer API with real
+// SDK-level timeout enforcement - see android_native.rs and
+// BosunSerialDevice.kt's doc comments for why this replaced the plugin's
+// own transport (its per-call timeout was not reliably honoured by
+// Android's USB host stack, a well-documented platform limitation).
 #![cfg(target_os = "android")]
 
 use std::collections::VecDeque;
@@ -17,17 +18,12 @@ use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_serialplugin::commands::{
-    available_ports, open, write, read, close,
-};
-use tauri_plugin_serialplugin::state::{
-    DataBits, FlowControl, Parity, StopBits,
-};
+use tauri::{AppHandle, Emitter, State};
 
 use super::android_helpers::{
     call_with_timeout, is_transient_error, is_write_only_stall, marker_found, sort_ports_desc,
 };
+use super::android_native::{available_ports, close, open, read, write};
 
 /// Consecutive successful writes with zero intervening successful reads
 /// before treating the link as a write-only black hole. At StageView's
@@ -36,18 +32,22 @@ use super::android_helpers::{
 /// below, which a write-only link never trips (see is_write_only_stall).
 const WRITE_ONLY_STALL_THRESHOLD: u32 = 5;
 
-/// Upper bound on how long a single plugin write()/read() call may run
-/// before we treat it as hung and force a reconnect. The module already
-/// documents the plugin's own worst-case NAK-retry window as "up to 5 s
-/// (plugin URB watchdog)" during a legitimate large-response stream, so
-/// this sits comfortably above that to avoid preempting a real (if slow)
-/// in-plugin recovery - while still bounding the outage from a genuine
-/// hang, which previously froze the I/O thread forever (2026-08-15: the
-/// app stopped responding to everything and never recovered, even
-/// minutes later, because the write() call itself never returned and the
-/// surrounding stall watchdog only runs between loop iterations it never
-/// got to). See `call_with_timeout` in android_helpers.rs.
+/// Upper bound on how long a single JNI open/close/read/write round-trip
+/// may run before we treat it as hung and force a reconnect. Even with
+/// the raw-USB transport's per-call bulkTransfer timeout, the surrounding
+/// JNI dispatch itself (or a genuinely wedged USB endpoint) could still
+/// stall - this stays as a second line of defense, matching the same
+/// reasoning as when it guarded the old plugin-based transport (2026-08-15:
+/// the app stopped responding to everything and never recovered, even
+/// minutes later, because a call never returned and the surrounding stall
+/// watchdog only runs between loop iterations it never got to). See
+/// `call_with_timeout` in android_helpers.rs.
 const IO_CALL_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Per-call write timeout passed down to BosunSerialBridge.write(), which
+/// hands it straight to UsbDeviceConnection.bulkTransfer(). Matches the
+/// write_timeout the old plugin's open() was configured with.
+const WRITE_TIMEOUT_MS: u64 = 1000;
 
 /// How long the link may sit completely idle - no outbound command
 /// queued, no unsolicited firmware push - before the I/O thread sends
@@ -104,14 +104,10 @@ pub struct PortInfo {
 // --------------------- list ---------------------
 
 #[tauri::command]
-pub fn list_ports(
-    app: AppHandle,
-    serial: State<'_, tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>,
-) -> Result<Vec<PortInfo>, String> {
-    let ports = available_ports(app.clone(), serial.clone(), None::<bool>)
-        .map_err(|e| format!("list ports: {}", e))?;
-    let out: Vec<PortInfo> = ports
-        .into_keys()
+pub fn list_ports(_app: AppHandle) -> Result<Vec<PortInfo>, String> {
+    let names = available_ports().map_err(|e| format!("list ports: {}", e))?;
+    let out: Vec<PortInfo> = names
+        .into_iter()
         .map(|name| PortInfo {
             name,
             kind: "serial".to_string(),
@@ -123,14 +119,11 @@ pub fn list_ports(
 
 // --------------------- connect / disconnect ---------------------
 
-type SpState<'a> = State<'a, tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>;
-
 #[tauri::command]
 pub async fn connect(
     port: String,
     state: State<'_, AppState>,
     app: AppHandle,
-    serial: SpState<'_>,
 ) -> Result<(), String> {
     let last_dead_reason = state.last_dead_reason.clone();
 
@@ -143,14 +136,8 @@ pub async fn connect(
         *guard = None;
     }
 
-    let canonical = open(
-        app.clone(), serial.clone(), port.clone(),
-        115_200,
-        Some(DataBits::Eight), Some(FlowControl::None),
-        Some(Parity::None), Some(StopBits::One),
-        Some(1000u64),
-    )
-    .map_err(|e| format!("open: {}", e))?;
+    let canonical = open(port.clone(), 115_200)
+        .map_err(|e| format!("open: {}", e))?;
 
     // Single I/O thread: reads incoming data, writes queued commands.
     // A channel lets connect() wait for the sentinel sync to finish
@@ -209,76 +196,68 @@ pub async fn connect(
                     let _ = app_for_thread.emit("firmware-reconnecting", ());
                 }
                 // Recover: drop the old port entirely and reopen.
-                // CRITICAL: re-enumerate - the device path changes after
-                // a CP reset re-enumerates the USB bus.  Reusing the old
-                // path makes the plugin's openDeviceFd throw an uncaught
-                // IOException on a Kotlin worker thread, which kills the
-                // whole app (2026-08-14 disconnect crash).
                 eprintln!("[io] stall recovery: closing and reopening");
-                // Every plugin call below is wrapped in call_with_timeout -
-                // the same Android USB-stack hang that write()/read() in
-                // the main loop already guard against (see IO_CALL_TIMEOUT's
-                // doc comment) can just as easily wedge close()/
-                // available_ports()/open() during recovery. Confirmed live
-                // (2026-08-15, second occurrence): the thread logged this
-                // exact line and then went silent forever - no reopen
-                // attempt, no re-sync, nothing - because the unguarded
-                // close() or available_ports() call below never returned.
-                let close_app = app_for_thread.clone();
+                // Every call below is wrapped in call_with_timeout - even
+                // with the raw-USB transport's own per-call bulkTransfer
+                // timeout, a genuinely wedged USB endpoint or a JNI-level
+                // hang can still block close()/available_ports()/open()
+                // during recovery (2026-08-15: confirmed live on the old
+                // plugin-based transport - the thread logged this exact
+                // line and then went silent forever because an unguarded
+                // call never returned; kept guarded here as a second line
+                // of defense).
                 let close_path = path.clone();
-                let close_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                    close(
-                        close_app.clone(),
-                        close_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                        close_path,
-                    )
-                });
+                let close_result = call_with_timeout(IO_CALL_TIMEOUT, move || close(close_path));
                 if let Err(timeout_msg) = close_result {
                     eprintln!("[io] close hung: {}", timeout_msg);
                 }
                 std::thread::sleep(Duration::from_millis(1500));
 
+                // The close() above dropped/re-asserted DTR, which triggers
+                // the RP2040's own hardware reset - not just a
+                // protocol-level reboot - so the device can vanish from the
+                // OS's USB device list entirely for several seconds while
+                // it re-enumerates (the sentinel PING/ACK phase below
+                // already budgets up to 20 s for the firmware itself to
+                // finish booting on top of that). Poll for it to reappear
+                // instead of checking once and giving up (2026-08-15:
+                // confirmed live on the raw-USB transport - checking only
+                // once, 1.5 s after close(), missed the re-enumeration
+                // window essentially every time, producing a tight
+                // closing-and-reopening loop every ~3.5 s that never
+                // actually recovered).
                 let mut reopened = false;
-                let ports_app = app_for_thread.clone();
-                let ports_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                    available_ports(
-                        ports_app.clone(),
-                        ports_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                        None::<bool>,
-                    )
-                });
-                match ports_result {
-                    Ok(Ok(ports)) => {
-                        let mut names: Vec<String> = ports.keys().cloned().collect();
-                        sort_ports_desc(&mut names);
-                        for name in names {
-                            let name_for_log = name.clone();
-                            let open_app = app_for_thread.clone();
-                            let open_name = name.clone();
-                            let open_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                                open(
-                                    open_app.clone(),
-                                    open_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                                    open_name,
-                                    115_200,
-                                    Some(DataBits::Eight), Some(FlowControl::None),
-                                    Some(Parity::None), Some(StopBits::One),
-                                    Some(1000u64),
-                                )
-                            });
-                            match open_result {
-                                Ok(Ok(p)) => { path = p; reopened = true; break; }
-                                Ok(Err(e)) => {
-                                    eprintln!("[io] reopen {} failed: {}", name_for_log, e);
-                                }
-                                Err(timeout_msg) => {
-                                    eprintln!("[io] reopen {} hung: {}", name_for_log, timeout_msg);
+                let reenumerate_deadline = std::time::Instant::now() + Duration::from_secs(12);
+                while std::time::Instant::now() < reenumerate_deadline && !reopened {
+                    if *stop_for_thread.lock().unwrap() { break; }
+                    let ports_result = call_with_timeout(IO_CALL_TIMEOUT, available_ports);
+                    match ports_result {
+                        Ok(Ok(names)) => {
+                            let mut names = names;
+                            sort_ports_desc(&mut names);
+                            for name in names {
+                                let name_for_log = name.clone();
+                                let open_name = name.clone();
+                                let open_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
+                                    open(open_name, 115_200)
+                                });
+                                match open_result {
+                                    Ok(Ok(p)) => { path = p; reopened = true; break; }
+                                    Ok(Err(e)) => {
+                                        eprintln!("[io] reopen {} failed: {}", name_for_log, e);
+                                    }
+                                    Err(timeout_msg) => {
+                                        eprintln!("[io] reopen {} hung: {}", name_for_log, timeout_msg);
+                                    }
                                 }
                             }
                         }
+                        Ok(Err(e)) => eprintln!("[io] re-enumerate failed: {}", e),
+                        Err(timeout_msg) => eprintln!("[io] re-enumerate hung: {}", timeout_msg),
                     }
-                    Ok(Err(e)) => eprintln!("[io] re-enumerate failed: {}", e),
-                    Err(timeout_msg) => eprintln!("[io] re-enumerate hung: {}", timeout_msg),
+                    if !reopened {
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
                 }
                 if !reopened {
                     eprintln!("[io] reopen failed on all ports");
@@ -289,11 +268,10 @@ pub async fn connect(
             first_cycle = false;
 
             // --- Sentinel PING/ACK phase ---
-            // The plugin asserts DTR during open(), which triggers a CP
-            // soft-reset.  Until the firmware finishes rebooting (~9 s),
-            // every bulk-out write is NAKed by the RP2040 and the plugin's
-            // 5 s watchdog cancels the URB.  Keep retrying the PING until
-            // the firmware ACKs it -- only then start serving the outbox.
+            // open() asserts DTR, which triggers a CP soft-reset.  Until
+            // the firmware finishes rebooting (~9 s), writes may be NAKed
+            // or simply unanswered.  Keep retrying the PING until the
+            // firmware ACKs it -- only then start serving the outbox.
             let sync_id = format!("__sync_{}_{}",
                 std::process::id(),
                 std::time::SystemTime::now()
@@ -305,36 +283,19 @@ pub async fn connect(
             while std::time::Instant::now() < sentinel_deadline && !synced {
                 if *stop_for_thread.lock().unwrap() { break; }
                 // Same hang class as the recovery path above and the main
-                // loop's write()/read() - wrap both plugin calls so a
-                // wedged PING or ACK read can't freeze the thread before
-                // it ever reaches the instrumented main loop.
-                let ping_app = app_for_thread.clone();
-                let ping_path = path.clone();
+                // loop's write()/read() - wrap both calls so a wedged PING
+                // or ACK read can't freeze the thread before it ever
+                // reaches the instrumented main loop.
                 let ping_line_for_call = ping_line.clone();
                 let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                    write(
-                        ping_app.clone(),
-                        ping_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                        ping_path,
-                        ping_line_for_call,
-                    )
+                    write(ping_line_for_call, WRITE_TIMEOUT_MS)
                 });
                 if let Err(timeout_msg) = write_result {
                     eprintln!("[io] sentinel write hung: {}", timeout_msg);
                 }
-                let mut deadline = std::time::Instant::now() + Duration::from_secs(3);
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
                 while std::time::Instant::now() < deadline && !synced {
-                    let read_app = app_for_thread.clone();
-                    let read_path = path.clone();
-                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                        read(
-                            read_app.clone(),
-                            read_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>(),
-                            read_path,
-                            Some(100u64),
-                            Some(4096usize),
-                        )
-                    });
+                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, || read(100, 4096));
                     match read_result {
                         Ok(Ok(data)) if !data.is_empty() => {
                             accum.extend_from_slice(data.as_bytes());
@@ -423,10 +384,9 @@ pub async fn connect(
                 // in the module header).  SKIP the write entirely while a
                 // multi-KB response is streaming in: the firmware's main
                 // loop is blocked sending it, its RX buffer fills, the
-                // write NAKs for up to 5 s (plugin URB watchdog), the hub
-                // loses the port mutex, the host stops draining the TX,
-                // the firmware stalls and the response is truncated.
-                // Received data within the last 500 ms = stream in flight.
+                // write NAKs, the host stops draining the TX, the firmware
+                // stalls and the response is truncated.  Received data
+                // within the last 500 ms = stream in flight.
                 if last_ok.elapsed() > Duration::from_millis(500) {
                     let queued: Option<String> = outbox_for_thread.lock().unwrap().pop_front();
                     let (cmd, is_keepalive) = match queued {
@@ -440,11 +400,8 @@ pub async fn connect(
                         let mut line = data;
                         if !line.ends_with('\n') { line.push('\n'); }
                         let line_for_retry = line.trim_end().to_string();
-                        let write_app = app_for_thread.clone();
-                        let write_path = path.clone();
                         let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                            let sp = write_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>();
-                            write(write_app.clone(), sp, write_path, line)
+                            write(line, WRITE_TIMEOUT_MS)
                         });
                         match write_result {
                             Ok(Ok(_)) => {
@@ -488,19 +445,14 @@ pub async fn connect(
                 let mut new_lines = 0;
                 let mut chunk_seq: u64 = 0;
                 loop {
-                    let read_app = app_for_thread.clone();
-                    let read_path = path.clone();
-                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                        let sp = read_app.state::<tauri_plugin_serialplugin::api::serial::SerialPort<tauri::Wry>>();
-                        read(read_app.clone(), sp, read_path, Some(150u64), Some(4096usize))
-                    });
+                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, || read(150, 4096));
                     let read_result = match read_result {
                         Ok(inner) => inner,
                         Err(timeout_msg) => {
-                            // Same hang class as the write side above: the
-                            // plugin's own 150 ms timeout can go unhonoured
-                            // by the Android USB stack (see module doc
-                            // comment), wedging this read() call forever.
+                            // Same hang class as the write side above: a
+                            // genuinely wedged USB endpoint or JNI-level
+                            // stall can still block this call despite the
+                            // raw transport's own bulkTransfer timeout.
                             let reason = format!("io read hung: {}", timeout_msg);
                             *last_dead_reason.lock().unwrap() = Some(reason.clone());
                             eprintln!("[io] fatal read error: {}", reason);
@@ -576,14 +528,14 @@ pub async fn connect(
             Ok(())
         }
         Ok(false) | Err(_) => {
-            let _ = close(app, serial, canonical);
+            let _ = close(canonical);
             Err("firmware did not respond to PING within 20s".into())
         }
     }
 }
 
 #[tauri::command]
-pub fn disconnect(state: State<AppState>, app: AppHandle, serial: SpState<'_>) -> Result<(), String> {
+pub fn disconnect(state: State<AppState>, _app: AppHandle) -> Result<(), String> {
     let mut guard = match state.serial.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -591,7 +543,7 @@ pub fn disconnect(state: State<AppState>, app: AppHandle, serial: SpState<'_>) -
     if let Some(handle) = guard.as_ref() {
         if let Ok(mut s) = handle.stop.lock() { *s = true; }
         handle.alive.store(false, Ordering::Release);
-        let _ = close(app, serial, handle.path.clone());
+        let _ = close(handle.path.clone());
     }
     // Drain any pending outbox so the next connect starts clean.
     if let Ok(mut q) = state.outbox.lock() { q.clear(); }
@@ -603,7 +555,7 @@ pub fn disconnect(state: State<AppState>, app: AppHandle, serial: SpState<'_>) -
 // --------------------- send a JSON line ---------------------
 
 #[tauri::command]
-pub fn send_command(line: String, state: State<AppState>, _app: AppHandle, _serial: SpState<'_>) -> Result<(), String> {
+pub fn send_command(line: String, state: State<AppState>, _app: AppHandle) -> Result<(), String> {
     // Check that we're connected.
     {
         let guard = state.serial.lock().map_err(|_| "lock poisoned")?;
@@ -659,7 +611,6 @@ pub fn drain_inbox(state: State<AppState>) -> Vec<String> {
 pub async fn auto_connect(
     state: State<'_, AppState>,
     app: AppHandle,
-    serial: SpState<'_>,
 ) -> Result<String, String> {
     {
         let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
@@ -670,22 +621,19 @@ pub async fn auto_connect(
         }
     }
 
-    let ports = available_ports(app.clone(), serial.clone(), None::<bool>)
-        .map_err(|e| format!("list ports: {}", e))?;
-    if ports.is_empty() { return Err("no USB serial devices found".into()); }
+    let mut port_names = available_ports().map_err(|e| format!("list ports: {}", e))?;
+    if port_names.is_empty() { return Err("no USB serial devices found".into()); }
 
-    // Port names use #N format (/dev/bus/usb/001/002#0, ...#1).
-    // Port 0 = console CDC (DTR triggers CP reset), port 1+ = data CDC.
-    // Sort descending so the data port is tried first.
-    let mut port_names: Vec<String> = ports.keys().cloned().collect();
+    // Sort descending so the data port is tried first (matters if this
+    // ever reports more than one synthetic port name).
     sort_ports_desc(&mut port_names);
 
     let mut diag: Vec<String> = Vec::new();
     for port_name in port_names {
-        match connect(port_name.clone(), state.clone(), app.clone(), serial.clone()).await {
+        match connect(port_name.clone(), state.clone(), app.clone()).await {
             Ok(()) => return Ok(port_name.clone()),
             Err(why) => {
-                let _ = disconnect(state.clone(), app.clone(), serial.clone());
+                let _ = disconnect(state.clone(), app.clone());
                 diag.push(format!("{}: {}", port_name, why));
             }
         }
@@ -693,4 +641,3 @@ pub async fn auto_connect(
 
     Err(format!("auto-connect failed: {}", diag.join("; ")))
 }
-

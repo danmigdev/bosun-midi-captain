@@ -19,11 +19,14 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
-# BosunMidiBridge (and BosunSerialService) are only referenced from the Rust
-# side through JNI (find_class + static method descriptors). R8 cannot see
-# those references and would strip the classes from the release DEX, making
-# the first JNI call throw NoClassDefFoundError. Keep them with their
-# original names - the JNI descriptors depend on the exact class names.
+# BosunMidiBridge, BosunSerialBridge (and BosunSerialService) are only
+# referenced from the Rust side through JNI (find_class + static method
+# descriptors). R8 cannot see those references and would strip or rename
+# the classes/methods in the release DEX, making the first JNI call throw
+# NoClassDefFoundError/NoSuchMethodError (2026-08-15: exactly this crash on
+# BosunSerialBridge.listPorts before this rule was added). Keep them with
+# their original names - the JNI descriptors depend on the exact names.
 -keep class com.bosun.app.BosunMidiBridge { *; }
 -keep class com.bosun.app.BosunMidiBridge$* { *; }
+-keep class com.bosun.app.BosunSerialBridge { *; }
 -keep class com.bosun.app.BosunSerialService { *; }
