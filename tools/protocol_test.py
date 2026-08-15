@@ -457,6 +457,7 @@ def _():
     port = FakePort()
     p, _ = build_protocol(port)
     p.handle({"type": "GET_PATCH", "id": "g", "bank": 1, "slot": 1})
+    drain_background(p)
     resp = json.loads(bytes(port.written).strip())
     assert resp["type"] == "PATCH"
     assert resp["patch"]["name"] == "Lead"
@@ -467,6 +468,7 @@ def _():
     port = FakePort()
     p, _ = build_protocol(port)
     p.handle({"type": "GET_PATCH", "id": "g", "bank": 99, "slot": 5})
+    drain_background(p)
     resp = json.loads(bytes(port.written).strip())
     assert resp == {"type": "ERROR", "id": "g", "error": "not_found", "bank": 99, "slot": 5}, resp
 
@@ -607,6 +609,7 @@ def _():
     config.load_patch_for = lambda b, s, profile: other_patch if profile == "p2" else (_ for _ in ()).throw(OSError())
     try:
         p.handle({"type": "GET_PATCH", "id": "gp", "bank": 2, "slot": 4, "profile": "p2"})
+        drain_background(p)
     finally:
         config.profile_exists = orig_exists
         config.load_patch_for = orig_load

@@ -1,5 +1,56 @@
 # Android Stage view / serial I/O silent-stall investigation
 
+## Follow-up 2 (2026-08-16): GET_PATCH silently gave up entirely on a real patch
+
+Live phone testing after the GET_MANIFEST/GET_GLOBAL fix below still showed
+one deterministic failure: pressing rig 3 (bank 1, slot 3) never updated
+Stage's switch 2 label, reproducibly, on a clean isolated press (not a
+timing race). Reproduced directly against the desktop rig: `GET_PATCH`
+bank=1 slot=3 got genuinely **zero response** - not delayed, never sent.
+Root cause: `_get_patch`'s single `json.dumps(obj)` call for the whole
+patch dict needs one contiguous heap allocation; its only recovery was one
+`gc.collect()`-and-retry (added earlier tonight, see below), and if that
+retry *also* MemoryError'd, it gave up completely - no ERROR, no PATCH,
+nothing. Confirmed this specific patch's encoding reliably fails this way.
+
+Fixed by converting `_get_patch` into `_get_patch_gen`, streaming its
+response field-by-field via `_write_bytes`/`_stream_value` (the same
+mechanism as manifest/global) instead of one `json.dumps()` call, so peak
+allocation is a single field rather than the whole patch.
+
+Making GET_PATCH background-driven too (alongside GET_MANIFEST/GET_GLOBAL)
+surfaced a second regression: `_start_background`'s original design
+*replaced* an in-flight background generator when a new one arrived,
+abandoning it mid-line. That was fine when only GET_MANIFEST/GET_GLOBAL
+used it (rare, non-overlapping in practice), but with GET_PATCH added, a
+burst of GET_PATCH requests arriving while a GET_MANIFEST was still
+streaming kept preempting it, truncating the manifest every time -
+reproduced directly (20 simultaneous GET_PATCH + 1 GET_MANIFEST): the
+manifest came back as a 114-byte fragment, immediately followed by
+corrupted/interleaved PATCH data. Fixed by replacing the single-slot
+"replace" design with a proper FIFO queue (`_bg_queue`): a new background
+request queues behind an in-flight one instead of abandoning it;
+`pump_background()` drains the queue in a loop so several small responses
+(GET_PATCH usually finishes within one slice) complete within a single
+tick instead of each costing an idle tick, while a genuinely large one
+(GET_MANIFEST) still only gets one slice per call.
+
+That 20-simultaneous-request stress test - a synthetic load no real editor
+client would ever produce - also drove the device into a genuine heap
+exhaustion crash loop (`memory allocation failed, allocating 937 bytes`,
+repeating forever, main loop wedged). Recovered without a physical power
+cycle: Ctrl+C over the console CDC to interrupt into the REPL, then Ctrl+D
+to soft-reload. Not treated as a bug to fix - 21 near-simultaneous requests
+for the same slot is far outside any realistic usage pattern (at most 2,
+from the known double-GET_PATCH quirk on a single patch switch).
+
+Verified on the desktop rig: 15x sequential GET_PATCH for rig 3 (100%
+clean, switch 2 present every time), GET_MANIFEST + 4 realistic concurrent
+GET_PATCH (manifest arrives intact at 22672 bytes, all 4 patches correct),
+and the original GET_MANIFEST + GET_PATCH collision test (clean, no
+corruption). `tools/protocol_test.py` (41/41) and
+`tools/firmware_stability_test.py` (17/17) both green.
+
 ## Follow-up (2026-08-16): GET_MANIFEST/GET_GLOBAL blocked the whole main loop
 
 After the native serial driver and `emit_event` fixes (see

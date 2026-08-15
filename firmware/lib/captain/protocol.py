@@ -31,9 +31,12 @@ class Protocol:
         self.port = usb_cdc.data
         self._rx_buf = bytearray()
         self._uploads = {}                        # path -> open file
-        # In-flight resumable background response (GET_MANIFEST/GET_GLOBAL -
-        # see _start_background/pump_background). At most one at a time.
+        # In-flight resumable background response (GET_MANIFEST/GET_GLOBAL/
+        # GET_PATCH - see _start_background/pump_background). At most one
+        # actively advancing at a time; anything else queues in _bg_queue
+        # rather than preempting it (see _start_background).
         self._bg_gen = None
+        self._bg_queue = []
         # Other _send() responses queued because they arrived while a
         # background line was still open on the wire (no trailing newline
         # yet) - writing them immediately would land mid-line and corrupt
@@ -278,7 +281,7 @@ class Protocol:
             elif t == "GET_GLOBAL":        self._start_background(self._get_global_gen(mid, msg))
             elif t == "PUT_GLOBAL":        self._put_global(mid, msg)
             elif t == "LIST_PATCHES":      self._list_patches(mid, msg)
-            elif t == "GET_PATCH":         self._get_patch(mid, msg)
+            elif t == "GET_PATCH":         self._start_background(self._get_patch_gen(mid, msg))
             elif t == "PUT_PATCH":         self._put_patch(mid, msg)
             elif t == "PUT_BINDING":       self._put_binding(mid, msg)
             elif t == "DELETE_PATCH":      self._delete_patch(mid, msg)
@@ -402,52 +405,66 @@ class Protocol:
 
     def _start_background(self, gen):
         """Register a resumable generator-based response (GET_MANIFEST,
-        GET_GLOBAL - see _get_manifest_gen/_get_global_gen) to be advanced a
-        step at a time from the main loop instead of run to completion
-        inline. Both of those responses stream multi-KB payloads via
-        _write_bytes/_stream_value with no yielding at all, which measured
-        5.25 s of dead time on real hardware for a 22 KB manifest (2026-08-
-        16, see the [timing] instrumentation in handle()) - during which
+        GET_GLOBAL, GET_PATCH - see _get_manifest_gen/_get_global_gen/
+        _get_patch_gen) to be advanced from the main loop instead of run to
+        completion inline. All three stream their response via
+        _write_bytes/_stream_value rather than one json.dumps() call, to
+        avoid needing one large contiguous allocation on the fragmented
+        RP2040 heap (GET_PATCH's own previous single-dumps()
+        dry-run-and-retry still gave up completely - no response at all -
+        if that retry also MemoryError'd; confirmed live 2026-08-16).
+        GET_MANIFEST/GET_GLOBAL can additionally run to multiple KB with no
+        yielding at all, which measured 5.25 s of dead time on real
+        hardware for a 22 KB manifest (2026-08-16) - during which
         tick_once() never returns, so protocol.poll() never runs again and
-        every other queued request (notably GET_PATCH right after a
-        patch_switched EVENT - Stage Mode's exact symptom) sits unread in
-        _rx_buf for the entire duration, plus footswitch polling and MIDI
-        processing are frozen too. Run the first slice immediately (matches
-        the old function's immediate-start feel and surfaces a
-        _resolve_profile error with no extra delay); pump_background()
-        advances the rest, one slice per tick, interleaved with normal
-        poll()/handle() dispatch (their _send() responses queue rather than
-        write while our line is open - see _send()). A second background
-        request arriving before the first finishes (e.g. the editor's
-        GET_MANIFEST retry watchdog firing again after a slow response -
-        getManifestAwait in protocol.ts) would otherwise abandon the first
-        generator mid-line, leaving an unterminated partial JSON object on
-        the wire for the new one's bytes to run onto - seal it off with a
-        bare newline first so it becomes its own harmless (dropped as
-        bad_json) line instead."""
+        every other queued request sits unread in _rx_buf for the entire
+        duration, plus footswitch polling and MIDI processing are frozen
+        too. If one is already in flight, queue this one rather than
+        abandoning the first: an abandoned generator's response has no
+        trailing newline yet, so replacing it would corrupt the wire the
+        same way an interleaved _send() would (see _send()'s _bg_gen
+        check) - confirmed live 2026-08-16 once GET_PATCH became
+        background-driven too: a burst of simultaneous GET_PATCH requests
+        kept preempting an in-flight GET_MANIFEST, truncating it every
+        single time. Queueing costs nothing for the common case (most
+        GET_PATCH/GET_GLOBAL responses finish within a single slice - see
+        pump_background's drain-the-queue loop) and just means a genuine
+        retry (e.g. the editor's GET_MANIFEST watchdog - getManifestAwait
+        in protocol.ts) waits its turn instead of stepping on the
+        original."""
         if self._bg_gen is not None:
-            self._write_bytes(b"\n")
-            self._bg_gen = None
-            self._flush_pending()
+            self._bg_queue.append(gen)
+            return
         self._bg_gen = gen
         self.pump_background()
 
     def pump_background(self):
-        """Advance the in-flight background generator (if any) by one step.
-        Call once per main-loop tick, after protocol.poll()/handle() so a
-        request that arrived while the generator was mid-flight gets
-        dispatched before we spend more time on the background one."""
-        if self._bg_gen is None:
-            return
-        try:
-            next(self._bg_gen)
-        except StopIteration:
-            self._bg_gen = None
-            self._flush_pending()
-        except Exception as e:
-            self._bg_gen = None
-            print("[protocol] background gen EXC err=%s" % type(e).__name__)
-            self._flush_pending()
+        """Advance the in-flight background generator (if any) by one step;
+        once it (and anything ahead of it) fully completes, start the next
+        queued one and give IT a turn too, in the same call. Most GET_PATCH/
+        GET_GLOBAL responses finish inside a single slice, so a burst of
+        several drains within one tick_once() instead of each costing its
+        own idle tick; a genuinely large one (GET_MANIFEST) still only gets
+        one slice per call, so it can't starve whatever's queued behind it
+        for more than a tick at a time. Call once per main-loop tick, after
+        protocol.poll()/handle() so a request that arrived this tick is
+        already queued (or dispatched, if nothing was in flight) before we
+        spend more time on background work."""
+        while True:
+            if self._bg_gen is None:
+                if not self._bg_queue:
+                    return
+                self._bg_gen = self._bg_queue.pop(0)
+            try:
+                next(self._bg_gen)
+                return
+            except StopIteration:
+                self._bg_gen = None
+                self._flush_pending()
+            except Exception as e:
+                self._bg_gen = None
+                print("[protocol] background gen EXC err=%s" % type(e).__name__)
+                self._flush_pending()
 
     def _flush_pending(self):
         """Write out every _send() response that queued while the
@@ -474,7 +491,7 @@ class Protocol:
                        for (b, s) in config.list_patches(profile=pid)]
         self._send({"type": "PATCH_LIST", "id": mid, "patches": patches, "profile": pid or ""})
 
-    def _get_patch(self, mid, msg):
+    def _get_patch_gen(self, mid, msg):
         bank, slot = msg["bank"], msg["slot"]
         pid, use_active = self._resolve_profile(mid, msg)
         if not use_active and pid is None:
@@ -484,28 +501,39 @@ class Protocol:
         except OSError:
             self._send({"type": "ERROR", "id": mid, "error": "not_found", "bank": bank, "slot": slot})
             return
-        obj = {"type": "PATCH", "id": mid, "bank": bank, "slot": slot, "patch": patch, "profile": pid or ""}
-        # _send() never raises and only retries its own json.dumps() once
-        # on MemoryError - not always enough for a patch with many
-        # bindings, and this response is exactly what Stage Mode needs
-        # promptly right after a patch_switched EVENT to refresh its
-        # switch labels (2026-08-15/16: confirmed live - GET_PATCH
-        # responses arriving many seconds late or not at all, right after
-        # the identical failure class was already fixed for _push_context
-        # and emit_event). Same fix: dry-run the encode with our own
-        # gc.collect()-and-retry before handing off to _send().
+        # Stream the response field-by-field (same mechanism as
+        # GET_MANIFEST/GET_GLOBAL - see _stream_value) instead of one
+        # json.dumps(obj) call for the whole patch. A patch with many
+        # bindings/actions can be multi-KB, and a single dumps() needs ONE
+        # contiguous allocation of that size - on the fragmented RP2040
+        # heap this can MemoryError even with plenty of *total* free
+        # memory. The previous fix here (dry-run encode + one
+        # gc.collect()-and-retry, matching _push_context/emit_event, see
+        # git history) still gave up completely - no ERROR, no PATCH,
+        # nothing - if that retry also failed, which is a genuine
+        # fragmentation problem a single collect doesn't always fix.
+        # Confirmed live 2026-08-16: a real patch on the test rig
+        # reproduced silent, total non-response deterministically, not
+        # just delay.
+        import gc
+        if self.port is None or not self.port.connected:
+            return
         try:
-            json.dumps(obj)
-        except MemoryError:
-            try:
-                gc.collect()
-            except Exception:
-                pass
-            try:
-                json.dumps(obj)
-            except MemoryError:
-                return
-        self._send(obj)
+            gc.collect()
+            w = self._write_bytes
+            w(b'{"type":"PATCH","id":')
+            w(json.dumps(mid).encode())
+            w(b',"bank":')
+            w(json.dumps(bank).encode())
+            w(b',"slot":')
+            w(json.dumps(slot).encode())
+            w(b',"profile":')
+            w(json.dumps(pid or "").encode())
+            w(b',"patch":')
+            yield from self._stream_value(w, patch, gc)
+            w(b'}\n')
+        except Exception as e:
+            print("[protocol] _send EXC type=PATCH err=%s" % type(e).__name__)
 
     def _get_midi_learn(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
