@@ -300,8 +300,39 @@
 # actions/setup-node@v6 pins major "22" (resolved to 22.23.2 for the run
 # this MR verifies against - confirmed via that run's own log). Fixed by
 # installing that exact Node build directly from nodejs.org instead of
-# apt's default (see sudo:/init: below) - not yet verified against a
-# real pipeline as of this note.
+# apt's default (see sudo:/init: below).
+#
+# RESOLVED (2026-08-16): confirmed via a real pipeline run - the Node fix
+# closed the CSP-hash gap completely (all three embedded sha256- hashes
+# byte-identical between this recipe's build and the reference). The
+# assets/tauri.conf.json diff from two notes above also turned out to be
+# real and separately worth fixing: the embedded literal still had
+# "versionCode":2, stale from before release.yml's own versionCode fix -
+# re-extracted a fresh one matching the current (now-stable) reference.
+#
+# STILL UNRESOLVED, LIKELY NOT FIXABLE FROM HERE: with every content-level
+# difference closed (manifest, assets, CSP hashes, embedded build paths),
+# the four lib/*.so files are down to a 272-byte gap out of ~5.9MB (0.005%)
+# - from an original ~1.7MB gap. Section-by-section comparison (pyelftools)
+# found it concentrated in .text (compiled code, -224 bytes) and .eh_frame/
+# .eh_frame_hdr (a few dozen bytes) - not an embedded string, an actual
+# codegen difference. editor/src-tauri/Cargo.toml's [profile.release]
+# already sets codegen-units = 1 (the most common source of Rust codegen
+# non-determinism, since it forces single-threaded per-crate codegen units
+# instead of work-stealing across several) - ruled out as the cause. With
+# lto = true also set, this is consistent with a narrower, better-known-if-
+# still-hard-to-eliminate class of non-determinism: LLVM's LTO backend can
+# still schedule some of its own optimization passes across multiple
+# threads even with a single codegen unit, and completion-order-dependent
+# tie-breaking in a few heuristics can very slightly change what gets
+# inlined. Eliminating this fully would mean disabling LTO (a real
+# performance/binary-size tradeoff for every release build, not just this
+# one) or chasing rustc-internal flags beyond what a build-recipe change
+# can reasonably attempt - left as-is per the user's explicit call
+# (2026-08-16: "stop here, document it") rather than touched unilaterally.
+# A F-Droid maintainer reviewing this MR may have their own answer for
+# this last sliver; this recipe otherwise matches release.yml's actual
+# build process byte-for-byte everywhere it's been possible to verify.
 
 Categories:
   - Multimedia
