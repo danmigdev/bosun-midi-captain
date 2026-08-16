@@ -35,6 +35,24 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# PowerShell 5.1 promotes EACH LINE a native tool writes to stderr into a
+# terminating error under $ErrorActionPreference = "Stop", even when the
+# tool's own exit code is 0 - a routine lint warning (Vite/svelte-check,
+# Gradle deprecation notices, ...) aborts the whole script before the
+# explicit $LASTEXITCODE checks below ever run (found 2026-08-16: a single
+# a11y warning in App.svelte silently killed the Android build with no
+# real failure). Run native tools through this wrapper - it drops to
+# "Continue" only for the duration of that one call, so stderr text is
+# just printed instead of thrown, and the $LASTEXITCODE check right after
+# each call remains the actual source of truth for success/failure.
+function Invoke-NativeTool {
+    param([scriptblock]$Command)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Command } finally { $ErrorActionPreference = $prev }
+}
+
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $editorDir  = Join-Path $projectRoot "editor"
 $tauriDir   = Join-Path $editorDir "src-tauri"
@@ -69,7 +87,7 @@ if (-not $SkipFrontend) {
     Write-Host "[1/4] Building frontend (Vite) ..." -ForegroundColor Yellow
     Push-Location $editorDir
     try {
-        npm run build
+        Invoke-NativeTool { npm run build }
         if ($LASTEXITCODE -ne 0) { throw "Vite build failed" }
     } finally { Pop-Location }
 } else {
@@ -113,7 +131,7 @@ if (-not $SkipRust) {
         # touching it unconditionally forces a fresh embed every build.
         (Get-Item (Join-Path $tauriDir "build.rs")).LastWriteTime = Get-Date
 
-        & $cargoExe build --release --target aarch64-linux-android
+        Invoke-NativeTool { & $cargoExe build --release --target aarch64-linux-android }
         if ($LASTEXITCODE -ne 0) { throw "Cargo build failed" }
     } finally { Pop-Location }
 } else {
@@ -139,7 +157,7 @@ try {
         "-x", "rustBuildX86Release",
         "-x", "rustBuildX86_64Release"
     )
-    & .\gradlew @gradleArgs
+    Invoke-NativeTool { & .\gradlew @gradleArgs }
     if ($LASTEXITCODE -ne 0) { throw "Gradle build failed" }
 } finally { Pop-Location }
 
@@ -147,7 +165,7 @@ try {
 Write-Host "Signing APK ..." -ForegroundColor Yellow
 $apkSigner = Join-Path $env:ANDROID_HOME "build-tools\35.0.0\apksigner.bat"
 $keystore  = Join-Path $env:USERPROFILE ".android\debug.keystore"
-& $apkSigner sign --ks $keystore --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android $apkUnsigned
+Invoke-NativeTool { & $apkSigner sign --ks $keystore --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android $apkUnsigned }
 if ($LASTEXITCODE -ne 0) { throw "Signing failed" }
 
 Copy-Item -Force $apkUnsigned $apkOut
@@ -157,7 +175,7 @@ Write-Host "`nBuild complete: $apkOut" -ForegroundColor Green
 # ---------- Deploy ----------
 if ($Deploy) {
     Write-Host "Deploying to device ..." -ForegroundColor Yellow
-    & $adbExe install -r $apkOut
+    Invoke-NativeTool { & $adbExe install -r $apkOut }
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Installed successfully." -ForegroundColor Green
     }

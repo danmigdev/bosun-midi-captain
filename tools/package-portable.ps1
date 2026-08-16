@@ -36,6 +36,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# PowerShell 5.1 promotes EACH LINE a native tool writes to stderr into a
+# terminating error under $ErrorActionPreference = "Stop", even when the
+# tool's own exit code is 0 - a routine lint warning (Vite/svelte-check,
+# ...) can abort the whole script before the $LASTEXITCODE check below
+# ever runs (found 2026-08-16 chasing the same issue in build-android.ps1).
+# Run native tools through this wrapper - it drops to "Continue" only for
+# the duration of that one call, so stderr text is just printed instead of
+# thrown, and $LASTEXITCODE remains the actual source of truth.
+function Invoke-NativeTool {
+    param([scriptblock]$Command)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Command } finally { $ErrorActionPreference = $prev }
+}
+
 $repoRoot  = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $editor    = Join-Path $repoRoot "editor"
 $tauriDir  = Join-Path $editor "src-tauri"
@@ -57,9 +72,9 @@ if (-not $SkipBuild) {
         # nvm4w npm shim drops args after `--`, so `--no-bundle` was being
         # lost and the build produced an NSIS installer we don't ship.
         if ($Configuration -eq "debug") {
-            npx tauri build --no-bundle --debug
+            Invoke-NativeTool { npx tauri build --no-bundle --debug }
         } else {
-            npx tauri build --no-bundle
+            Invoke-NativeTool { npx tauri build --no-bundle }
         }
         if ($LASTEXITCODE -ne 0) { throw "tauri build failed (exit $LASTEXITCODE)" }
     } finally {

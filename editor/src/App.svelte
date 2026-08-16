@@ -1474,7 +1474,7 @@
     {/if}
     <!-- Mobile sidebar overlay -->
     {#if isMobile}
-      <div class="sidebar-overlay" class:open={mobileMenuOpen} onclick={toggleMobileMenu}></div>
+      <div class="sidebar-overlay" class:open={mobileMenuOpen} onclick={toggleMobileMenu} role="presentation"></div>
     {/if}
     <div class="shell">
       <nav class="sidebar" class:open={mobileMenuOpen} style={isMobile && !mobileMenuOpen ? "display:none" : ""}>
