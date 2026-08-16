@@ -17,8 +17,30 @@
 # account and ongoing engagement with the F-Droid community. This file is
 # a starting point for that submission, not a finished one.
 #
-# KNOWN UNCERTAINTY (2026-08-16, not yet verified against a real F-Droid
-# build attempt):
+# TESTED LOCALLY (2026-08-16) against a real fdroidserver + F-Droid
+# buildserver image (registry.gitlab.com/fdroid/fdroidserver:buildserver,
+# which is the actual Debian 13 environment F-Droid's CI builds on -
+# fdroidserver itself pip-installed on top, since the image doesn't ship
+# it). `fdroid lint com.bosun.app` passes clean. `fdroid build -t`
+# (local/non-server test mode) found and fixed three real bugs:
+#   - init: used an invented $$bosun-midi-captain$$ placeholder for "repo
+#     root" - not real F-Droid syntax (only $$SDK$$/$$NDK$$/$$VERSION$$
+#     are), and since init commands run through bash -c, bash's own $$
+#     (process ID) mangled every path. Rewritten with relative paths.
+#   - The buildserver image's ndk/ directory ships EMPTY - added the
+#     `ndk:` field so F-Droid actually provisions $$NDK$$ before init:
+#     runs, instead of assuming it's already there.
+#   - cargo had no linker configured for aarch64-linux-android (same
+#     requirement build-android.ps1 sets locally via
+#     CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER) - added the export.
+#
+# STILL UNVERIFIED (local test mode skips `sudo:` entirely - "these
+# commands were skipped because fdroid build is not running on a
+# dedicated build server" - so none of this can be confirmed without an
+# actual F-Droid buildserver submission):
+#   - Whether node/npm/rustup actually install and produce a working
+#     aarch64-linux-android target inside F-Droid's real sandboxed
+#     buildserver (network/permissions may differ from this local test).
 #   - Tauri Android apps have a documented history of F-Droid build
 #     failures because F-Droid's build server strips the project's own
 #     `gradlew` (untrusted binary) and substitutes its own, and older
@@ -34,9 +56,6 @@
 #     is required instead, needs confirming against current F-Droid docs/
 #     policy - this draft assumes network access is fine and will need
 #     correction if not.
-#   - NDK/Rust toolchain versions below are copied from the versions this
-#     repo's own build-android.ps1 pins locally; F-Droid's builder image
-#     needs to have (or be told to install) matching versions.
 
 Categories:
   - Multimedia
@@ -63,6 +82,12 @@ Builds:
     versionCode: 29
     commit: v0.6.0
     subdir: editor/src-tauri/gen/android
+    # Provisions $$NDK$$ (and sets ANDROID_NDK/ANDROID_NDK_HOME) before
+    # init: runs - matches the version build-android.ps1 pins locally
+    # (editor/src-tauri, $ndkBin). Found via a local test (2026-08-16):
+    # the buildserver image's ndk/ directory ships EMPTY - this field is
+    # what actually provisions it, not something baked into the image.
+    ndk: "30.0.15729638"
     sudo:
       - apt-get update
       - apt-get install -y nodejs npm
@@ -87,7 +112,13 @@ Builds:
       # this point without manually pre-installing them in the test
       # environment). All four lines run as ONE joined shell (cwd
       # carries over), so each cd is relative to wherever the previous
-      # line left off.
+      # line left off. CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER matches
+      # what build-android.ps1 sets for the same cross-compile locally
+      # (there, $$NDK$$ is the Windows NDK dir + ...\windows-x86_64\bin\
+      # ...21-clang.cmd; here it's the Linux NDK's linux-x86_64 toolchain,
+      # no .cmd extension) - without it cargo has no linker for the
+      # aarch64-linux-android target and the build fails at link time.
+      - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
       - cd ../../.. && npm ci && npm run build
       - cd src-tauri && cargo build --release --target aarch64-linux-android && cd ..
       - mkdir -p src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
