@@ -267,7 +267,15 @@ jobs:
         with:
           name: Bosun ${{ steps.ver.outputs.label }}
           files: release/bosun.apk
-          tag_name: ${{ github.ref_name }}
+          # Missing the `github.event.inputs.tag ||` fallback that the
+          # other three platform jobs have (see tag_name a few hundred
+          # lines up) meant every workflow_dispatch re-run (e.g. to pick
+          # up a signing fix for an existing tag) silently uploaded to
+          # whatever branch it dispatched from (github.ref_name, "main")
+          # instead of the actual release - three re-runs in a row never
+          # touched v0.6.0's real bosun.apk asset, which stayed broken/
+          # unsigned throughout (found 2026-08-16 while chasing that bug).
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: false
           prerelease: false
         env:
