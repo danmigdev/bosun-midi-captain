@@ -1,0 +1,89 @@
+# Draft F-Droid build metadata for Bosun's Android app.
+#
+# This is NOT submitted anywhere yet. F-Droid inclusion works like this:
+#   1. Fork https://gitlab.com/fdroid/fdroiddata
+#   2. Add this file (renamed to just the package ID: metadata/com.bosun.app.yml)
+#      to that fork's metadata/ directory
+#   3. Open a merge request against fdroiddata
+#   4. F-Droid's build server (Linux, sandboxed, no network access beyond
+#      what's declared) attempts an actual build using this recipe and
+#      reports back pass/fail
+#   5. A human F-Droid maintainer reviews the MR (license, anti-features,
+#      reproducibility) - this can take from days to several weeks, and
+#      commonly involves iterating on the build recipe based on real
+#      build-server failures
+#
+# None of steps 1-5 can be done by an AI assistant - they need a GitLab
+# account and ongoing engagement with the F-Droid community. This file is
+# a starting point for that submission, not a finished one.
+#
+# KNOWN UNCERTAINTY (2026-08-16, not yet verified against a real F-Droid
+# build attempt):
+#   - Tauri Android apps have a documented history of F-Droid build
+#     failures because F-Droid's build server strips the project's own
+#     `gradlew` (untrusted binary) and substitutes its own, and older
+#     Tauri/cargo-mobile2 tooling hard-depended on the bundled one
+#     (tauri-apps/tauri#6367, closed via tauri-apps/cargo-mobile2#111).
+#     Bosun's own build-android.ps1 already avoids `tauri android build`'s
+#     orchestration - it calls cargo and gradlew directly - which should
+#     help, but this is unverified against F-Droid's actual environment.
+#   - Cargo needs to fetch crate dependencies from crates.io during the
+#     Rust build step. F-Droid's build servers restrict network access
+#     during builds for reproducibility; whether crates.io fetches are
+#     permitted, or whether vendoring all Cargo dependencies into the repo
+#     is required instead, needs confirming against current F-Droid docs/
+#     policy - this draft assumes network access is fine and will need
+#     correction if not.
+#   - NDK/Rust toolchain versions below are copied from the versions this
+#     repo's own build-android.ps1 pins locally; F-Droid's builder image
+#     needs to have (or be told to install) matching versions.
+
+Categories:
+  - Multimedia
+License: GPL-3.0-or-later
+AuthorName: Danilo Migliarino
+SourceCode: https://github.com/danmigdev/bosun-midi-captain
+IssueTracker: https://github.com/danmigdev/bosun-midi-captain/issues
+
+AutoName: Bosun
+Summary: Editor and Stage view for PaintAudio MIDI Captain foot controllers
+Description: |
+    Bosun is an editor and live "Stage" companion for the PaintAudio MIDI
+    Captain foot controller running Bosun firmware. Configure switches,
+    bindings and screen layout, and mirror the pedal's live state on a
+    phone or tablet at a gig - connects directly over USB-OTG, no computer
+    needed. Plugin system supports Kemper Player, Hotone Ampero II Stage,
+    Line 6 Helix, and generic MIDI devices.
+
+RepoType: git
+Repo: https://github.com/danmigdev/bosun-midi-captain
+
+Builds:
+  - versionName: 0.6.0
+    versionCode: 29
+    commit: v0.6.0
+    subdir: editor/src-tauri/gen/android
+    sudo:
+      - apt-get update
+      - apt-get install -y nodejs npm
+      # Pin to whatever Rust toolchain this repo's rust-toolchain (if
+      # added) or CI declares - unverified, needs a real value.
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - rustup target add aarch64-linux-android
+    init:
+      # Frontend build + Rust cross-compile happen here since F-Droid's
+      # standard `gradle:` build type only drives the Gradle half - see
+      # build-android.ps1 for the equivalent Windows/local version of
+      # this same three-step sequence.
+      - cd $$bosun-midi-captain$$/editor && npm ci && npm run build
+      - cd $$bosun-midi-captain$$/editor/src-tauri && cargo build --release --target aarch64-linux-android
+      - mkdir -p $$bosun-midi-captain$$/editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+      - cp $$bosun-midi-captain$$/editor/src-tauri/target/aarch64-linux-android/release/libbosun_editor_lib.so $$bosun-midi-captain$$/editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
+    gradle:
+      - yes
+    output: app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk
+
+AutoUpdateMode: None
+UpdateCheckMode: Tags
+CurrentVersion: 0.6.0
+CurrentVersionCode: 29
