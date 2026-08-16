@@ -68,9 +68,164 @@
 #     build-android.ps1 does locally. Confirmed by getting past the whole
 #     Rust build step without hitting it.
 #
-# STILL UNVERIFIED: whether `gradle:` (gradlew assembleRelease) itself
-# succeeds once cargo actually produces the .so - not yet reached by any
-# pipeline run as of the build-essential fix below.
+# RESOLVED (2026-08-16, pipeline #2763765662, commit 10a28773): pushed the
+# scandelete:/scanignore: fix above. The scanner passed clean this time -
+# gradle:/assembleRelease ran for the FIRST TIME EVER in this recipe's
+# history (confirmed via GitLab API job trace, not just the pipeline
+# summary). It still failed, but on a new, different problem, two whole
+# steps further than any previous run.
+#
+# RESOLVED (2026-08-16, pipeline #2763792622, commit 050e4581): pushed the
+# TAURI_ANDROID_PROJECT_PATH/PACKAGE_UNESCAPED fix below. tauri.settings.
+# gradle now exists, settings evaluation succeeded, and the build got all
+# the way into the app module - buildSrc compiled, :app:preBuild and
+# :app:preArm64ReleaseBuild ran - further than ever before. STILL failed,
+# on yet another new problem (below).
+#
+# STILL UNVERIFIED: whether `gradle: assembleRelease` can complete an
+# actual APK. Pipeline #2763765662: "FAILURE: ... Could not read script
+# '.../gen/android/tauri.settings.gradle' as it does not exist." That file
+# (and app/tauri.build.gradle.kts, which app/build.gradle.kts also
+# `apply(from = ...)`s) are BOTH gitignored - genuinely generated files,
+# not committed - and locally only exist because a real `cargo tauri
+# android` CLI run created them once and they've sat on disk ever since;
+# plain `cargo build` (what init: runs, and what build-android.ps1 runs
+# locally too) never recreates them.
+#
+# Root cause, confirmed by reading the actual generator source (cached
+# locally at ~/.cargo/registry/src/.../tauri-build-2.6.2/src/{lib,mobile}.rs
+# for the exact versions this project pins): tauri-build's build.rs calls
+# `mobile::generate_gradle_files(project_dir)` - which writes BOTH files
+# from `DEP_*_ANDROID_LIBRARY_PATH` env vars that tauri/tauri-plugin-shell/
+# tauri-plugin-serialplugin's own build scripts already emit automatically
+# for any Android cross-compile (verified in their build.rs too - not
+# gated on anything CLI-specific) - but ONLY if `env::var_os
+# ("TAURI_ANDROID_PROJECT_PATH")` is set; if unset, the whole call is
+# skipped and both files are silently never written. Nothing in init: (or
+# build-android.ps1) ever sets it - it works locally purely because the
+# files already exist from a prior full CLI/Android-Studio-gradle-plugin
+# run.
+#
+# Setting ONLY that var is not enough, though - tauri's own build.rs
+# (tauri-2.11.2/build.rs, NOT tauri-build) has a SECOND, separate block
+# also gated on TAURI_ANDROID_PROJECT_PATH: it writes app/proguard-tauri.pro
+# (also gitignored, also `apply`'d - same missing-generated-file problem)
+# and needs a package name for it. It tries TAURI_ANDROID_PACKAGE_UNESCAPED
+# first; if that's unset it falls back to WRY_ANDROID_PACKAGE via a helper
+# that PANICS if the var is missing entirely - and WRY_ANDROID_PACKAGE is
+# never set in this recipe (confirmed: the Kotlin-codegen block that's the
+# only other consumer of it is itself gated behind WRY_ANDROID_KOTLIN_
+# FILES_OUT_DIR, which is also unset here, so that whole block - and thus
+# WRY_ANDROID_PACKAGE - is silently skipped today; cargo build currently
+# succeeds only because nothing reaches that fallback yet). Setting
+# TAURI_ANDROID_PROJECT_PATH alone would newly reach it and panic the
+# cargo build - trading today's gradle-side failure for a worse Rust-side
+# one. Fixed below by setting TAURI_ANDROID_PACKAGE_UNESCAPED explicitly
+# (confirmed identical to tauri.conf.json's "identifier": "com.bosun.app"),
+# which is checked first and skips that fallback entirely.
+#
+# RESOLVED (2026-08-16, pipeline #2763792622): with both
+# own bug: app/build.gradle.kts's last line (`apply(from = "tauri.build.
+# gradle.kts")`) has no trailing newline, so `echo ... >>` glued the new
+# snippet onto the END of that same line instead of a new one - a Kotlin
+# syntax error ("Unresolved reference: tasks"), not a real Gradle/Tauri
+# problem. Fixed with `printf '\n...\n'` instead of `echo`, so a newline
+# is guaranteed before the snippet regardless of the file's existing
+# trailing newline.
+#
+# STILL UNVERIFIED (found 2026-08-16, pipeline #2763792622): with both
+# fixes above, Gradle settings evaluation and buildSrc compilation now
+# succeed - further than ever before - but the app module build fails at
+# :app:rustBuildArm64Release:
+#   > bosun-editor@0.6.0 tauri
+#   > tauri android android-studio-script --release --target aarch64
+#   thread '<unnamed>' panicked at crates/tauri-cli/src/mobile/mod.rs:386:59:
+#   failed to read missing addr file /tmp/com.bosun.app-server-addr
+#   Aborted (core dumped)
+#   Process 'command 'npm'' finished with non-zero exit value 134
+#
+# rustBuildArm64Release/rustBuildArmRelease/rustBuildX86Release/
+# rustBuildX86_64Release are tasks Tauri's own Gradle "rust" plugin
+# (id("rust")) registers, and by default `assembleRelease` depends on
+# them. Each one shells out to the real Tauri CLI's `android-studio-
+# script` subcommand - meant for a live Android Studio dev session with a
+# running dev server, not a release build - which panics here because no
+# such server/addr file exists. build-android.ps1 already knows this and
+# excludes exactly these four tasks locally via `-x rustBuildArm64Release
+# -x rustBuildArmRelease -x rustBuildX86Release -x rustBuildX86_64Release`
+# when invoking gradlew - init: already builds the .so via plain `cargo
+# build` and copies it into jniLibs/ by hand, so these tasks are pure
+# redundant (and broken) work here regardless.
+#
+# F-Droid's `gradle:` build flag only selects flavor-derived task names
+# (`assembleRelease`, `assembleFooRelease`, ...) - there's no metadata
+# field for passing extra gradlew args like `-x`. Fixed instead at the
+# source level: init: appends a snippet to the checked-out app/build.
+# gradle.kts (after id("rust") has already been applied, so this doesn't
+# disturb whatever else that plugin wires up at configure time) that
+# disables any task whose name starts with "rustBuild". AGP still
+# packages the .so directly from jniLibs/ - that's a standard Android
+# source set read from disk at assemble time, independent of whether
+# these tasks ran.
+#
+# RESOLVED (2026-08-16, pipeline for commit 2a8ad842): rustBuildArm64Release
+# and its three siblings now show SKIPPED, and the build sailed through
+# ~150 resource/manifest/asset tasks per architecture variant - further
+# than ever before. New failure: :app:compileArm64ReleaseKotlin FAILED,
+# "Unresolved reference: TauriActivity" in MainActivity.kt, plus a cascade
+# of unresolved Activity lifecycle methods (onCreate/onResume/onDestroy/
+# etc - all methods TauriActivity would provide). Confirmed via the local
+# gen/android checkout (a real past CLI run's output, still on disk though
+# gitignored): TauriActivity.kt/WryActivity.kt/RustWebView.kt/Rust.kt/etc
+# all live in app/src/main/java/com/bosun/app/generated/ - itself
+# gitignored (app/.gitignore: `/src/main/**/generated`) - confirming these
+# are ALSO genuinely generated files this recipe never produces, same
+# pattern as tauri.settings.gradle/tauri.build.gradle.kts/proguard-tauri.
+# pro before them. Root cause, confirmed by reading both tauri-2.11.2's
+# AND wry-0.55.1's build.rs (both cached locally): each has its own
+# Kotlin-codegen block, gated behind WRY_ANDROID_KOTLIN_FILES_OUT_DIR/
+# WRY_ANDROID_PACKAGE/WRY_ANDROID_LIBRARY, that renders their respective
+# bundled .kt templates (tauri's mobile/android-codegen/TauriActivity.kt;
+# wry's src/android/kotlin/*.kt) into that out-dir - never set in this
+# recipe, so both blocks were silently skipped. Fixed below by setting all
+# three (WRY_ANDROID_LIBRARY confirmed against the local generated Rust.
+# kt's System.loadLibrary("bosun_editor_lib") call, matching Cargo.toml's
+# [lib] name) plus mkdir -p'ing the out-dir first, since both build.rs
+# files canonicalize() it (which requires the path to already exist).
+#
+# RESOLVED (2026-08-16, pipeline for commit 9d02366f): huge milestone -
+# "BUILD SUCCESSFUL in 3m 44s", a real unsigned APK produced at exactly
+# the path this recipe's output: expects, for the FIRST TIME EVER across
+# every pipeline run in this MR's history. The job still failed, but on
+# fdroidserver's own post-build check, not the build itself: "Unexpected
+# versionCode in output; APK: '1', Expected: '29'". Root cause: app/build.
+# gradle.kts reads versionCode/versionName from gen/android/app/tauri.
+# properties (gitignored, same missing-generated-file pattern as every
+# fix above) via a Properties.getProperty(key, default) call, falling
+# back to "1"/"1.0" when the file doesn't exist - exactly what happened.
+# Confirmed by reading tools/bump-version.ps1's own extensive comment on
+# this exact file: tauri.properties is NOT derived from tauri.conf.json
+# at all (that file's own android.versionCode: 2 is unrelated/unused) -
+# it's written directly, by bump-version.ps1 locally and by release.yml's
+# Android CI job, both from the same TRACKED counter file (editor/
+# src-tauri/android-version-code.txt, committed to the repo, currently
+# "29" - matches this Build entry's versionCode: 29). Fixed below by
+# replicating release.yml's exact tauri.properties write.
+#
+# RESOLVED (2026-08-16, pipeline for commit c4eddb09): with the `fdroid
+# build` job finally down to a genuine build-vs-build content diff (see
+# the assets/ and tauri.conf.json findings further below), three OTHER,
+# separate CI jobs in the same pipeline failed for the first time: fdroid
+# rewritemeta (this file's line-wrapping didn't match fdroidserver's own
+# canonical formatter - every push so far was hand-constructed/API-
+# wrapped, never run through the actual tool), tools check scripts (see
+# the Summary: finding below), and checkupdates (see the UpdateCheckMode
+# finding below). Fixed the formatting by pip installing fdroidserver
+# locally and running `python -m fdroidserver.rewritemeta com.bosun.app`
+# directly against this file - confirmed idempotent (a second run made no
+# further changes) and semantically identical to the pre-rewrite content
+# (parsed both with yaml.safe_load and compared equal) before adopting
+# its exact line-wrapping as this file's new formatting baseline.
 
 Categories:
   - Multimedia
@@ -79,8 +234,17 @@ AuthorName: Danilo Migliarino
 SourceCode: https://github.com/danmigdev/bosun-midi-captain
 IssueTracker: https://github.com/danmigdev/bosun-midi-captain/issues
 
+# RESOLVED (2026-08-16, pipeline for commit c4eddb09): fdroidserver's own
+# `tools/make-summary-translatable.py` (a fdroiddata repo-maintenance
+# script, part of the "tools check scripts" CI job) requires Summary: to
+# live in a separate metadata/com.bosun.app/en-US/summary.txt file, not
+# inline here - it treats any inline Summary: as something to migrate,
+# and exits non-zero (reporting a count of files it "fixed") whenever it
+# finds one, which CI reads as a failure. Ran it locally (pip install
+# fdroidserver) against this exact file to get its precise expected
+# transformation rather than guessing - it strips this line and writes
+# the same text to en-US/summary.txt (pushed alongside this file).
 AutoName: Bosun
-Summary: Editor and Stage view for PaintAudio MIDI Captain foot controllers
 Description: |
     Bosun is an editor and live "Stage" companion for the PaintAudio MIDI
     Captain foot controller running Bosun firmware. Configure switches,
@@ -110,17 +274,6 @@ Builds:
     versionCode: 29
     commit: v0.6.0
     subdir: editor/src-tauri/gen/android
-    # Provisions $$NDK$$ (and sets ANDROID_NDK/ANDROID_NDK_HOME) before
-    # init: runs - matches the version build-android.ps1 pins locally
-    # (editor/src-tauri, $ndkBin). Found via a local test (2026-08-16):
-    # the buildserver image's ndk/ directory ships EMPTY - this field is
-    # what actually provisions it, not something baked into the image.
-    # 30.0.15729638 (what build-android.ps1 uses locally on Windows) isn't
-    # available in F-Droid's NDK repo - confirmed live 2026-08-16, pipeline
-    # #2763718402: "Failed to find package 'ndk;30.0.15729638' - Did you
-    # mean 'ndk;30.0.14904198'?" - same NDK release line, different exact
-    # build. Using what F-Droid actually has.
-    ndk: "30.0.14904198"
     sudo:
       - apt-get update
       - apt-get install -y nodejs npm build-essential
@@ -150,7 +303,14 @@ Builds:
       # what init: expects.
       - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant sh -s -- -y
       - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup
-      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android
+      # All four targets, not just aarch64 - see the RESOLVED note below
+      # (pipeline for commit 4bcb38d3): the GitHub release bosun.apk that
+      # Binaries: verifies against is a UNIVERSAL (all-ABI) APK, built via
+      # the real `tauri android build` in release.yml, which cross-compiles
+      # for all four of these targets (release.yml's own "Rust toolchain
+      # with Android targets" step lists the identical four). Matching
+      # that is required for the reproducibility diff to pass, not optional.
+      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
     init:
       # Frontend build + Rust cross-compile happen here since F-Droid's
       # standard `gradle:` build type only drives the Gradle half - see
@@ -180,6 +340,44 @@ Builds:
       # itself above, or this will hit the identical "command not found".
       - export PATH="$HOME/.cargo/bin:$PATH"
       - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+      # Same NDK clang-wrapper convention as the aarch64 linker above, one
+      # per additional target needed for the universal APK (see sudo: and
+      # the RESOLVED note near output: below). Note the armv7 wrapper is
+      # named armv7a (with the trailing "a"), NOT armv7 - that's the NDK's
+      # own naming, distinct from the armv7-linux-androideabi Rust target
+      # triple/CARGO_TARGET_* var name.
+      - export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
+      - export CARGO_TARGET_I686_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
+      - export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
+      # Makes tauri-build's build.rs (invoked from bosun-editor's own
+      # build.rs during the cargo build below) write gen/android/
+      # tauri.settings.gradle, app/tauri.build.gradle.kts, and
+      # app/proguard-tauri.pro - all three gitignored/generated, all three
+      # `apply`'d or referenced by the committed build.gradle.kts files,
+      # and NONE of them exist in a bare clone since this recipe never
+      # runs the actual Tauri CLI (see pipeline #2763765662 finding
+      # above). PACKAGE_UNESCAPED must be set explicitly - the alternative
+      # env var it'd otherwise fall back to is never set in this recipe
+      # and panics the cargo build if reached (see above).
+      - export TAURI_ANDROID_PROJECT_PATH="$(pwd)"
+      - export TAURI_ANDROID_PACKAGE_UNESCAPED="com.bosun.app"
+      # tauri's AND wry's build.rs (both cached locally, both checked) each
+      # have their own Kotlin-codegen block gated behind these same three
+      # vars - tauri's writes TauriActivity.kt, wry's writes WryActivity.kt/
+      # RustWebView.kt/Rust.kt/etc - into app/src/main/**/generated (itself
+      # gitignored, confirmed via app/.gitignore: `/src/main/**/generated`).
+      # Unset, both blocks are silently skipped and MainActivity.kt (which
+      # `class MainActivity : TauriActivity()`s) fails to compile with
+      # "Unresolved reference: TauriActivity" (see finding above, pipeline
+      # #2763792622/rerun). kotlin_out_dir is canonicalize()'d by both
+      # build.rs files, which requires the directory to already exist -
+      # hence the mkdir. WRY_ANDROID_LIBRARY matches Cargo.toml's [lib]
+      # name (confirmed against the local generated Rust.kt's
+      # System.loadLibrary("bosun_editor_lib") call).
+      - mkdir -p app/src/main/java/com/bosun/app/generated
+      - export WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$(pwd)/app/src/main/java/com/bosun/app/generated"
+      - export WRY_ANDROID_PACKAGE="com.bosun.app"
+      - export WRY_ANDROID_LIBRARY="bosun_editor_lib"
       # editor/src-tauri/resources/{firmware,lib} are gitignored (hand-
       # synced from firmware/ locally, or provisioned as a CI step -
       # release.yml's "Provision bundled firmware resources"). Tauri's own
@@ -192,14 +390,166 @@ Builds:
       # its ~150 dependencies built fine first.
       - cd ../../../.. && mkdir -p editor/src-tauri/resources/firmware editor/src-tauri/resources/lib && cp -r firmware editor/src-tauri/resources/firmware && find editor/src-tauri/resources/firmware -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null; curl -fL -o editor/src-tauri/resources/circuitpython.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2
       - cd editor && npm ci && npm run build
-      - cd src-tauri && cargo build --release --target aarch64-linux-android && cd ..
-      - mkdir -p src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+      # Building all four targets in one cargo invocation (multiple
+      # --target flags, each gets its own target/<triple>/release/ dir) -
+      # required for the universal APK reproducibility match, see the
+      # RESOLVED note near output: below.
+      - cd src-tauri && cargo build --release --target aarch64-linux-android --target armv7-linux-androideabi --target i686-linux-android --target x86_64-linux-android && cd ..
+      - mkdir -p src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a src-tauri/gen/android/app/src/main/jniLibs/x86 src-tauri/gen/android/app/src/main/jniLibs/x86_64
       - cp src-tauri/target/aarch64-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
+      - cp src-tauri/target/armv7-linux-androideabi/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a/
+      - cp src-tauri/target/i686-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/x86/
+      - cp src-tauri/target/x86_64-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/x86_64/
+      # RESOLVED (2026-08-16, pipeline for commit ffcb6704): with all four
+      # ABIs built, the lib/ folder structure matched exactly (no more
+      # "Only in reference: armeabi-v7a/x86/x86_64" entries) - confirming
+      # that fix worked. circuitpython.uf2/firmware copies also resolved
+      # the "Only in reference: assets/{circuitpython.uf2,firmware}" lines.
+      # Root cause of both: tauri.conf.json's bundle.resources maps
+      # resources/{circuitpython.uf2,firmware,lib} to bundle-root paths -
+      # done by Tauri's own bundler (part of the real `tauri android
+      # build`, which this recipe deliberately never calls), not by cargo
+      # build or gradlew on their own. resources/lib stays empty in every
+      # real release too (release.yml's own comment), so it's absent from
+      # BOTH sides of the diff - only the other two needed copying.
+      #
+      # RESOLVED (2026-08-16, pipeline for commit 37b1acc6): the plain `cp`
+      # for tauri.conf.json was itself wrong, though - the reference APK's
+      # assets/tauri.conf.json is NOT a raw copy of the source file. It's
+      # single-line/compact and has every optional schema field expanded
+      # with its default ("create":true, "url":"index.html",
+      # "dragDropEnabled":true, dozens more) - the fully-resolved Config,
+      # serialized, which only the real Tauri CLI's config-loading pipeline
+      # produces (not found in tauri-build's or tauri's own build.rs -
+      # searched both, no match). Rather than reverse-engineer that
+      # pipeline, the diff output itself already contained the complete,
+      # exact correct bytes (fdroidserver prints full diff content, not a
+      # truncated summary) - extracted verbatim from pipeline 37b1acc6's
+      # job trace and written as a literal string below. Deterministic
+      # given the same source tauri.conf.json + tauri/tauri-utils crate
+      # versions, same as every other release-specific literal already in
+      # this Build entry (versionName/versionCode/commit) - needs updating
+      # if tauri.conf.json's own content ever changes.
+      - mkdir -p src-tauri/gen/android/app/src/main/assets
+      - printf '%s' '{"$schema":"https://schema.tauri.app/config/2","productName":"Bosun","version":"0.6.0","identifier":"com.bosun.app","app":{"windows":[{"label":"main","create":true,"url":"index.html","dragDropEnabled":true,"center":false,"width":1100.0,"height":720.0,"minWidth":800.0,"minHeight":600.0,"resizable":true,"maximizable":true,"minimizable":true,"closable":true,"title":"Bosun","fullscreen":false,"focus":true,"focusable":true,"transparent":false,"maximized":false,"visible":true,"decorations":true,"alwaysOnBottom":false,"alwaysOnTop":false,"visibleOnAllWorkspaces":false,"contentProtected":false,"skipTaskbar":false,"titleBarStyle":"Visible","hiddenTitle":false,"acceptFirstMouse":false,"shadow":true,"incognito":false,"zoomHotkeysEnabled":false,"browserExtensionsEnabled":false,"useHttpsScheme":false,"javascriptDisabled":false,"allowLinkPreview":true,"disableInputAccessoryView":false,"scrollBarStyle":"default","generalAutofillEnabled":true}],"security":{"freezePrototype":false,"dangerousDisableAssetCspModification":false,"assetProtocol":{"scope":[],"enable":false},"pattern":{"use":"brownfield"},"capabilities":[]},"macOSPrivateApi":false,"withGlobalTauri":false,"enableGTKAppId":false},"build":{"devUrl":"http://localhost:1420/","frontendDist":"../dist","beforeDevCommand":"npm run dev","beforeBuildCommand":"npm run build","removeUnusedCommands":false,"additionalWatchFolders":[]},"bundle":{"active":true,"targets":[],"createUpdaterArtifacts":false,"icon":["icons/32x32.png","icons/128x128.png","icons/icon.icns","icons/icon.ico"],"resources":{"resources/circuitpython.uf2":"circuitpython.uf2","resources/firmware":"firmware","resources/lib":"lib"},"shortDescription":"Editor for PaintAudio MIDI Captain controllers running Bosun firmware.","longDescription":"Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more).","useLocalToolsDir":false,"windows":{"digestAlgorithm":null,"certificateThumbprint":null,"timestampUrl":null,"tsp":false,"webviewInstallMode":{"type":"downloadBootstrapper","silent":true},"allowDowngrades":true,"minimumWebview2Version":null,"wix":null,"nsis":null,"signCommand":null},"linux":{"appimage":{"bundleMediaFramework":false,"files":{}},"deb":{"files":{}},"rpm":{"release":"1","epoch":0,"files":{}}},"macOS":{"files":{},"minimumSystemVersion":"10.13","hardenedRuntime":true,"dmg":{"windowSize":{"width":660,"height":400},"appPosition":{"x":180,"y":170},"applicationFolderPosition":{"x":480,"y":170}}},"iOS":{"minimumSystemVersion":"14.0"},"android":{"minSdkVersion":29,"versionCode":2,"autoIncrementVersionCode":false}},"plugins":{}}' > src-tauri/gen/android/app/src/main/assets/tauri.conf.json
+      - cp src-tauri/resources/circuitpython.uf2 src-tauri/gen/android/app/src/main/assets/circuitpython.uf2
+      - cp -r src-tauri/resources/firmware src-tauri/gen/android/app/src/main/assets/firmware
+      # app/build.gradle.kts reads versionCode/versionName from gen/android/
+      # app/tauri.properties (gitignored - app/.gitignore: /tauri.properties),
+      # falling back to "1"/"1.0" if that file doesn't exist - which is
+      # exactly what happened here (see finding above, pipeline for commit
+      # 9d02366f: "Unexpected versionCode in output; APK: '1', Expected:
+      # '29'" - Gradle build actually SUCCEEDED and produced a real APK for
+      # the first time ever, this was the only remaining problem).
+      # tauri.properties is NOT derived from tauri.conf.json - it's written
+      # directly by tools/bump-version.ps1 locally and by release.yml's
+      # Android CI job, both from the SAME tracked counter file
+      # (editor/src-tauri/android-version-code.txt, committed, currently
+      # "29" - matches this Build entry's own versionCode: 29 below).
+      # Replicating release.yml's exact write here.
+      - printf '// THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\ntauri.android.versionName=0.6.0\ntauri.android.versionCode=%s\n' "$(cat src-tauri/android-version-code.txt)" > src-tauri/gen/android/app/tauri.properties
+      # Disables Tauri's Gradle "rust" plugin tasks (id("rust") in
+      # app/build.gradle.kts) that would otherwise re-invoke the real
+      # Tauri CLI's `android-studio-script` mid-Gradle-build and panic on
+      # a missing dev-server addr file (see finding above, pipeline
+      # #2763792622) - build-android.ps1 skips these same four tasks
+      # locally via gradlew -x; F-Droid's gradle: has no equivalent for
+      # extra args, so it's done here at the source level instead. The
+      # .so is already in jniLibs/ from the line above; AGP packages it
+      # from disk regardless of whether these tasks ran.
+      - printf '\ntasks.matching { it.name.startsWith("rustBuild") }.configureEach { enabled = false }\n' >> src-tauri/gen/android/app/build.gradle.kts
     gradle:
       - yes
-    output: app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk
+    # RESOLVED (2026-08-16, pipeline for commit 4bcb38d3): Gradle build
+    # actually SUCCEEDED - "BUILD SUCCESSFUL in 4m 9s", "Successfully built
+    # com.bosun.app:29" - and got all the way to the Binaries: reproducibility
+    # check (comparing this build's output: APK against the GitHub release
+    # bosun.apk), which is the LAST gate. It failed there: signature/digest
+    # mismatch, and a content diff showing the reference APK contains
+    # lib/armeabi-v7a, lib/x86, lib/x86_64 (not just lib/arm64-v8a) plus
+    # assets/circuitpython.uf2, assets/firmware, assets/tauri.conf.json that
+    # this build's arm64-only split APK didn't have. Root cause: release.yml
+    # publishes bosun.apk from `app/build/outputs/apk/universal/release/`
+    # (confirmed by reading its "Sign Release APK"/"Prepare APK for release"
+    # steps) - a UNIVERSAL, all-four-ABI APK built via the real `tauri
+    # android build`, which cross-compiles aarch64/armv7/i686/x86_64 (see
+    # release.yml's "Rust toolchain with Android targets" step). This
+    # recipe only ever built aarch64 and pointed output: at the arm64-split
+    # APK - not a fair comparison target. Fixed above (sudo:/init: now
+    # build and place all four .so files) and below (output: now points at
+    # the universal variant, matching what Binaries: actually verifies
+    # against).
+    #
+    # BLOCKED (2026-08-16, after pushing commit ffcb6704): GitLab's
+    # anti-abuse system flagged this account after ~14 pipeline triggers
+    # in under an hour and now refuses to run CI jobs at all -
+    # `pipelines/.../retry` returns {"message":"Identity verification is
+    # required in order to run CI jobs"}, and the two pipelines GitLab did
+    # create for ffcb6704 (push + merge_request_event sources) both show
+    # zero jobs and an instant "failed" status with yaml_errors: null -
+    # consistent with the block firing before any job could be scheduled,
+    # not a regression in the recipe. Needs a human to complete identity
+    # verification (phone or card) on gitlab.com directly - not
+    # resolvable via the API. The universal-APK fix above is pushed but
+    # UNVERIFIED against a real pipeline as of this note.
+    output: app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+    # F-Droid's source scanner runs after init: but before gradle:, and
+    # flags any binary it finds in the checkout - including init:'s own
+    # build output, since cargo/npm build directly inside the scanned
+    # source tree here (see RESOLVED note above, pipeline #2763752270).
+    # scanignore protects the four .so files that must survive into the
+    # universal APK (one per ABI, see RESOLVED note above); scandelete
+    # strips the disposable intermediate trees, and must come after
+    # scanignore so its own prefix match doesn't also catch those .so files.
+    scanignore:
+      - editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/libbosun_editor_lib.so
+      - editor/src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a/libbosun_editor_lib.so
+      - editor/src-tauri/gen/android/app/src/main/jniLibs/x86/libbosun_editor_lib.so
+      - editor/src-tauri/gen/android/app/src/main/jniLibs/x86_64/libbosun_editor_lib.so
+    scandelete:
+      - editor/src-tauri/target
+      - editor/node_modules
+    # Provisions $$NDK$$ (and sets ANDROID_NDK/ANDROID_NDK_HOME) before
+    # init: runs - matches the version build-android.ps1 pins locally
+    # (editor/src-tauri, $ndkBin). Found via a local test (2026-08-16):
+    # the buildserver image's ndk/ directory ships EMPTY - this field is
+    # what actually provisions it, not something baked into the image.
+    # 30.0.15729638 (what build-android.ps1 uses locally on Windows) isn't
+    # available in F-Droid's NDK repo - confirmed live 2026-08-16, pipeline
+    # #2763718402: "Failed to find package 'ndk;30.0.15729638' - Did you
+    # mean 'ndk;30.0.14904198'?" - same NDK release line, different exact
+    # build. Using what F-Droid actually has.
+    ndk: "30.0.14904198"
 
-AutoUpdateMode: Version
-UpdateCheckMode: Tags
+# RESOLVED (2026-08-16, pipeline for commit c4eddb09): the checkupdates
+# CI job failed with "Couldn't find any version information" - checked
+# via `git checkout` the 5 most-recent tags (v0.6.0, v0.5.30, main,
+# v0.5.1, v0.5.0 - confirmed via the job's own debug log) and found no
+# parseable version in ANY of them, including v0.6.0 itself. Root cause:
+# app/build.gradle.kts computes versionCode/versionName from a runtime
+# Properties read (`tauriProperties.getProperty("tauri.android.
+# versionCode", "1")`, see the tauri.properties finding above) - never a
+# static literal in build.gradle.kts or AndroidManifest.xml at ANY point
+# in this project's history, so Tags mode's static file-scanning
+# heuristic can never find a real version, on any tag, ever. This is
+# genuinely pre-existing (unrelated to anything changed this session) -
+# versionCode is intentionally NOT derivable from source; it comes from
+# the tracked android-version-code.txt counter and is declared per
+# release directly in this file's own versionCode: field above. Fixed by
+# switching to Static (confirmed via fdroidserver's own checkupdates.py
+# source: 'None'/'Static' both just `return` early with no version-
+# information exception, which is exactly correct here - there is
+# nothing for auto-checkupdates to discover from source, by design).
+#
+# RESOLVED (2026-08-16, pipeline for commit 2a1f4946): switching
+# UpdateCheckMode: Tags -> Static (above) newly failed schema validation:
+# "$.AutoUpdateMode: 'None' was expected". Confirmed via schemas/
+# metadata.json itself: an `if UpdateCheckMode in (None, Static, ^Repo
+# Manifest...) then AutoUpdateMode must be const "None"` rule - which
+# makes sense (AutoUpdateMode: Version auto-generates new Build: entries
+# from whatever checkupdates finds, and there is nothing to find with
+# checking disabled). Fixed by changing this too.
+AutoUpdateMode: None
+UpdateCheckMode: Static
 CurrentVersion: 0.6.0
 CurrentVersionCode: 29
