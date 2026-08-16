@@ -280,6 +280,28 @@
 # hardcoded 21 instead, an old build-android.ps1 convention unrelated to
 # minSdkVersion. Fixed below: ndk: field and every CARGO_TARGET_*_LINKER
 # now match the reference's actual NDK build and API level exactly.
+#
+# RESOLVED (2026-08-16): NDK/API match alone got readelf structure to
+# match exactly, dropping per-arch .so size deltas to 32-1488 bytes -
+# confirmed (via `readelf -n`) purely the builder's home directory
+# embedded verbatim in panic-location strings (/home/vagrant vs /home/
+# runner). Fixed with a matching RUSTFLAGS=--remap-path-prefix on both
+# this recipe and release.yml (see init: below and bosun-midi-captain's
+# release.yml) - confirmed via grep that BOTH sides now embed the same
+# /build placeholder and zero occurrences of either real path.
+#
+# RESOLVED (2026-08-16): with that in place, a full byte-level `cmp` (not
+# just size comparison) found only 86 bytes differed across an entire
+# ~4-6MB .so, in exactly two 43-byte clusters (the width of a base64
+# SHA256 hash) - Tauri's embedded CSP integrity hashes for specific
+# frontend assets, meaning `npm run build` itself produced different
+# output, not a compilation artifact. Root cause: this recipe apt-get
+# installed Debian trixie's default nodejs (20.19.2), while release.yml's
+# actions/setup-node@v6 pins major "22" (resolved to 22.23.2 for the run
+# this MR verifies against - confirmed via that run's own log). Fixed by
+# installing that exact Node build directly from nodejs.org instead of
+# apt's default (see sudo:/init: below) - not yet verified against a
+# real pipeline as of this note.
 
 Categories:
   - Multimedia
@@ -330,7 +352,7 @@ Builds:
     subdir: editor/src-tauri/gen/android
     sudo:
       - apt-get update
-      - apt-get install -y nodejs npm build-essential
+      - apt-get install -y build-essential
       # build-essential (gcc/cc): Rust's build scripts and proc-macros
       # (proc-macro2, quote, serde_core, ...) compile for the HOST, not
       # the aarch64-linux-android target, and need a native C toolchain
@@ -356,7 +378,28 @@ Builds:
       # there - it's root) so the file ownership and location both match
       # what init: expects.
       - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant sh -s -- -y
-      - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup
+      # RESOLVED (2026-08-16): last reproducibility gap, found via a
+      # byte-level cmp of this recipe's .so output against the GitHub
+      # reference once NDK/API and RUSTFLAGS remapping were both already
+      # matched - only 86 bytes differed in the ENTIRE ~4-6MB file per
+      # architecture, clustered into exactly two 43-byte regions (the
+      # exact width of a base64 SHA256 hash). Not compiler/linker noise -
+      # a real content difference: these are Tauri's embedded CSP
+      # `sha256-...` integrity hashes for specific bundled frontend
+      # assets, meaning `npm run build`'s actual OUTPUT differed between
+      # the two pipelines, not just how it got compiled into the .so.
+      # Root cause: apt-get installs Debian trixie's default nodejs
+      # package (20.19.2 - confirmed live in this pipeline's own apt
+      # log), while release.yml's actions/setup-node@v6 pins major
+      # version "22", which resolved to 22.23.2 for the run this MR
+      # verifies against (confirmed via that run's own setup-node log).
+      # Different Node major versions can produce different Vite/esbuild
+      # bundler output from identical source. Installing the exact same
+      # 22.23.2 build directly from nodejs.org (avoiding NodeSource's
+      # curl-pipe-to-bash installer and its extra apt repo) instead of
+      # relying on whatever Debian's default happens to be.
+      - curl -fL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz && mkdir -p /home/vagrant/node-v22.23.2-linux-x64 && tar -xJf /tmp/node.tar.xz -C /home/vagrant/node-v22.23.2-linux-x64 --strip-components=1 && rm /tmp/node.tar.xz
+      - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup /home/vagrant/node-v22.23.2-linux-x64
       # All four targets, not just aarch64 - see the RESOLVED note below
       # (pipeline for commit 4bcb38d3): the GitHub release bosun.apk that
       # Binaries: verifies against is a UNIVERSAL (all-ABI) APK, built via
@@ -391,7 +434,13 @@ Builds:
       # $HOME/.cargo/bin by rustup, need the same explicit-path treatment
       # applied to rustup itself above, or this will hit the identical
       # "command not found".
-      - export PATH="$HOME/.cargo/bin:$PATH"
+      # Node 22.23.2 (installed by sudo: above, matching release.yml's
+      # actions/setup-node@v6 exactly) ahead of cargo's own PATH entry -
+      # otherwise `npm ci`/`npm run build` below would silently fall back
+      # to nothing (this recipe no longer apt-get installs nodejs/npm at
+      # all, see sudo: above) or, if some other npm existed, the wrong
+      # version.
+      - export PATH="/home/vagrant/node-v22.23.2-linux-x64/bin:$HOME/.cargo/bin:$PATH"
       # Last reproducibility gap (2026-08-16, after matching NDK/API):
       # readelf structure now matches the reference exactly, and .so size
       # deltas dropped from ~600-800KB to 32-1488 bytes per architecture -
