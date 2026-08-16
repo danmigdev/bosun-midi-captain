@@ -129,7 +129,14 @@ Builds:
       # Pin to whatever Rust toolchain this repo's rust-toolchain (if
       # added) or CI declares - unverified, needs a real value.
       - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      - rustup target add aarch64-linux-android
+      # Each `sudo:` line runs as its own independent invocation, not a
+      # continued shell session - rustup-init's own PATH update (adding
+      # $HOME/.cargo/bin) doesn't carry over to this next line. Confirmed
+      # live 2026-08-16, pipeline #2763727525: rustup installed cleanly
+      # ("Rust is installed now. Great!") but the very next line failed
+      # with "rustup: command not found". Reference the full path instead
+      # of relying on PATH.
+      - $HOME/.cargo/bin/rustup target add aarch64-linux-android
     init:
       # Frontend build + Rust cross-compile happen here since F-Droid's
       # standard `gradle:` build type only drives the Gradle half - see
@@ -153,6 +160,11 @@ Builds:
       # ...21-clang.cmd; here it's the Linux NDK's linux-x86_64 toolchain,
       # no .cmd extension) - without it cargo has no linker for the
       # aarch64-linux-android target and the build fails at link time.
+      # PATH: this init: block is its own separate shell context from the
+      # sudo: block above - cargo/rustc, installed to $HOME/.cargo/bin by
+      # rustup, need the same explicit-path treatment applied to rustup
+      # itself above, or this will hit the identical "command not found".
+      - export PATH="$HOME/.cargo/bin:$PATH"
       - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
       - cd ../../.. && npm ci && npm run build
       - cd src-tauri && cargo build --release --target aarch64-linux-android && cd ..
