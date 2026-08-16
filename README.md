@@ -388,4 +388,8 @@ dist/                     packaged portable builds
 
 ---
 
+## License
+
+[GPL-3.0-or-later](LICENSE).
+
 Credits: hardware pin maps and protocol groundwork were informed by [PySwitch](https://github.com/Tunetown/PySwitch). Bosun runs on [CircuitPython](https://circuitpython.org/) and [Tauri](https://tauri.app/).
