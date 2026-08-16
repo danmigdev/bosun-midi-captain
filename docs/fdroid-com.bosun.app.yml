@@ -17,6 +17,23 @@
 # account and ongoing engagement with the F-Droid community. This file is
 # a starting point for that submission, not a finished one.
 #
+# PRIOR ATTEMPT (2026-07-24, MR !43795, still open, found 2026-08-16 while
+# starting this session's submission - almost duplicated it blind): dropped
+# Builds: entirely in favor of Binaries:-only verification ("Tauri/Rust
+# build not supported in F-Droid env"), which schema-validates as invalid -
+# 'Builds' is a required property even alongside Binaries: (that's what
+# Binaries: verifies AGAINST - F-Droid still builds from source and diffs
+# the result). Also had License: MIT (stale - the repo declared
+# GPL-3.0-or-later this session) and a non-templated Binaries: URL
+# (schema requires a %v or %c placeholder so future releases resolve
+# automatically, not a URL hardcoded to v0.5.0). This draft restores a
+# real Builds: entry (below) and fixes both of those, keeping the same
+# AllowedAPKSigningKeys - independently re-derived this session from a
+# fresh v0.6.0 release APK via `apksigner verify --print-certs` and it's
+# identical, confirming the signing key itself hasn't changed across
+# releases (only a CI build-tools/tag_name bug briefly broke publishing
+# a properly signed artifact - fixed separately in the main repo).
+#
 # TESTED LOCALLY (2026-08-16) against a real fdroidserver + F-Droid
 # buildserver image (registry.gitlab.com/fdroid/fdroidserver:buildserver,
 # which is the actual Debian 13 environment F-Droid's CI builds on -
@@ -77,6 +94,19 @@ Description: |
 RepoType: git
 Repo: https://github.com/danmigdev/bosun-midi-captain
 
+# %v is required by F-Droid's schema (a bare hardcoded version in the old
+# draft's URL failed schema validation) - it's substituted with each new
+# release's version as CurrentVersion advances, so this doesn't need
+# manual updates going forward. F-Droid builds from source per Builds:
+# below and diffs the result against whatever this resolves to, as the
+# reproducibility check.
+Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v%v/bosun.apk
+
+# SHA-256 of the release signing certificate - re-derived 2026-08-16 from
+# a fresh v0.6.0 APK via `apksigner verify --print-certs`, matches the
+# prior MR's value exactly (same signing key across all releases).
+AllowedAPKSigningKeys: 53fd21db1e975195c7f6faf45f9c3f3a3fdcb310738762a61397be175e136e93
+
 Builds:
   - versionName: 0.6.0
     versionCode: 29
@@ -127,7 +157,7 @@ Builds:
       - yes
     output: app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk
 
-AutoUpdateMode: None
+AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 0.6.0
 CurrentVersionCode: 29
