@@ -392,6 +392,20 @@ Builds:
       # applied to rustup itself above, or this will hit the identical
       # "command not found".
       - export PATH="$HOME/.cargo/bin:$PATH"
+      # Last reproducibility gap (2026-08-16, after matching NDK/API):
+      # readelf structure now matches the reference exactly, and .so size
+      # deltas dropped from ~600-800KB to 32-1488 bytes per architecture -
+      # all that's left is rustc embedding the builder's home directory
+      # verbatim in every third-party crate's panic-location strings
+      # ($HOME/.cargo/registry/... - 380 occurrences per .so here). F-Droid's
+      # buildserver runs as vagrant (/home/vagrant); GitHub Actions runs as
+      # runner (/home/runner) - different string lengths, hence non-zero
+      # byte diffs even with identical source/toolchain. --remap-path-prefix
+      # is rustc's standard fix for exactly this, but it only produces
+      # byte-identical output if BOTH sides remap to the SAME placeholder -
+      # bosun-midi-captain's release.yml sets the identical RUSTFLAGS value
+      # for its own Android job, remapping /home/runner instead.
+      - export RUSTFLAGS="--remap-path-prefix=$HOME=/build"
       - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang
       # Same NDK clang-wrapper convention as the aarch64 linker above, one
       # per additional target needed for the universal APK (see sudo: and

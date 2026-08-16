@@ -154,6 +154,21 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    env:
+      # Reproducible-builds match for the F-Droid submission (docs/fdroid-
+      # com.bosun.app.yml): rustc embeds the builder's home directory
+      # verbatim in every third-party crate's panic-location strings.
+      # ubuntu-latest runs as $HOME=/home/runner; F-Droid's buildserver
+      # runs as /home/vagrant - different string lengths meant the
+      # compiled .so files never matched byte-for-byte even with
+      # identical source, toolchain, and NDK. Remapping both sides to the
+      # same placeholder (F-Droid's recipe sets the identical RUSTFLAGS,
+      # remapping ITS OWN $HOME instead) makes them line up. Confirmed
+      # 2026-08-16: before this, per-arch .so size deltas were already
+      # down to 32-1488 bytes (from ~600-800KB before also matching NDK/
+      # API level) - consistent with this being the last remaining cause,
+      # not a guess.
+      RUSTFLAGS: --remap-path-prefix=/home/runner=/build
     steps:
       - uses: actions/checkout@v7
         with:
