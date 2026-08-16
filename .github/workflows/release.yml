@@ -229,6 +229,14 @@ jobs:
           alias: ${{ secrets.KEYSTORE_ALIAS }}
           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+          # r0adkll/sign-android-release defaults to build-tools 29.0.3 for
+          # zipalign, which isn't what "Setup Android SDK" above actually
+          # installs - every release through v0.6.0 silently published an
+          # UNSIGNED bosun.apk as a result ("Couldn't find the Android
+          # build tools @ .../build-tools/29.0.3", masked by this step's
+          # own continue-on-error, so the workflow still reported success).
+          # Match the version actually installed above.
+          buildToolsVersion: "34.0.0"
         continue-on-error: true
 
       - name: Prepare APK for release
