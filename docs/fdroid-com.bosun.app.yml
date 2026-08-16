@@ -74,11 +74,24 @@ Builds:
       # Frontend build + Rust cross-compile happen here since F-Droid's
       # standard `gradle:` build type only drives the Gradle half - see
       # build-android.ps1 for the equivalent Windows/local version of
-      # this same three-step sequence.
-      - cd $$bosun-midi-captain$$/editor && npm ci && npm run build
-      - cd $$bosun-midi-captain$$/editor/src-tauri && cargo build --release --target aarch64-linux-android
-      - mkdir -p $$bosun-midi-captain$$/editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
-      - cp $$bosun-midi-captain$$/editor/src-tauri/target/aarch64-linux-android/release/libbosun_editor_lib.so $$bosun-midi-captain$$/editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
+      # this same three-step sequence. Paths are relative, walking up
+      # from `subdir` (editor/src-tauri/gen/android) - NOT the $$VAR$$
+      # syntax, which is reserved for F-Droid's own substitutions
+      # ($$SDK$$/$$NDK$$/$$VERSION$$); an earlier draft invented
+      # $$bosun-midi-captain$$ for "repo root", which isn't a real
+      # F-Droid feature and got mangled by bash's own $$ (PID) variable
+      # instead (confirmed via a local `fdroid build -t` test,
+      # 2026-08-16 - see that test's other finding below: `sudo:` steps
+      # don't run in local/non-server mode, so the Rust toolchain/NDK
+      # question this recipe exists to answer is still unverified past
+      # this point without manually pre-installing them in the test
+      # environment). All four lines run as ONE joined shell (cwd
+      # carries over), so each cd is relative to wherever the previous
+      # line left off.
+      - cd ../../.. && npm ci && npm run build
+      - cd src-tauri && cargo build --release --target aarch64-linux-android && cd ..
+      - mkdir -p src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+      - cp src-tauri/target/aarch64-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
     gradle:
       - yes
     output: app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk
