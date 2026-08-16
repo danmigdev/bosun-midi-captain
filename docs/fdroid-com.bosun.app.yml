@@ -126,17 +126,24 @@ Builds:
     sudo:
       - apt-get update
       - apt-get install -y nodejs npm
-      # Pin to whatever Rust toolchain this repo's rust-toolchain (if
-      # added) or CI declares - unverified, needs a real value.
-      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      # Each `sudo:` line runs as its own independent invocation, not a
-      # continued shell session - rustup-init's own PATH update (adding
-      # $HOME/.cargo/bin) doesn't carry over to this next line. Confirmed
-      # live 2026-08-16, pipeline #2763727525: rustup installed cleanly
-      # ("Rust is installed now. Great!") but the very next line failed
-      # with "rustup: command not found". Reference the full path instead
-      # of relying on PATH.
-      - $HOME/.cargo/bin/rustup target add aarch64-linux-android
+      # `sudo:` lines run via a bare `sudo bash -c "...; ...; ..."` with
+      # NO --user, so this whole block runs as ROOT, not vagrant -
+      # rustup-init installs to $HOME/.cargo, and here $HOME is /root.
+      # But the LATER `init:` block runs as vagrant (HOME=/home/vagrant -
+      # confirmed via the fdroid build wrapper's own env), a completely
+      # different context, so cargo installed under /root/.cargo is
+      # invisible to it regardless of PATH. Confirmed live 2026-08-16,
+      # pipeline #2763738704: rustup installed fine, `rustup target add`
+      # (fixed to reference $HOME/.cargo/bin explicitly) also succeeded,
+      # but init:'s `cargo build` still hit "command not found" - because
+      # the two blocks' $HOME point at different directories entirely,
+      # not because of a PATH-vs-no-PATH issue like the previous fix.
+      # Explicitly install under vagrant's home (root can still write
+      # there - it's root) so the file ownership and location both match
+      # what init: expects.
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant sh -s -- -y
+      - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup
+      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android
     init:
       # Frontend build + Rust cross-compile happen here since F-Droid's
       # standard `gradle:` build type only drives the Gradle half - see
