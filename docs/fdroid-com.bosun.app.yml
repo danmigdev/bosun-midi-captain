@@ -117,7 +117,12 @@ Builds:
     # (editor/src-tauri, $ndkBin). Found via a local test (2026-08-16):
     # the buildserver image's ndk/ directory ships EMPTY - this field is
     # what actually provisions it, not something baked into the image.
-    ndk: "30.0.15729638"
+    # 30.0.15729638 (what build-android.ps1 uses locally on Windows) isn't
+    # available in F-Droid's NDK repo - confirmed live 2026-08-16, pipeline
+    # #2763718402: "Failed to find package 'ndk;30.0.15729638' - Did you
+    # mean 'ndk;30.0.14904198'?" - same NDK release line, different exact
+    # build. Using what F-Droid actually has.
+    ndk: "30.0.14904198"
     sudo:
       - apt-get update
       - apt-get install -y nodejs npm
