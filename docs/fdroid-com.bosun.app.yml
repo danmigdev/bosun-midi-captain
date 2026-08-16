@@ -51,28 +51,26 @@
 #     requirement build-android.ps1 sets locally via
 #     CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER) - added the export.
 #
-# STILL UNVERIFIED (local test mode skips `sudo:` entirely - "these
-# commands were skipped because fdroid build is not running on a
-# dedicated build server" - so none of this can be confirmed without an
-# actual F-Droid buildserver submission):
-#   - Whether node/npm/rustup actually install and produce a working
-#     aarch64-linux-android target inside F-Droid's real sandboxed
-#     buildserver (network/permissions may differ from this local test).
-#   - Tauri Android apps have a documented history of F-Droid build
-#     failures because F-Droid's build server strips the project's own
-#     `gradlew` (untrusted binary) and substitutes its own, and older
-#     Tauri/cargo-mobile2 tooling hard-depended on the bundled one
-#     (tauri-apps/tauri#6367, closed via tauri-apps/cargo-mobile2#111).
-#     Bosun's own build-android.ps1 already avoids `tauri android build`'s
-#     orchestration - it calls cargo and gradlew directly - which should
-#     help, but this is unverified against F-Droid's actual environment.
-#   - Cargo needs to fetch crate dependencies from crates.io during the
-#     Rust build step. F-Droid's build servers restrict network access
-#     during builds for reproducibility; whether crates.io fetches are
-#     permitted, or whether vendoring all Cargo dependencies into the repo
-#     is required instead, needs confirming against current F-Droid docs/
-#     policy - this draft assumes network access is fine and will need
-#     correction if not.
+# RESOLVED VIA REAL PIPELINE RUNS (2026-08-16, MR !43795, iterating
+# against the actual F-Droid buildserver - not local test mode, which
+# skips `sudo:` entirely and couldn't have caught any of these):
+#   - crates.io network access during the build: WORKS. Pipeline
+#     #2763743410 resolved and downloaded every one of Bosun's ~150
+#     transitive crate dependencies successfully before hitting the
+#     (unrelated, now-fixed) missing-C-compiler error below. No
+#     vendoring needed.
+#   - node/npm install, rustup install, and the npm/vite frontend build
+#     all work as-is once the ndk:/PATH/HOME issues above were fixed.
+#   - The documented Tauri-vs-F-Droid gradlew-stripping incompatibility
+#     (tauri-apps/tauri#6367) has NOT bitten this recipe, because it never
+#     calls `tauri android build` in the first place - cargo and gradlew
+#     are invoked directly (see init:/gradle: below), same as
+#     build-android.ps1 does locally. Confirmed by getting past the whole
+#     Rust build step without hitting it.
+#
+# STILL UNVERIFIED: whether `gradle:` (gradlew assembleRelease) itself
+# succeeds once cargo actually produces the .so - not yet reached by any
+# pipeline run as of the build-essential fix below.
 
 Categories:
   - Multimedia
@@ -125,7 +123,16 @@ Builds:
     ndk: "30.0.14904198"
     sudo:
       - apt-get update
-      - apt-get install -y nodejs npm
+      - apt-get install -y nodejs npm build-essential
+      # build-essential (gcc/cc): Rust's build scripts and proc-macros
+      # (proc-macro2, quote, serde_core, ...) compile for the HOST, not
+      # the aarch64-linux-android target, and need a native C toolchain
+      # regardless of cross-compilation - confirmed live 2026-08-16,
+      # pipeline #2763743410: cargo resolved and downloaded every crate
+      # successfully (confirms crates.io network access works fine on
+      # F-Droid's infra) and started compiling before hitting
+      # "error: linker `cc` not found - No such file or directory".
+      #
       # `sudo:` lines run via a bare `sudo bash -c "...; ...; ..."` with
       # NO --user, so this whole block runs as ROOT, not vagrant -
       # rustup-init installs to $HOME/.cargo, and here $HOME is /root.
