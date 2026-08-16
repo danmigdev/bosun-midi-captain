@@ -226,6 +226,43 @@
 # further changes) and semantically identical to the pre-rewrite content
 # (parsed both with yaml.safe_load and compared equal) before adopting
 # its exact line-wrapping as this file's new formatting baseline.
+#
+# RESOLVED (2026-08-16): with every recipe-side issue above fixed, the
+# `fdroid build` job's reproducibility diff narrowed to ONLY the reference
+# GitHub release's AndroidManifest.xml (versionCode=2, should be 29) and
+# the four native .so files. Root-caused the manifest bug OUTSIDE this
+# recipe entirely: release.yml's Android job regenerates gen/android/app/
+# tauri.properties (gitignored) from tauri.conf.json's own stale
+# bundle.android.versionCode: 2 field on every `tauri android init`/
+# `build` invocation, including inside the release build step itself, so
+# an earlier attempt to patch tauri.properties downstream (however well
+# timed) never survived. Fixed by patching tauri.conf.json's own field
+# directly in CI instead (bosun-midi-captain commits 8b7488c, then
+# 945d4e8 for the version that actually stuck) - confirmed by decoding
+# both AndroidManifest.xml files with androguard: identical except for
+# THIS field before the fix, byte-identical after. GitHub's v0.6.0
+# release was manually re-run twice to pick up each fix and confirm.
+#
+# STILL UNRESOLVED: the four lib/*.so files still differ byte-for-byte
+# from the reference. Investigated directly (downloaded both this
+# recipe's job artifact and the reference bosun.apk, unzipped both):
+# ruled out toolchain version drift (embedded rustc commit hash AND
+# clang version are identical in both), dependency version drift (all 66
+# crates with embedded panic-location paths resolve to identical
+# versions on both sides), and rustc's own stdlib path remapping (both
+# embed the identical /rustc/<hash>/ virtual path, as expected - this is
+# rustc default behavior, not environment-dependent). Found ONE genuine,
+# but insufficient, difference: third-party crate paths embed the
+# builder's home directory verbatim (/home/vagrant/.cargo/registry/...
+# here vs /home/runner/.cargo/registry/... in the GitHub Actions-built
+# reference - 380 occurrences, but only a 1-byte length difference each,
+# nowhere near enough to explain the several-hundred-KB total size gap
+# per architecture). The dominant remaining cause is still unidentified -
+# next step would need actual ELF tooling (readelf/objdump, not available
+# in this session's environment) to compare section-by-section rather
+# than whole-file byte diffs. The standard reproducible-builds fix for
+# embedded-path non-determinism is rustc's --remap-path-prefix, worth
+# trying once the dominant cause is confirmed rather than guessed at.
 
 Categories:
   - Multimedia
