@@ -1,5 +1,29 @@
 # Android Stage view / serial I/O silent-stall investigation
 
+## Follow-up 3 (2026-08-16): CONTEXT push throttle felt "a beat behind"
+
+After the GET_PATCH fix above, live feedback: correctness was fine but
+Stage still "feels slightly slow" generally - title, block indicators, all
+of it. Switch labels (GET_PATCH-driven) were already fast; the remaining
+culprit is `_push_context`'s throttle, which gates the CONTEXT push (title
+via `kemper_rig_name`, block on/off indicators, bpm, tuner) to once per
+second. Lowered from 1000ms to 200ms (app.py) - `display_context` only has
+on the order of 10-20 keys, so the fingerprint computation this throttle
+exists to bound stays cheap even at 5x the rate. Verified: clean boot, PING
+responds, offline test suites green (41/41, 17/17). Firmware bumped to
+0.5.38.
+
+## Final live verification (2026-08-16)
+
+Cables moved back to the phone after the `3127069` fixes below. Cleared
+logcat, ran a fresh capture, and had the user press rig 3 repeatedly mixed
+with other rigs, on Stage view - title, block indicators, and switch
+labels (including switch 2 on rig 3, the exact patch that reproduced the
+GET_PATCH bug) all updated correctly every time. Captured log (632 lines)
+has zero stall/reconnect/EXC/fatal indicators across the whole session.
+This closes out the Android Stage investigation end to end, verified on
+real hardware in the actual deployment configuration (phone + OTG hub).
+
 ## Follow-up 2 (2026-08-16): GET_PATCH silently gave up entirely on a real patch
 
 Live phone testing after the GET_MANIFEST/GET_GLOBAL fix below still showed

@@ -1147,18 +1147,25 @@ class Captain:
 
     def _push_context(self, now_ms):
         """Push the current display_context over the data port for the editor's
-        Stage Mode. Throttled to ~1 Hz and only when state actually changed.
+        Stage Mode. Throttled to ~5 Hz and only when state actually changed.
 
         Called unconditionally from every main-loop tick (100+ times/s), so
         the throttle check MUST run before any per-key work: this used to
         build the "cheap" fingerprint (str() + sort over every context
-        entry) first and check the 1 s gate second, meaning the O(n log n)
+        entry) first and check the gate second, meaning the O(n log n)
         fingerprint ran on every single tick regardless of whether a push
         was even due - real, always-on CPU tax that competed with the same
         loop's USB-MIDI/data-CDC servicing for time (2026-08-14: reported as
         Stage updates and Kemper-block LEDs lagging well behind real time).
+        The throttle INTERVAL itself was originally 1000 ms, chosen for
+        "reasonable enough" rather than performance reasons - display_context
+        only has on the order of 10-20 keys (bank/slot/patch_name/kemper_*),
+        so the sort is genuinely cheap even at 5x the rate; lowered to
+        200 ms (2026-08-16, live feedback: title/block-indicator updates
+        still felt "a beat behind" after the GET_PATCH/GET_MANIFEST fixes,
+        which only sped up the unthrottled switch-label path).
 
-        The 1 Hz throttle (_last_context_check_ms) advances unconditionally
+        The throttle (_last_context_check_ms) advances unconditionally
         on every check, regardless of outcome - it exists purely to bound
         how often this runs per the perf note above. The separate
         "delivered" bookkeeping (_last_context_fp) is a DIFFERENT gate: it
@@ -1179,7 +1186,7 @@ class Captain:
         See the comment further below on why the JSON encode is dry-run
         here before calling protocol._send(), instead of just calling it
         and trusting it worked."""
-        if now_ms - getattr(self, "_last_context_check_ms", 0) < 1000:
+        if now_ms - getattr(self, "_last_context_check_ms", 0) < 200:
             return
         self._last_context_check_ms = now_ms
         port = self.protocol.port
