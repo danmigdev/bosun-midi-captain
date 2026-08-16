@@ -243,26 +243,43 @@
 # THIS field before the fix, byte-identical after. GitHub's v0.6.0
 # release was manually re-run twice to pick up each fix and confirm.
 #
-# STILL UNRESOLVED: the four lib/*.so files still differ byte-for-byte
-# from the reference. Investigated directly (downloaded both this
-# recipe's job artifact and the reference bosun.apk, unzipped both):
-# ruled out toolchain version drift (embedded rustc commit hash AND
-# clang version are identical in both), dependency version drift (all 66
-# crates with embedded panic-location paths resolve to identical
-# versions on both sides), and rustc's own stdlib path remapping (both
-# embed the identical /rustc/<hash>/ virtual path, as expected - this is
-# rustc default behavior, not environment-dependent). Found ONE genuine,
-# but insufficient, difference: third-party crate paths embed the
-# builder's home directory verbatim (/home/vagrant/.cargo/registry/...
-# here vs /home/runner/.cargo/registry/... in the GitHub Actions-built
-# reference - 380 occurrences, but only a 1-byte length difference each,
-# nowhere near enough to explain the several-hundred-KB total size gap
-# per architecture). The dominant remaining cause is still unidentified -
-# next step would need actual ELF tooling (readelf/objdump, not available
-# in this session's environment) to compare section-by-section rather
-# than whole-file byte diffs. The standard reproducible-builds fix for
-# embedded-path non-determinism is rustc's --remap-path-prefix, worth
-# trying once the dominant cause is confirmed rather than guessed at.
+# RESOLVED (2026-08-16): root-caused the four lib/*.so differences via
+# WSL's readelf (not available in this session's own environment
+# directly, but reachable via `wsl -e` from it) on both this recipe's job
+# artifact and the reference bosun.apk. Already ruled out toolchain
+# version drift (embedded rustc commit hash AND clang version identical
+# in both), dependency version drift (all 66 crates with embedded panic-
+# location paths resolve to identical versions on both sides), rustc's
+# own stdlib path remapping (both embed the identical /rustc/<hash>/
+# virtual path - default rustc behavior, not environment-dependent), and
+# found the builder's home directory embedded verbatim in third-party
+# crate paths (/home/vagrant/... here vs /home/runner/... in the
+# reference) but that's only a 1-byte-per-occurrence difference, nowhere
+# near enough to explain the gap on its own.
+#
+# `readelf -S` found the real, structural cause: this recipe's .so has a
+# legacy .hash (SysV symbol hash) section and no .relr.dyn; the
+# reference has .relr.dyn (compact relative-relocation packing, gated on
+# target API level) and no .hash - genuinely different linker output
+# shape, not byte noise. `readelf -n` confirmed why: the .note.android.
+# ident section embeds the exact NDK build used to link each one. This
+# recipe's: API 21, NDK "r30-beta1" build 14904198 (matching the ndk:
+# field below, before this fix). The reference's: API 29, NDK "r29"
+# build 14206865 - a different NDK MAJOR version, not just a different
+# point release. Root cause of THAT: GitHub Actions' ubuntu-latest runner
+# ships NDK 29.0.14206865 baked into its image, and the real Tauri CLI's
+# Android build tooling auto-detects and prefers it over whatever
+# release.yml's own "Setup Android SDK" step explicitly installs
+# (ndk;25.2.9519653) - confirmed via that job's own log line, "Info Using
+# installed NDK: .../ndk/29.0.14206865", right after downloading a
+# completely different one. That's a separate, pre-existing bug in
+# release.yml's own NDK pinning (not something this recipe can fix -
+# flagged to the user, not touched). API 29 isn't arbitrary either: it's
+# tauri.conf.json's own android.minSdkVersion, which the real Tauri CLI
+# reads to pick the clang wrapper's API suffix - this recipe's init: had
+# hardcoded 21 instead, an old build-android.ps1 convention unrelated to
+# minSdkVersion. Fixed below: ndk: field and every CARGO_TARGET_*_LINKER
+# now match the reference's actual NDK build and API level exactly.
 
 Categories:
   - Multimedia
@@ -365,27 +382,26 @@ Builds:
       # this point without manually pre-installing them in the test
       # environment). All four lines run as ONE joined shell (cwd
       # carries over), so each cd is relative to wherever the previous
-      # line left off. CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER matches
-      # what build-android.ps1 sets for the same cross-compile locally
-      # (there, $$NDK$$ is the Windows NDK dir + ...\windows-x86_64\bin\
-      # ...21-clang.cmd; here it's the Linux NDK's linux-x86_64 toolchain,
-      # no .cmd extension) - without it cargo has no linker for the
-      # aarch64-linux-android target and the build fails at link time.
-      # PATH: this init: block is its own separate shell context from the
-      # sudo: block above - cargo/rustc, installed to $HOME/.cargo/bin by
-      # rustup, need the same explicit-path treatment applied to rustup
-      # itself above, or this will hit the identical "command not found".
+      # line left off. CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER's API
+      # level and NDK version (below, ndk: field) both changed from what
+      # build-android.ps1 used to use (API 21, NDK 30.x) to API 29/NDK
+      # 29.0.14206865 - see the RESOLVED reproducibility note near output:
+      # below for why. PATH: this init: block is its own separate shell
+      # context from the sudo: block above - cargo/rustc, installed to
+      # $HOME/.cargo/bin by rustup, need the same explicit-path treatment
+      # applied to rustup itself above, or this will hit the identical
+      # "command not found".
       - export PATH="$HOME/.cargo/bin:$PATH"
-      - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+      - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang
       # Same NDK clang-wrapper convention as the aarch64 linker above, one
       # per additional target needed for the universal APK (see sudo: and
       # the RESOLVED note near output: below). Note the armv7 wrapper is
       # named armv7a (with the trailing "a"), NOT armv7 - that's the NDK's
       # own naming, distinct from the armv7-linux-androideabi Rust target
       # triple/CARGO_TARGET_* var name.
-      - export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
-      - export CARGO_TARGET_I686_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
-      - export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
+      - export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi29-clang
+      - export CARGO_TARGET_I686_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android29-clang
+      - export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android29-clang
       # Makes tauri-build's build.rs (invoked from bosun-editor's own
       # build.rs during the cargo build below) write gen/android/
       # tauri.settings.gradle, app/tauri.build.gradle.kts, and
@@ -547,16 +563,45 @@ Builds:
       - editor/src-tauri/target
       - editor/node_modules
     # Provisions $$NDK$$ (and sets ANDROID_NDK/ANDROID_NDK_HOME) before
-    # init: runs - matches the version build-android.ps1 pins locally
-    # (editor/src-tauri, $ndkBin). Found via a local test (2026-08-16):
-    # the buildserver image's ndk/ directory ships EMPTY - this field is
-    # what actually provisions it, not something baked into the image.
-    # 30.0.15729638 (what build-android.ps1 uses locally on Windows) isn't
-    # available in F-Droid's NDK repo - confirmed live 2026-08-16, pipeline
-    # #2763718402: "Failed to find package 'ndk;30.0.15729638' - Did you
-    # mean 'ndk;30.0.14904198'?" - same NDK release line, different exact
-    # build. Using what F-Droid actually has.
-    ndk: "30.0.14904198"
+    # init: runs - the buildserver image's ndk/ directory ships EMPTY,
+    # confirmed via a local test (2026-08-16) - this field is what
+    # actually provisions it, not something baked into the image.
+    #
+    # Originally pinned to 30.0.14904198 (what build-android.ps1 used
+    # locally, and the closest match F-Droid's own NDK repo offered when
+    # 30.0.15729638 - build-android.ps1's exact original version - turned
+    # out unavailable there: pipeline #2763718402, "Failed to find
+    # package 'ndk;30.0.15729638' - Did you mean 'ndk;30.0.14904198'?").
+    #
+    # CHANGED (2026-08-16) to 29.0.14206865 for reproducibility, not
+    # availability: with every other diff resolved, `fdroid build`'s
+    # reproducibility check still failed on all four lib/*.so files
+    # differing byte-for-byte from the GitHub reference. Investigated with
+    # WSL's readelf (not available in this session's own environment) on
+    # both this recipe's job artifact and the reference bosun.apk: ours
+    # has a legacy .hash section and no .relr.dyn; the reference has
+    # .relr.dyn (compact relative relocations, API-level-gated) and no
+    # .hash - a real structural linker difference, not just non-
+    # deterministic byte noise. readelf -n's .note.android.ident section
+    # embeds the exact NDK build directly: ours said API 21 / "r30-beta1"
+    # / build 14904198 (matching the ndk: field below, before this fix);
+    # the reference said API 29 / "r29" / build 14206865 - a completely
+    # different NDK, not just a different point release. Root cause: the
+    # GitHub Actions ubuntu-latest runner ships a NDK 29.0.14206865
+    # baked into the image at /usr/local/lib/android/sdk/ndk/, and the
+    # real Tauri CLI's Android build tooling auto-detects and prefers it
+    # over whatever release.yml's own "Setup Android SDK" step explicitly
+    # installs (ndk;25.2.9519653, confirmed via that job's own log:
+    # "Info Using installed NDK: .../ndk/29.0.14206865", a completely
+    # different NDK than the one it just downloaded) - a separate,
+    # pre-existing bug in release.yml's own NDK pinning, not something
+    # this recipe can fix. API 29 also isn't arbitrary: it's tauri.conf.
+    # json's own android.minSdkVersion, which the real Tauri CLI reads to
+    # pick the clang wrapper's API suffix - this recipe's init: hardcoded
+    # 21 instead (matching build-android.ps1's old convention, unrelated
+    # to minSdkVersion). Changed both the ndk: field and every
+    # CARGO_TARGET_*_LINKER's API suffix (21 -> 29) above to match.
+    ndk: "29.0.14206865"
 
 # RESOLVED (2026-08-16, pipeline for commit c4eddb09): the checkupdates
 # CI job failed with "Couldn't find any version information" - checked
