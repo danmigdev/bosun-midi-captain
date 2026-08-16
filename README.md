@@ -78,6 +78,7 @@ The result is the two halves of this repository: the `firmware/` that runs on th
 
 - Windows, macOS or Linux. Every GitHub release attaches a build for all three: a Windows portable x64 ZIP, a macOS `.dmg`, and a Linux AppImage. WebView2 ships with Windows 11; macOS and Linux use the system WebView.
 - Nothing to install for end users: the Windows build is an extract-and-run ZIP, and the macOS/Linux builds are a standard `.dmg` / AppImage.
+- Android is also supported (every release attaches `bosun.apk`): connect the pedal directly over USB-OTG, no computer in the loop. Useful for running [Stage](#stage) on a tablet at a gig. It talks to the pedal through a custom raw-USB driver rather than a standard serial/MIDI API, working around reliability issues in Android's own USB MIDI and serial stacks.
 
 ## Quick start
 
