@@ -52,3 +52,15 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Vendored fix for reproducible-build support (F-Droid submission,
+# docs/fdroid-com.bosun.app.yml): upstream tauri-codegen 2.6.2 walks the
+# frontend dist/ directory with WalkDir's default (unsorted) order to
+# collect per-asset CSP hashes into plain Vecs, and separately iterates a
+# HashMap for inline-script hashes - both filesystem/hasher-seed
+# dependent, so the CSP hash list's byte order in the compiled binary
+# could differ between otherwise-identical builds on different machines.
+# Patched to sort both by name/key. See vendor/tauri-codegen-2.6.2's
+# embedded_assets.rs for the exact diff against the upstream crate.
+[patch.crates-io]
+tauri-codegen = { path = "vendor/tauri-codegen-2.6.2" }
