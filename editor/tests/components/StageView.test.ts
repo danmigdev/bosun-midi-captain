@@ -49,6 +49,9 @@ beforeEach(() => {
     if (cmd === "drain_inbox") return Promise.resolve(inboxLines);
     return Promise.resolve(undefined);
   });
+  // Stage theme persists to localStorage (see stage-theme.ts) - clear it so
+  // one test's edits can't bleed into the next.
+  localStorage.clear();
 });
 
 /** Feed a firmware message through the mocked doorbell into the protocol
@@ -638,6 +641,56 @@ describe("StageView", () => {
       renderStage({ onExit });
       fireEvent.click(screen.getByRole("button", { name: "Exit Stage" }));
       expect(onExit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("stage appearance panel", () => {
+    it("is closed by default and opens on the gear button", () => {
+      const { container } = renderStage();
+      expect(container.querySelector(".theme-panel")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+      expect(container.querySelector(".theme-panel")).not.toBeNull();
+    });
+
+    it("closes via its own close button, not onExit", () => {
+      const onExit = vi.fn();
+      const { container } = renderStage({ onExit });
+      fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close appearance panel" }));
+      expect(container.querySelector(".theme-panel")).toBeNull();
+      expect(onExit).not.toHaveBeenCalled();
+    });
+
+    it("applies an edited section color as a CSS var on the stage root, and persists it", () => {
+      const { container } = renderStage();
+      fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+
+      const colorInput = container.querySelector(
+        'input[title="Rig name color"]',
+      ) as HTMLInputElement;
+      expect(colorInput).not.toBeNull();
+      fireEvent.input(colorInput, { target: { value: "#123456" } });
+
+      const stageEl = container.querySelector(".stage") as HTMLElement;
+      expect(stageEl.style.getPropertyValue("--stage-rig-name-color").trim()).toBe("#123456");
+      expect(JSON.parse(localStorage.getItem("BOSUN_STAGE_THEME")!)).toMatchObject({
+        sections: { rigName: { color: "#123456" } },
+      });
+    });
+
+    it("resetting a section removes its CSS var", () => {
+      const { container } = renderStage();
+      fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+
+      const colorInput = container.querySelector(
+        'input[title="Tuner color"]',
+      ) as HTMLInputElement;
+      fireEvent.input(colorInput, { target: { value: "#abcdef" } });
+      const stageEl = container.querySelector(".stage") as HTMLElement;
+      expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("#abcdef");
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Reset" })[3]); // tuner row
+      expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("");
     });
   });
 });

@@ -11,6 +11,10 @@
   } from "../lib/protocol";
   import { DEFAULT_LAYOUT } from "../lib/pedal-layout";
   import { ledColorFor } from "../lib/led-color";
+  import {
+    readSavedStageTheme, saveStageTheme, stageThemeToCssVars, type StageTheme,
+  } from "../lib/stage-theme";
+  import StageThemeEditor from "./StageThemeEditor.svelte";
 
   type Props = {
     deviceInfo: { fw: string; device: string; bank: number; slot: number; profile?: string } | null;
@@ -58,6 +62,16 @@
   // --- live state ---
   let context = $state<Record<string, unknown>>({});
   let unsubFw: (() => void) | null = null;
+
+  // --- stage theme (per-section font/color/size, see stage-theme.ts) ---
+  let stageTheme = $state<StageTheme>(readSavedStageTheme());
+  let showThemeEditor = $state(false);
+  let stageThemeVars = $derived(stageThemeToCssVars(stageTheme));
+
+  function handleThemeChange(next: StageTheme) {
+    stageTheme = next;
+    saveStageTheme(next);
+  }
 
   // Full patch (with bindings) fetched on mount and when deviceInfo changes
   let fullPatch = $state<{ name?: string; bindings?: Binding[] } | null>(null);
@@ -227,9 +241,16 @@
   }
 </script>
 
-<div class="stage">
-  <!-- exit button: transparent, top-right, appears on tap -->
-  <button class="stage__exit" onclick={onExit} aria-label="Exit Stage">✕</button>
+<div class="stage" style={stageThemeVars}>
+  <!-- controls: transparent, top-right, appear on tap -->
+  <div class="stage__controls">
+    <button class="stage__icon-btn" onclick={() => (showThemeEditor = !showThemeEditor)} aria-label="Stage appearance">⚙</button>
+    <button class="stage__icon-btn" onclick={onExit} aria-label="Exit Stage">✕</button>
+  </div>
+
+  {#if showThemeEditor}
+    <StageThemeEditor theme={stageTheme} onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
+  {/if}
 
   <!-- header: rig name + bank/rig + BPM + tuner -->
   <div class="stage__header">
@@ -289,7 +310,7 @@
     height: 100%; height: 100dvh;
     padding: clamp(0.3rem, 1vw, 1rem);
     gap: clamp(0.3rem, 1vw, 0.8rem);
-    font-family: "Inter", -apple-system, sans-serif;
+    font-family: var(--stage-font, "Inter", -apple-system, sans-serif);
     font-weight: 600;
     color: var(--text);
     background: var(--bg);
@@ -297,9 +318,14 @@
     position: relative;
   }
 
-  .stage__exit {
+  .stage__controls {
     position: absolute; top: clamp(0.3rem, 1vw, 0.6rem); right: clamp(0.3rem, 1vw, 0.6rem);
     z-index: 10;
+    display: flex; gap: clamp(0.3rem, 1vw, 0.6rem);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .stage:hover .stage__controls, .stage:active .stage__controls { opacity: 0.9; }
+  .stage__icon-btn {
     /* Circle inverted vs the active theme: near-white on dark,
        near-black on light -- always stands out against the stage. */
     background: var(--text); border: none;
@@ -307,11 +333,10 @@
     width: clamp(2rem, 5vw, 3rem); height: clamp(2rem, 5vw, 3rem);
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    cursor: pointer; opacity: 0; transition: opacity 0.3s;
+    cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .stage:hover .stage__exit, .stage:active .stage__exit { opacity: 0.9; }
-  .stage__exit:active { opacity: 0.6; }
+  .stage__icon-btn:active { opacity: 0.6; }
 
   /* ----- header ----- */
   .stage__header {
@@ -322,8 +347,9 @@
     padding: 0 clamp(3rem, 8vw, 5rem); /* avoid overlap with exit ✕ on both sides */
   }
   .stage__bank {
-    font-size: clamp(3.6rem, 14vw, 8rem);
-    color: #ffffff;
+    font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-bank-scale, 1));
+    color: var(--stage-bank-color, #ffffff);
+    font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-transform: uppercase;
     letter-spacing: 0.04em;
     line-height: 1.1;
@@ -332,29 +358,33 @@
     white-space: nowrap;
   }
   .stage__rig-name {
-    font-size: clamp(3.6rem, 14vw, 8rem);
+    font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-rig-name-scale, 1));
     line-height: 1.1; letter-spacing: -0.02em;
-    color: #ffffff;
+    color: var(--stage-rig-name-color, #ffffff);
+    font-family: var(--stage-rig-name-font, var(--stage-font, "Inter", -apple-system, sans-serif));
   }
   .stage__meta {
     display: flex; align-items: baseline; gap: clamp(0.5rem, 2vw, 1.2rem);
     flex-wrap: wrap;
   }
   .stage__bank {
-    font-size: clamp(3.6rem, 14vw, 8rem);
-    color: #ffffff;
+    font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-bank-scale, 1));
+    color: var(--stage-bank-color, #ffffff);
+    font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-transform: uppercase;
     letter-spacing: 0.04em;
     line-height: 1.1;
   }
   .stage__bpm {
-    font-size: clamp(1.5rem, 6vw, 3rem);
-    color: var(--text);
+    font-size: calc(clamp(1.5rem, 6vw, 3rem) * var(--stage-bpm-scale, 1));
+    color: var(--stage-bpm-color, var(--text));
+    font-family: var(--stage-bpm-font, var(--stage-font, "Inter", -apple-system, sans-serif));
   }
   .stage__bpm small { font-size: 0.55em; color: var(--text-muted); }
   .stage__tuner {
-    font-size: clamp(1.5rem, 6vw, 3rem);
-    color: #4ade80;
+    font-size: calc(clamp(1.5rem, 6vw, 3rem) * var(--stage-tuner-scale, 1));
+    color: var(--stage-tuner-color, #4ade80);
+    font-family: var(--stage-tuner-font, var(--stage-font, "Inter", -apple-system, sans-serif));
   }
 
   /* ----- 2x5 pedal grid ----- */
@@ -387,8 +417,9 @@
   }
 
   .stage__switch-label {
-    font-size: clamp(1.5rem, 6.6vw, 3rem);
-    color: #ffffff;
+    font-size: calc(clamp(1.5rem, 6.6vw, 3rem) * var(--stage-switch-label-scale, 1));
+    color: var(--stage-switch-label-color, #ffffff);
+    font-family: var(--stage-switch-label-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     max-width: 100%; line-height: 1.15;
@@ -405,8 +436,9 @@
     85%, 100% { transform: translateX(0); }
   }
   .stage__switch-id {
-    font-size: clamp(1.5rem, 6.6vw, 3rem);
-    color: var(--text-dim);
+    font-size: calc(clamp(1.5rem, 6.6vw, 3rem) * var(--stage-switch-id-scale, 1));
+    color: var(--stage-switch-id-color, var(--text-dim));
+    font-family: var(--stage-switch-id-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     font-weight: 600;
   }
 
@@ -424,16 +456,20 @@
       padding: 0 clamp(0.5rem, 2vh, 1rem);
     }
     .stage__rig-name {
-      font-size: clamp(2.6rem, 12vh, 7rem);
+      font-size: calc(clamp(2.6rem, 12vh, 7rem) * var(--stage-rig-name-scale, 1));
       line-height: 1;
     }
     .stage__meta {
       font-size: clamp(1rem, 4vh, 2.5rem);
       gap: clamp(0.5rem, 2vh, 1.5rem);
     }
-    .stage__bank { font-size: clamp(2.6rem, 12vh, 7rem); color: #ffffff; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.1; }
-    .stage__bpm  { font-size: clamp(1.2rem, 5vh, 3rem); }
-    .stage__tuner { font-size: clamp(1.2rem, 5vh, 3rem); }
+    .stage__bank {
+      font-size: calc(clamp(2.6rem, 12vh, 7rem) * var(--stage-bank-scale, 1));
+      color: var(--stage-bank-color, #ffffff);
+      text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.1;
+    }
+    .stage__bpm  { font-size: calc(clamp(1.2rem, 5vh, 3rem) * var(--stage-bpm-scale, 1)); }
+    .stage__tuner { font-size: calc(clamp(1.2rem, 5vh, 3rem) * var(--stage-tuner-scale, 1)); }
 
     .stage__pedal {
       flex: 1 1 0;
@@ -453,12 +489,12 @@
       border-color: rgba(255, 255, 255, 0.12);
     }
     .stage__switch-label {
-      font-size: clamp(1.8rem, 9vh, 4.5rem);
-      color: #ffffff;
+      font-size: calc(clamp(1.8rem, 9vh, 4.5rem) * var(--stage-switch-label-scale, 1));
+      color: var(--stage-switch-label-color, #ffffff);
       line-height: 1.1;
     }
     .stage__switch-id {
-      font-size: clamp(1.8rem, 9vh, 4.5rem);
+      font-size: calc(clamp(1.8rem, 9vh, 4.5rem) * var(--stage-switch-id-scale, 1));
     }
   }
 </style>
