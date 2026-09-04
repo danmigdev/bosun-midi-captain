@@ -1,0 +1,5 @@
+# bosun-hub runtime dependencies (Python 3.11+).
+# On Raspberry Pi OS these are available as apt packages
+# (python3-serial, python3-websockets) so no pip/venv is required.
+pyserial>=3.5
+websockets>=12.0

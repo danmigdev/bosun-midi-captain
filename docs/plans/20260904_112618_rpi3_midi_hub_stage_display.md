@@ -110,19 +110,24 @@ hub". Findings:
   tooling, Pd, SuperCollider, MODEP modules), and its Bookworm image was
   still beta as of 2024.
 
-- **Raspberry Pi OS Bookworm Lite, 64-bit** (recommended base). The most
-  current and best-supported option. We add exactly three things:
-  1. `amidiminder` (rule-based ALSA auto-connect) from `apt.blokas.io` -
-     this is the same component Patchbox uses, and rule-based beats
-     `amidiauto`'s all-to-all wiring for our fixed 2-device topology.
+- **Raspberry Pi OS Lite, 64-bit** (chosen base, flashed 2026-09-04).
+  As of the 2026-06-18 release this is Debian **Trixie** (Bookworm is
+  now the "Legacy" option); starting a multi-month project on an
+  already-Legacy base was rejected. We add exactly three things:
+  1. a **udev + `aconnect` rule** that connects the Captain and Kemper
+     USB-MIDI ports in the ALSA sequencer on hotplug. For exactly two
+     fixed devices this is ~20 lines with zero external dependencies -
+     simpler and more predictable than pulling in `amidiauto` /
+     `amidiminder`, whose Blokas apt builds also lag new Debian
+     releases. (If the topology ever grows, `amidiminder` from source
+     or Patchbox OS is the fallback.)
   2. `cage` (a minimal Wayland kiosk compositor) + Chromium.
   3. our `bosun-hub` service (below).
 
-**Decision:** base on **Raspberry Pi OS Bookworm Lite 64-bit + amidiminder**
-(a minimal purpose-built equivalent of Patchbox). If a turnkey MIDI distro
-is preferred, **Patchbox OS** is a drop-in alternative base - the layered
-software is identical because it is the same Bookworm/apt/systemd
-underneath. Both are open source. Decision D1 confirms which we ship.
+**Decision (D1):** base on **Raspberry Pi OS Lite 64-bit (Trixie)** with
+a hand-written udev/`aconnect` MIDI rule. Patchbox OS remains a drop-in
+alternative base if a turnkey MIDI distro is ever wanted - the layered
+software is identical because it is the same apt/systemd underneath.
 
 ## Current architecture (as built today)
 
@@ -213,41 +218,43 @@ Why this shape:
 
 ### Components / work breakdown
 
-**1. `tools/rpi-hub/` - the appliance (new)**
+**1. `tools/rpi-hub/` - the appliance**
 
-- `bosun-hub` Python service:
-  - Open the Captain data CDC. Port discovery: enumerate `/dev/ttyACM*`,
-    pick the data interface (reuse the `sort_ports_desc` logic from
-    `serial/android_helpers.rs` - highest interface number is data; the
-    console must not be opened or it resets the RP2040).
-  - Sentinel PING/ACK sync on connect and drop stale backlog (port the
-    proven logic from `serial_tcp_bridge.py` + `serial/desktop.rs`).
-  - Self-heal: wall-clock stall + write-only-stall detection, close/reopen
-    with a DTR toggle, wait for re-enumeration (port the hardening from
-    the Android I/O-thread work - see memory
-    `project_android_serial_architecture`).
-  - Idle keepalive PING (~6 s) so a silent Stage link does not look dead.
-  - Fan the byte stream out to N clients: raw TCP `:9876` and a WebSocket
-    endpoint. Writes from any client are serialized to the port.
-  - Serve the static stage bundle over HTTP on the same port.
-  - One connection at a time to the port; many readers. Backpressure:
-    drop-oldest on a slow WS client, never block the port reader.
-- `systemd` units, **mutually independent** (a display failure never
-  stops MIDI - `R-live-1`):
-  - `amidiminder` (packaged) - Captain<->Kemper ALSA seq rules.
-  - `bosun-hub.service` - the CDC bridge + TCP/WS server.
+- `bosun_hub` Python service - **DONE and tested against
+  `tools/tcp_firmware_emulator.py`** (commit on `feature/rpi-midi-hub`):
+  - `link.py` - single-threaded owner of the data port. Candidate
+    discovery (`/dev/ttyACM*` descending, so data before console),
+    PING/ACK sentinel sync with stale-backlog discard, idle keepalive
+    PING (`__hub_*` replies swallowed, not broadcast), wall-clock +
+    write-only stall detection, hard reopen with backoff. Ported from
+    the Android serial backend's shape (memory
+    `project_android_serial_architecture`). Also accepts a
+    `tcp://host:port` target for development against the emulator.
+  - `hub.py` - fan-out between the link thread and asyncio subscribers,
+    bounded drop-oldest queues (a slow socket never back-pressures the
+    port), `{"type":"HUB","link":...}` status frames for the kiosk.
+  - `server.py` - raw TCP `:9876` (editor `tcp_connect` compatible,
+    transparent, no status injection), WebSocket `:8081` (kiosk), static
+    HTTP `:8080` (Stage bundle, `Cache-Control: no-store`).
+  - `tests/` - `fake_pedal.py` + `test_hub_e2e.py` +
+    `test_server_smoke.py`, all dependency-free, no hardware.
+- **TODO** `systemd` units, **mutually independent** (a display failure
+  never stops MIDI - `R-live-1`):
+  - `bosun-midi.service` / a udev rule - `aconnect` Captain<->Kemper.
+  - `bosun-hub.service` - the service above.
   - `bosun-kiosk.service` - cage + chromium; `Wants=` bosun-hub but does
     not block it, auto-restarts on crash.
-  All have `Restart=always` and a `WatchdogSec=`.
-- `install.sh` on top of stock Raspberry Pi OS Lite: apt deps, Blokas
-  repo + `amidiminder`, `cage`/`chromium`, HDMI mode config, enable
-  read-only overlay root + hardware watchdog, enable services.
-  Idempotent, re-runnable for updates (temporarily remounts rw).
-- `config/` : `/boot/firmware/config.txt` snippet for the Waveshare mode
-  + `dtparam=watchdog=on`, a udev rule so `/dev/ttyACM*` is stable,
-  Ethernet mDNS (`bosun-hub.local`) + link-local fallback, Pi 4 USB-C
-  `dwc2`/`g_ether` gadget config, WiFi left disabled.
-- `README.md` with wiring diagram, power notes, flashing steps.
+  All `Restart=always` + `WatchdogSec=`.
+- **TODO** `install.sh` on top of stock Raspberry Pi OS Lite: apt deps
+  (`python3-serial python3-websockets cage chromium`), the udev/aconnect
+  MIDI rule, HDMI mode config, read-only overlay root + hardware
+  watchdog, enable services. Idempotent (remounts rw for updates).
+- **TODO** `config/` : `/boot/firmware/config.txt` snippet for the
+  Wisecoco 1920x440 mode + `dtparam=watchdog=on`, stable `/dev/ttyACM*`
+  udev alias, Ethernet mDNS (`bosun-hub.local`), Pi 4 USB-C
+  `dwc2`/`g_ether` gadget config, WiFi joins `bosun` SSID.
+- **TODO** `README.md` wiring diagram + power notes (service `README.md`
+  already written).
 
 **2. `editor/` - the stage kiosk build (new build target, no runtime changes to StageView)**
 
