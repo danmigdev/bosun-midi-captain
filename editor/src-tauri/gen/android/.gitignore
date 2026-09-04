@@ -18,3 +18,6 @@ keystore.properties
 
 /.tauri
 /tauri.settings.gradle
+
+# Generated at build time by tools/build-android.ps1 (copy of firmware/ + resources/)
+/app/src/main/assets/
