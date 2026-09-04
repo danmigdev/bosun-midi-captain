@@ -256,41 +256,40 @@ Why this shape:
 - **TODO** `README.md` wiring diagram + power notes (service `README.md`
   already written).
 
-**2. `editor/` - the stage kiosk build (new build target, no runtime changes to StageView)**
+**2. `editor/` - the stage kiosk build - DONE** (commit `3e063ff` on
+`feature/rpi-midi-hub`). No runtime changes to StageView or protocol.ts.
 
-- `editor/stage-kiosk.html` + `editor/vite.stage-kiosk.config.ts` +
-  `editor/kiosk/` :
-  - `ws-transport.ts` - a real implementation of the `@tauri-apps/api`
-    surface StageView touches, backed by a WebSocket to
-    `bosun-hub`: `invoke("drain_inbox")`, `invoke("send_command", ...)`,
-    `invoke("is_connected")`, and `listen("firmware-data-ready")`.
-    Auto-reconnect with backoff; re-run the bootstrap on reconnect.
-  - `bootstrap.ts` - on connect, issue `GET_DEVICE_INFO`, `GET_MANIFEST`
-    (streamed), `GET_GLOBAL`, `LIST_PATCHES`, then `mount(StageView, ...)`
-    with the resulting props (mirrors the relevant slice of
-    `App.svelte` `refetchAll()`). Feed subsequent `CONTEXT`/`PATCH`/`EVENT`
-    lines through the same bus StageView already subscribes to.
-  - `?lite` / a query flag to drop the expensive ambient-glow blur layers
-    for Pi 3 (see risk R1).
-- `package.json` : `"build:stage": "vite build --config vite.stage-kiosk.config.ts"`.
-- Output is plain static files; `bosun-hub` serves them. Nothing here
-  ships in the desktop/Android app.
-- The existing `dev-preview` harness stays as-is for local design work;
-  the kiosk build is its production sibling.
+- `editor/vite.stage-kiosk.config.ts` aliases `@tauri-apps/api/core` and
+  `/event` onto `editor/src/kiosk/`. `npm run build:stage` ->
+  `editor/dist-stage/` (`index.html` + assets), served by bosun-hub.
+- `src/kiosk/ws-link.ts` - one WebSocket to `ws://<host>:8081`, line per
+  message, handles `{"type":"HUB","link":...}` frames ->
+  reconnecting/reconnected, auto-reconnect with backoff.
+- `src/kiosk/tauri-core.ts` / `tauri-event.ts` - the `invoke`/`listen`
+  surface protocol.ts needs (`send_command`, `drain_inbox`,
+  `is_connected`, `firmware-data-ready` + disconnect/reconnect events).
+- `src/kiosk/KioskApp.svelte` - minimal shell holding StageView's
+  reactive props, refreshed from the message bus like App.svelte;
+  "Waiting for the pedal..." until the hub link is up.
+- Verified end to end on the Pi against `tests/stage_demo_pedal.py`.
+- **TODO** the `?lite` flag (drop the ambient-glow blur) - decide after
+  the R1 render test on the panel / via cage+wayvnc.
+- **TODO** short-viewport CSS for 1920x440 (R1b) - after the panel, and
+  it belongs with the Stage View polish, not here.
 
 **3. Tests**
 
-- `tools/rpi-hub/tests/` - unit tests for port selection, sentinel sync,
-  fan-out/backpressure, self-heal state machine (host-runnable, no Pi).
-  Reuse `tools/tcp_firmware_emulator.py` as the fake pedal.
-- `editor/tests/` - `ws-transport` reconnect/bootstrap tests against a
-  mock WebSocket; a StageView render test fed from a recorded
-  `CONTEXT`/`PATCH` capture (`dev-preview/device-full.log` is a real one).
-- Manual bring-up checklist on hardware (HW rig available - see memory
-  `project_hw_test_rig`): `aseqdump` shows Captain<->Kemper both ways,
-  rig change on the Player front panel follows on the Captain and the
-  Stage screen, tuner/BPM/effect-block LEDs mirror, kiosk survives a
-  Captain power-cycle and a Pi reboot.
+- `tools/rpi-hub/tests/` - `test_hub_e2e.py` + `test_server_smoke.py`
+  (link sync, backlog discard, keepalive, reconnect, fan-out,
+  backpressure, all three front-ends) + `stage_demo_pedal.py`. DONE,
+  green on the host and on the Pi.
+- **TODO** `editor/` - a `ws-link` reconnect/bootstrap test and a
+  KioskApp render test.
+- **TODO** manual bring-up on hardware (HW rig - memory
+  `project_hw_test_rig`): `aseqdump` Captain<->Kemper both ways, rig
+  change on the Player follows on the Captain and the Stage screen,
+  tuner/BPM/blocks mirror, kiosk survives a Captain power-cycle and a
+  Pi reboot.
 
 **4. Docs**
 
@@ -331,10 +330,10 @@ so both are available.
   no `?lite`) renders smoothly. Pi 3 works but is marginal on the
   browser and cannot do gadget-mode editor access. **Recommend Pi 4
   (2 GB), keep the software Pi-3-compatible.**
-- **D3.** (Substantially resolved by the all-wired target.) Setup-time
-  editor access over Ethernet + mDNS, plus Pi 4 USB-C gadget-ethernet.
-  WiFi off by default, enabled manually at home for updates. Still open:
-  do you also want an on-demand WiFi AP as a fallback editor path?
+- **D3. RESOLVED (2026-09-04): drop WiFi entirely.** Setup and updates
+  over Ethernet. The live rig never touches a network. The Pi's WiFi
+  radio is `rfkill`-blocked and the NM profile removed in the install.
+  No AP.
 - **D4.** Deliverable form: an `install.sh` on top of stock Raspberry Pi
   OS, or a prebuilt flashable image (pi-gen based) as a release artifact?
 - **D5.** Because the protocol port is only reachable on a cable you
