@@ -18,10 +18,9 @@ stage screen:
    exposes the Bosun line-JSON protocol on a wired LAN so the
    desktop/Android editor can connect (`tcpConnect`) during setup /
    soundcheck.
-3. **External Stage display.** The Pi drives a wide HDMI panel
-   (reference: Waveshare 8.8" Side Monitor, 480x1920 native) showing the
-   same **Stage View** currently used on Android, fed live from the
-   Captain.
+3. **External Stage display.** The Pi drives a wide HDMI bar panel
+   (chosen: Wisecoco 11.3" 1920x440, native landscape) showing the same
+   **Stage View** currently used on Android, fed live from the Captain.
 
 Target outcome: plug in power, the Captain, the Kemper and the monitor;
 the rig is playable and the stage screen is live, no laptop or phone
@@ -75,7 +74,7 @@ path. Consequences that drive the rest of this plan:
 | Part | Notes |
 |---|---|
 | Raspberry Pi 3B / 3B+ | 1 GB RAM, quad A53. **See risk R1** - a Pi 4 (2 GB+) is strongly recommended for the browser-rendered Stage View. Keep the software Pi-3-compatible regardless. |
-| Waveshare 8.8" Side Monitor | 480x1920 IPS, HDMI in + USB for power, **no touch**. Needs a custom HDMI mode (`hdmi_timings`) and a display rotation for landscape 1920x480. Vendor recommends its own 5 V supply rather than drawing from the Pi. [wiki](https://www.waveshare.com/wiki/8.8inch_Side_Monitor) |
+| Display (chosen): Wisecoco 11.3" bar monitor, model R126F01-HB (Amazon `B0FPR3GS11`) | **1920x440 IPS, native landscape** (no rotation needed - better than the portrait Waveshare 8.8" alternative), 60 Hz, 350 cd/m2, **non-touch** (the `-T` model is the touch variant; we don't need touch). Video in is **mini- or micro-HDMI** (not full size - needs the right cable/adapter per Pi model). **Powered by a separate USB cable, NOT by HDMI** - HDMI only carries ~0.25 W on its +5 V pin, nowhere near the panel's ~5 W. Marketed as Raspberry-Pi-compatible and driver-free; should present a clean EDID for the 1920x440 mode (verify on Bookworm KMS, custom `video=` mode is the fallback). |
 | Powered USB hub | Almost certainly required. The Pi 3 caps total USB current low, and its USB + Ethernet share one 480 Mbps bus. The Android bridge already documents needing a powered hub for simultaneous Kemper + Captain. |
 | 5 V PSU(s) | One solid supply for the Pi (>= 2.5 A), one for the monitor. On a pedalboard, ideally a single high-current 5 V brick feeding the Pi and a powered hub. Every power-on order must be safe (see `R5`). |
 | microSD | 16 GB+, A2 endurance/industrial card. Root filesystem runs **read-only** (overlayfs) so a power cut cannot corrupt it. |
@@ -83,7 +82,10 @@ path. Consequences that drive the rest of this plan:
 
 Cabling: Captain USB (1 MIDI-class interface + 2 CDC-ACM interfaces on
 one connector), Kemper Player USB (MIDI-class only, no DIN), monitor
-HDMI + monitor USB power. Ethernet only used at setup/soundcheck.
+video (Pi HDMI/micro-HDMI -> monitor mini/micro-HDMI, exact adapter
+depends on D2), monitor power (separate USB 5 V lead - feed it from the
+same 5 V brick as the Pi, **not** daisy-chained through a Pi USB port,
+which has almost no current headroom). Ethernet only at setup/soundcheck.
 
 ## Distro selection
 
@@ -345,10 +347,20 @@ so both are available.
   layers; test early on real hardware; if unacceptable, either mandate
   Pi 4 (D2) or render Stage with a lighter engine. **Prototype this
   first, before building the appliance.**
-- **R2 - Waveshare HDMI mode on Bookworm KMS.** Bookworm defaults to the
-  KMS driver, where the legacy `hdmi_timings` path is fragile. May need a
-  `video=HDMI-A-1:...` cmdline mode or a custom EDID, plus a compositor
-  output transform for landscape. Budget bring-up time.
+- **R1b - Stage View layout at 1920x440.** Stage View's landscape CSS was
+  tuned against tablet and ~4:1 aspect ratios; the Wisecoco panel is
+  4.36:1 with only **440 px of height** for the header plus two rows of
+  five switch tiles. The `stage:preview` spike must check the layout
+  holds (tile sizing, marquee, tuner block) at exactly this geometry;
+  minor Stage CSS tweaks for very short viewports may be needed and, if
+  so, belong on `feature/stage-view-theme` or a small shared branch, not
+  buried in the kiosk build.
+- **R2 - HDMI mode on Bookworm KMS.** The Wisecoco should ship a proper
+  EDID for 1920x440 (driver-free is a selling point), so this is likely
+  easier than the portrait Waveshare. If KMS does not pick it up
+  cleanly, fall back to a `video=HDMI-A-1:1920x440M@60` cmdline mode /
+  custom EDID. No rotation needed (native landscape). Confirm the mini/
+  micro-HDMI cable + adapter matches the chosen Pi.
 - **R3 - Pi 3 USB/LAN shared bus.** On a Pi 3, the 4 USB ports + Ethernet
   share one 480 Mbps bus. During a set nothing else is on the wire (no
   editor traffic), so MIDI latency is fine; the contention only matters
