@@ -9,6 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "build:stage": "vite build --config vite.stage-kiosk.config.ts",
+    "dev:stage": "vite --config vite.stage-kiosk.config.ts",
     "tauri": "tauri",
     "package:portable": "powershell -ExecutionPolicy Bypass -File ../tools/package-portable.ps1",
     "check": "svelte-check --tsconfig ./tsconfig.json",

@@ -1,0 +1,34 @@
+/* The kiosk is a stage panel: always dark, no theme toggle. Just the
+   design tokens StageView reads (the dark palette from App.svelte). */
+:root {
+  --bg: #14161b;
+  --bg-card: #1c1f26;
+  --text: #e4e6eb;
+  --text-muted: #9aa1ad;
+  --text-dim: #6a7280;
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+body {
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+  color: var(--text);
+}
+
+.kiosk-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  font-size: clamp(1.2rem, 4vw, 2.4rem);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
