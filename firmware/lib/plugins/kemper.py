@@ -698,6 +698,11 @@ def _apply_cache(app):
         block = _block_of_binding(binding)
         if block is not None and block in _BLOCK_STATE:
             app.set_switch_latched(sw_name, _BLOCK_STATE[block])
+    # Feed the settled block state to Stage Mode. Deferred to here (rather
+    # than published per-delta during the rig-change burst) so the Stage
+    # view sees one clean settled picture, not the mid-burst flicker.
+    for block, on in list(_BLOCK_STATE.items()):
+        _publish(app, {"kemper_block_" + block: "on" if on else "off"})
 
 
 def wants_authoritative_boot(app):
@@ -950,6 +955,10 @@ def _handle_sysex(data, app, cfg):
     # Paint live only when NOT settling a rig change (see settle_until_ms);
     # mid-burst paints are what cause the flash. tick() repaints after settle.
     if app._now_ms() >= _BIDIR_STATE["settle_until_ms"]:
+        # Stage Mode block colour: publish on the actual change, not on the
+        # 5 s beacon clock, or effect toggles lag the Stage view by up to
+        # _BEACON_RESEND_MS. _publish de-dupes; _push_context throttles.
+        _publish(app, {"kemper_block_" + block: "on" if on else "off"})
         for sw_name, binding in app.current_bindings():
             if _binding_targets_block(binding, block):
                 app.set_switch_latched(sw_name, on)
@@ -1009,11 +1018,13 @@ def tick(app, now_ms):
     ))
     _BIDIR_STATE["last_beacon_ms"] = now_ms
     _BIDIR_STATE["init_sent"] = True
-    # Publish block states to display_context for Stage Mode coloring.
-    # Wrapped in try/except so a transient error doesn't kill the beacon.
+    # 5 s backstop for the Stage Mode block colours - the prompt path is
+    # the per-change _publish in on_midi_in / _apply_cache; this just
+    # re-asserts in case one was missed. _publish de-dupes, so this is a
+    # no-op when nothing changed. try/except so it can't kill the beacon.
     try:
         for block, on in list(_BLOCK_STATE.items()):
-            app.update_context({"kemper_block_" + block: "on" if on else "off"})
+            _publish(app, {"kemper_block_" + block: "on" if on else "off"})
     except Exception:
         pass
 
