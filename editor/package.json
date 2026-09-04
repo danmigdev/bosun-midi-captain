@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "stage:preview": "vite --config vite.stage-preview.config.ts",
     "build:stage": "vite build --config vite.stage-kiosk.config.ts",
     "dev:stage": "vite --config vite.stage-kiosk.config.ts",
     "tauri": "tauri",

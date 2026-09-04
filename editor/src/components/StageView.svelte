@@ -123,21 +123,34 @@
     return `${(msg as Record<string,unknown>).type ?? ""}`;
   }
 
-  function marquee(el: HTMLElement) {
+  // `el` is the fixed-size clipping frame (overflow:hidden, never moves);
+  // its only child is the ".stage__marquee-track" span that actually holds
+  // the text and gets translated. Sliding the SAME element that also clips
+  // itself doesn't reveal anything - the clip boundary moves with it - so
+  // the frame/track have to be two different elements.
+  //
+  // `text` is only read to give Svelte a reactive trigger: the action never
+  // reruns on its own when the frame's box is unchanged, but a new
+  // label/rig name replacing the old one changes the track's content width
+  // without resizing the frame - recheck whenever that display text
+  // changes, not just when the frame itself resizes.
+  function marquee(el: HTMLElement, text?: unknown) {
+    const track = el.firstElementChild as HTMLElement | null;
     const check = () => {
-      const overflow = el.scrollWidth > el.clientWidth + 2;
+      if (!track) return;
+      const overflow = track.scrollWidth > el.clientWidth + 2;
       if (overflow) {
-        const dx = -(el.scrollWidth - el.clientWidth);
-        el.style.setProperty("--marquee-dx", `${dx}px`);
-        el.classList.add("stage__switch-label--scroll");
+        const dx = -(track.scrollWidth - el.clientWidth);
+        track.style.setProperty("--marquee-dx", `${dx}px`);
+        track.classList.add("stage__marquee-active");
       } else {
-        el.classList.remove("stage__switch-label--scroll");
+        track.classList.remove("stage__marquee-active");
       }
     };
     check();
     const obs = new ResizeObserver(check);
     obs.observe(el);
-    return { destroy() { obs.disconnect(); } };
+    return { update: check, destroy() { obs.disconnect(); } };
   }
 
   function isLatchedOn(sw: string): boolean {
@@ -169,6 +182,21 @@
     const msg = action?.messages?.[0];
     if (!msg || (msg as Record<string,unknown>).type !== "kemper_effect_toggle") return null;
     return ((msg as Record<string,unknown>).slot as string) ?? null;
+  }
+
+  /** Active state + LED colour for the ambient floor glow behind the grid
+   *  (purely decorative echo of a switch's own LED colour - never a
+   *  substitute for the border/background colour logic in the markup,
+   *  which stays the source of truth for what's actually engaged). */
+  function switchVisual(sw: string): { active: boolean; color: string | null } {
+    const b = bindingForSwitch(sw);
+    const navPatch = b ? null : navPatchFor(sw);
+    const navSlot = navPatch ? navSlotFor(sw) : null;
+    const active = b ? isLatchedOn(sw) : (navSlot !== null && navSlot === deviceInfo?.slot);
+    const color = b
+      ? ledColorFor(b, true)
+      : (navSlot !== null ? (presetNav?.bank_colors?.[String(deviceInfo?.bank)] ?? "#888888") : null);
+    return { active, color };
   }
 
   // --- polling ---
@@ -254,10 +282,10 @@
 
   <!-- header: rig name + bank/rig + BPM + tuner -->
   <div class="stage__header">
-    <div class="stage__rig-name">{rigName}</div>
+    <div class="stage__rig-name" use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
     <div class="stage__meta">
       {#if deviceInfo}
-        <span class="stage__bank">BANK {deviceInfo.bank} · RIG {deviceInfo.slot}</span>
+        <span class="stage__bank" use:marquee={`${deviceInfo.bank}/${deviceInfo.slot}`}><span class="stage__marquee-track">BANK {deviceInfo.bank} · RIG {deviceInfo.slot}</span></span>
       {/if}
       {#if bpm}
         <span class="stage__bpm">{bpm} <small>BPM</small></span>
@@ -272,6 +300,20 @@
 
   <!-- 2-row x 5-column footswitch grid -->
   <div class="stage__pedal">
+    <!-- ambient floor glow: echoes each engaged switch's own LED colour,
+         purely decorative - never the source of truth for switch state -->
+    <div class="stage__glow" aria-hidden="true">
+      {#each rows as row}
+        <div class="stage__glow-row">
+          {#each row as sw}
+            {@const v = switchVisual(sw)}
+            <div class="stage__glow-spot"
+                 style={v.color ? `background: radial-gradient(circle, ${v.color}59 0%, transparent 70%); opacity: ${v.active ? 1 : 0}` : "opacity: 0"}>
+            </div>
+          {/each}
+        </div>
+      {/each}
+    </div>
     {#each rows as row}
       <div class="stage__pedal-row">
         {#each row as sw}
@@ -289,13 +331,14 @@
                look, same as the physical LED staying off. -->
           {@const offColor = b ? ledColorFor(b, false) : (navSlot !== null ? (presetNav?.bank_colors?.[String(deviceInfo?.bank)] ?? "#888888") : null)}
           {@const onColor = b ? ledColorFor(b, true) : (navSlot !== null ? (presetNav?.bank_colors?.[String(deviceInfo?.bank)] ?? "#888888") : null)}
+          {@const label = b ? (effectLabel(b) || displaySwitch(sw)) : (navPatch ? navPatch.name : "-")}
           <div class="stage__switch"
                class:stage__switch--bound={!!b || navSlot !== null}
                class:stage__switch--active={active}
                style={onColor ? (active
                    ? `border-color: ${onColor}; background: ${onColor}66; box-shadow: 0 0 16px ${onColor}50`
                    : `border-color: ${offColor}`) : ''}>
-            <span class="stage__switch-label" use:marquee>{b ? (effectLabel(b) || displaySwitch(sw)) : (navPatch ? navPatch.name : "-")}</span>
+            <span class="stage__switch-label" use:marquee={label}><span class="stage__marquee-track">{label}</span></span>
             <span class="stage__switch-id">{displaySwitch(sw)}</span>
           </div>
         {/each}
@@ -346,6 +389,21 @@
     flex-wrap: wrap;
     padding: 0 clamp(3rem, 8vw, 5rem); /* avoid overlap with exit ✕ on both sides */
   }
+  /* Clipping frames for the marquee effect: fixed-size, never move. The
+     ".stage__marquee-track" child inside each one holds the actual text and
+     is what the `marquee` action translates - sliding the frame itself
+     would move its own clip boundary with it and reveal nothing. */
+  .stage__rig-name, .stage__bank {
+    max-width: 100%;
+    overflow: hidden; text-overflow: clip;
+    white-space: nowrap;
+    position: relative;
+    /* Flex items refuse to shrink below their content's natural width by
+       default (the "min-width: auto" trap) - without this, BANK fighting
+       BPM for room in the same flex line pushes BPM off-canvas instead of
+       letting BANK's own clip/marquee frame absorb the squeeze. */
+    min-width: 0;
+  }
   .stage__bank {
     font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-bank-scale, 1));
     color: var(--stage-bank-color, #ffffff);
@@ -353,9 +411,6 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     line-height: 1.1;
-    max-width: 100%;
-    overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .stage__rig-name {
     font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-rig-name-scale, 1));
@@ -366,19 +421,23 @@
   .stage__meta {
     display: flex; align-items: baseline; gap: clamp(0.5rem, 2vw, 1.2rem);
     flex-wrap: wrap;
-  }
-  .stage__bank {
-    font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-bank-scale, 1));
-    color: var(--stage-bank-color, #ffffff);
-    font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    line-height: 1.1;
+    /* Grows to fill whatever's left of the header row (its own wrapped line
+       in portrait, the remainder after the rig name in landscape), so the
+       BPM auto-margin below has real space to push against and reaches the
+       row's actual right edge instead of just the edge of a small
+       bank/bpm/tuner cluster centered with everything else. min-width:0 is
+       load-bearing here too, same trap as .stage__bank one level down: as a
+       flex item of .stage__header it would otherwise refuse to shrink below
+       BANK's huge intrinsic content width and overflow the header instead
+       of being constrained to it. */
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .stage__bpm {
     font-size: calc(clamp(1.5rem, 6vw, 3rem) * var(--stage-bpm-scale, 1));
     color: var(--stage-bpm-color, var(--text));
     font-family: var(--stage-bpm-font, var(--stage-font, "Inter", -apple-system, sans-serif));
+    margin-left: auto; /* docks BPM (and tuner after it) to the right edge */
   }
   .stage__bpm small { font-size: 0.55em; color: var(--text-muted); }
   .stage__tuner {
@@ -392,6 +451,32 @@
     flex: 1 1 auto;
     display: flex; flex-direction: column;
     gap: clamp(3px, 0.8vw, 8px);
+    position: relative; z-index: 0; /* stacking context: keeps .stage__glow's
+      negative z-index scoped here, above .stage's own flat background but
+      below the switches painted on top of it */
+  }
+  /* Ambient glow layer: one blurred, oversized spot per grid cell, aligned
+     with the real switches above it via the identical flex geometry. Colour
+     and visibility are set inline per spot (see switchVisual in <script>);
+     this layer never carries functional meaning on its own. */
+  .stage__glow {
+    position: absolute; inset: 0; z-index: -1;
+    display: flex; flex-direction: column;
+    gap: clamp(3px, 0.8vw, 8px);
+    pointer-events: none;
+    filter: blur(clamp(20px, 4vw, 48px));
+  }
+  .stage__glow-row {
+    flex: 1 1 0;
+    display: flex;
+    gap: clamp(3px, 0.8vw, 8px);
+  }
+  .stage__glow-spot {
+    flex: 1 1 0;
+    border-radius: 50%;
+    transform: scale(1.6);
+    opacity: 0;
+    transition: opacity 0.5s ease;
   }
   .stage__pedal-row {
     flex: 1 1 0;
@@ -415,19 +500,49 @@
   .stage__switch--bound {
     border-color: rgba(255, 255, 255, 0.12);
   }
+  /* Gentle breathing pulse on an engaged switch - a live "this is on" cue
+     that never touches border/background colour, so the LED-accurate
+     colour logic above stays the single source of truth for state. */
+  .stage__switch--active {
+    animation: stage-switch-pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes stage-switch-pulse {
+    0%, 100% { transform: scale(1); filter: brightness(1); }
+    50%      { transform: scale(1.02); filter: brightness(1.12); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage__switch--active { animation: none; }
+    .stage__glow-spot { transition: none; }
+    .stage__marquee-track:global(.stage__marquee-active) { animation: none; }
+  }
 
   .stage__switch-label {
     font-size: calc(clamp(1.5rem, 6.6vw, 3rem) * var(--stage-switch-label-scale, 1));
     color: var(--stage-switch-label-color, #ffffff);
     font-family: var(--stage-switch-label-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-align: center;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden; text-overflow: clip;
     max-width: 100%; line-height: 1.15;
     font-weight: 700;
     position: relative;
   }
-  .stage__switch-label--scroll {
-    text-overflow: clip;
+  /* Inline-block so `transform` applies to it (a plain inline element isn't
+     transformable) - this is the piece that actually slides; its parent
+     frame (.stage__rig-name / .stage__bank / .stage__switch-label above)
+     stays put and clips it via overflow:hidden. */
+  .stage__marquee-track {
+    display: inline-block;
+    white-space: nowrap;
+  }
+  /* :global - this class is only ever added imperatively by the `marquee`
+     action (see <script>), never written in markup, so Svelte's scoped-CSS
+     usage analysis can't see it applies here and silently drops the whole
+     rule without :global (confirmed via a throwaway browser harness: the
+     "unused selector" warning is not benign - the rule is genuinely absent
+     from the shipped CSS otherwise). Compounded onto .stage__marquee-track,
+     which IS statically visible in the template, so this still resolves
+     normally rather than as a bare unscoped global selector. */
+  .stage__marquee-track:global(.stage__marquee-active) {
     animation: stage-marquee 5s ease-in-out infinite;
   }
   @keyframes stage-marquee {
@@ -473,6 +588,13 @@
 
     .stage__pedal {
       flex: 1 1 0;
+      gap: clamp(2px, 1.2vh, 8px);
+    }
+    .stage__glow {
+      gap: clamp(2px, 1.2vh, 8px);
+      filter: blur(clamp(16px, 4vh, 40px));
+    }
+    .stage__glow-row {
       gap: clamp(2px, 1.2vh, 8px);
     }
     .stage__pedal-row {
