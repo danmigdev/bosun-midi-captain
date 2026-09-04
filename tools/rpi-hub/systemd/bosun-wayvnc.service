@@ -1,0 +1,17 @@
+[Unit]
+Description=VNC mirror of the Stage kiosk (dev / no-panel viewing)
+After=bosun-kiosk.service
+Requires=bosun-kiosk.service
+
+[Service]
+Type=simple
+User=bosun
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# wayvnc attaches to cage's wayland socket; give cage a moment to create it.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -n "$(find $XDG_RUNTIME_DIR -maxdepth 1 -name "wayland-*" ! -name "*.lock")" ] && exit 0; sleep 0.3; done; exit 1'
+ExecStart=/bin/sh -c 'export WAYLAND_DISPLAY=$(find $XDG_RUNTIME_DIR -maxdepth 1 -name "wayland-*" ! -name "*.lock" -printf "%f\\n" | head -1); exec wayvnc 0.0.0.0 5900'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

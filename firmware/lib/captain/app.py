@@ -1197,43 +1197,46 @@ class Captain:
         fp = (len(ctx), tuple(sorted((str(k), str(v)) for k, v in ctx.items())))
         if fp == getattr(self, "_last_context_fp", None):
             return
-        # Build a JSON-safe copy
-        safe = {}
-        for k, v in ctx.items():
-            try:
-                import json as _j
-                _j.dumps({k: v})
-                safe[k] = v
-            except Exception:
-                safe[k] = str(v)
+
+        import gc as _gc
+        import json as _j
+
         # protocol._send() never raises - it catches every exception
         # internally (including MemoryError) and only prints "[protocol]
-        # _send EXC" to the REPL, so it cannot signal failure back here,
-        # and its own single gc.collect()-and-retry on json.dumps() isn't
-        # always enough right after a big Kemper rig-change SYSEX burst
-        # leaves the heap freshly fragmented (2026-08-15: confirmed live,
-        # twice - a CONTEXT push right after a rig change hit MemoryError
-        # both with and without an extra proactive gc.collect() beforehand,
-        # and because _send() swallows that silently, this function had no
-        # way to know the push actually failed and would commit the
-        # fingerprint as "delivered" anyway - permanently losing that
-        # state change until the next unrelated one). So dry-run the same
-        # encode here first, with our own gc.collect()-and-retry: on
-        # failure, return WITHOUT committing _last_context_fp, so the next
-        # 1 Hz tick retries the same state instead of losing it. Once this
-        # succeeds, _send()'s own internal (redundant but harmless)
-        # re-encode of the same now-uncontested payload is essentially
-        # guaranteed to succeed too.
-        obj = {"type": "CONTEXT", "context": safe}
+        # _send EXC" to the REPL, so it cannot signal failure back here.
+        # We must know whether the push actually went out, or the
+        # fingerprint gets committed as "delivered" and the state change
+        # is lost until some later unrelated one (2026-08-15: confirmed
+        # live). So dry-run the encode here first: on failure, return
+        # WITHOUT committing _last_context_fp so the next tick retries.
+        #
+        # On the Kemper-on-a-Pi setup the heap sits very tight (~10 KB
+        # free) and the old code re-encoded the context ~17x per push
+        # (a json.dumps per key for the safety check, then the whole
+        # object, then _send's own re-encode) - so effect-toggle pushes
+        # MemoryError'd every tick and never got through (2026-09-04).
+        # Now: one proactive gc, one dry-run dumps, and only fall back to
+        # the per-key JSON-safety coercion if that hits a real TypeError
+        # (a plugin put a non-serialisable value in the context).
+        _gc.collect()
+        obj = {"type": "CONTEXT", "context": ctx}
         try:
-            import json as _j
             _j.dumps(obj)
         except MemoryError:
+            _gc.collect()
             try:
-                import gc as _gc
-                _gc.collect()
-            except Exception:
-                pass
+                _j.dumps(obj)
+            except MemoryError:
+                return
+        except TypeError:
+            safe = {}
+            for k, v in ctx.items():
+                try:
+                    _j.dumps(v)
+                    safe[k] = v
+                except Exception:
+                    safe[k] = str(v)
+            obj = {"type": "CONTEXT", "context": safe}
             try:
                 _j.dumps(obj)
             except MemoryError:

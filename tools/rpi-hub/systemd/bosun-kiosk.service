@@ -1,0 +1,23 @@
+[Unit]
+Description=Bosun Stage kiosk (cage + Chromium)
+After=bosun-hub.service seatd.service
+Wants=bosun-hub.service
+
+[Service]
+Type=simple
+User=bosun
+PAMName=login
+TTYPath=/dev/tty7
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=BOSUN_KIOSK_HEADLESS=1
+Environment=BOSUN_KIOSK_MODE=1920x440
+ExecStart=/opt/bosun-hub/kiosk/bosun-kiosk.sh
+Restart=always
+RestartSec=3
+# A kiosk crash must never touch MIDI - this unit is stand-alone.
+
+[Install]
+WantedBy=multi-user.target

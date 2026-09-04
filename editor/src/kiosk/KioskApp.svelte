@@ -32,14 +32,28 @@
   let patches = $state<PatchSummary[]>([]);
   let everBooted = $state(false);
 
-  function bootstrap(): void {
-    // Fire-and-forget: responses land in the subscriber below. Mirrors
-    // App.svelte's refetchAll for the fields Stage needs.
+  let fullBootstrapDone = false;
+
+  function resync(): void {
+    // Cheap re-sync on every (re)connect: just the current bank/slot.
+    // StageView re-pulls CONTEXT + PATCH itself on the same transition.
     cmd.getDeviceInfo();
-    cmd.getManifest();
-    cmd.getGlobal();
-    cmd.listPatches();
+
+    if (!fullBootstrapDone) {
+      fullBootstrapDone = true;
+      cmd.getGlobal();
+      cmd.listPatches();
+    }
     everBooted = true;
+
+    // The manifest is deliberately NOT fetched. On the RP2040 it streams
+    // field-by-field for ~7 s as a background generator, and a GET_PATCH
+    // arriving mid-stream (every rig change) can wedge that generator,
+    // permanently queueing every later CONTEXT push / EVENT behind it -
+    // the Stage view then goes deaf to effect toggles. StageView only
+    // uses the manifest for label fallbacks on UNLABELLED bindings
+    // (uncommon - switches carry their own label), so the Stage view
+    // does without it.
   }
 
   onMount(() => {
@@ -50,7 +64,7 @@
       const up = await isConnected();
       if (up && !connected) {
         connected = true;
-        bootstrap();
+        resync();
       } else if (!up && connected) {
         connected = false;
       }

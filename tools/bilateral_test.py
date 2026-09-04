@@ -444,6 +444,99 @@ def _():
     assert app.latched_calls == []
 
 
+# --- Stage Mode: effect-block state must reach display_context on the
+#     ACTUAL change, not only the 5 s beacon tick. Regression for the Pi
+#     kiosk / desktop Stage view showing stale effect squares (the pedal
+#     LED was always right; the published context lagged or, for
+#     footswitch toggles, never updated at all). ---
+
+def _block_ctx(app):
+    """Every kemper_block_* value published to display_context, merged."""
+    out = {}
+    for u in app.context_updates:
+        for k, v in u.items():
+            if k.startswith("kemper_block_"):
+                out[k] = v
+    return out
+
+
+@test("kemper: CC echo of a footswitch toggle publishes kemper_block_* to context")
+def _():
+    # THE bug: CC 22 = block X ("FLANG"). A footswitch toggle comes back
+    # as this CC echo, and it used to update the LED but never the Stage
+    # view's context.
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)
+    assert app.latched_calls == [("3", True)], app.latched_calls
+    assert _block_ctx(app) == {"kemper_block_X": "on"}, app.context_updates
+
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 0], app)
+    assert _block_ctx(app) == {"kemper_block_X": "off"}, app.context_updates
+
+
+@test("kemper: SYSEX param response for a block publishes kemper_block_* to context")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"4": _patch_with_block("4", "C")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x34, 0x03, 1), app)
+    assert _block_ctx(app) == {"kemper_block_C": "on"}, app.context_updates
+
+
+@test("kemper: block toggle DURING a rig-change settle window is NOT published live")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    app.now_ms = 1000
+    kemper._BIDIR_STATE["settle_until_ms"] = 1500  # still settling
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)  # block X on, mid-burst
+    assert app.latched_calls == [], "no live LED paint during settle"
+    assert _block_ctx(app) == {}, "no live context publish during settle"
+    # cache is still updated so _apply_cache can settle it
+    assert kemper._BLOCK_STATE.get("X") is True
+
+
+@test("kemper: _apply_cache publishes the settled block state to context")
+def _():
+    _reset_published()
+    kemper._BLOCK_STATE.clear()
+    kemper._BLOCK_STATE.update({"X": True, "C": False})
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X"), "4": _patch_with_block("4", "C")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper._apply_cache(app)
+    assert _block_ctx(app) == {"kemper_block_X": "on", "kemper_block_C": "off"}, \
+        app.context_updates
+
+
+@test("kemper: repeated identical block state is published only once (dedup)")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 100], app)  # still "on"
+    block_pubs = [u for u in app.context_updates if any(k.startswith("kemper_block_") for k in u)]
+    assert len(block_pubs) == 1, block_pubs
+
+
 @test("kemper: bidirectional sensing message ($7E) marks confirmed + publishes kemper_connected")
 def _():
     app = FakeApp(

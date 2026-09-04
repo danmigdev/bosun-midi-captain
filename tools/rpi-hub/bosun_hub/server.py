@@ -94,14 +94,24 @@ async def _serve_ws(hub: Hub, host: str, port: int):
                     part = part.strip()
                     if part:
                         sub.send(part)
-        except Exception:  # noqa: BLE001 - normal close paths raise here
-            pass
+        except Exception as exc:  # noqa: BLE001 - normal close paths raise here
+            log.debug("ws %s recv loop ended: %r", ws.remote_address, exc)
         finally:
             sub.close()
             down.cancel()
-            log.info("ws client %s disconnected", ws.remote_address)
+            reason = getattr(ws, "close_reason", None)
+            code = getattr(ws, "close_code", None)
+            log.info(
+                "ws client %s disconnected (code=%s reason=%r)",
+                ws.remote_address, code, reason,
+            )
 
-    server = await serve(handle, host, port)
+    # Keep long-idle connections alive: the Stage feed can be silent for
+    # minutes and some paths (browser throttling, a busy Pi) delay the
+    # pong past the default 20 s. Be generous.
+    server = await serve(
+        handle, host, port, ping_interval=30, ping_timeout=90, max_size=None
+    )
     log.info("WebSocket protocol on ws://%s:%d", host, port)
     return server
 

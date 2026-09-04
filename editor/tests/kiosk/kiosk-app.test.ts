@@ -79,11 +79,14 @@ async function bringLinkUp() {
   await waitFor(() => expect(lastSent("GET_DEVICE_INFO")).toBeTruthy());
 }
 
+/** Answer whatever bootstrap commands were actually sent. The kiosk
+ *  defers GET_MANIFEST by 6 s and never re-sends it on a reconnect. */
 function answerBootstrap(bank = 1, slot = 1) {
   reply({ type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id, fw: "0.6.1", device: "midi_captain_10", current: { bank, slot } });
-  reply({ type: "MANIFEST", id: lastSent("GET_MANIFEST")!.id, core_messages: {}, plugins: {} });
-  reply({ type: "GLOBAL", id: lastSent("GET_GLOBAL")!.id, device: {} });
-  reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, patches: [] });
+  const g = lastSent("GET_GLOBAL");
+  if (g) reply({ type: "GLOBAL", id: g.id, device: {} });
+  const p = lastSent("LIST_PATCHES");
+  if (p) reply({ type: "PATCH_LIST", id: p.id, patches: [] });
 }
 
 const kToggle = (slot: string) => ({
@@ -157,5 +160,58 @@ describe("kiosk integration", () => {
     await waitFor(() =>
       expect(container.querySelector(".stage__rig-name")).toHaveTextContent("LEAD"),
     );
+  });
+
+  it("never re-requests the heavy manifest/global/patch-list on a reconnect", async () => {
+    // The manifest streams for seconds on the firmware and starves the
+    // data channel of CONTEXT pushes (the effect-block state the Stage
+    // view lives on). A reconnect storm re-fetching it was why effect
+    // toggles stopped updating on the Pi. A reconnect must cost only a
+    // tiny GET_DEVICE_INFO.
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+
+    const heavyOnFirstBoot = sock().sent.filter(
+      (l) => l.includes("GET_GLOBAL") || l.includes("LIST_PATCHES"),
+    ).length;
+    expect(heavyOnFirstBoot).toBe(2); // once, on the first connect
+
+    for (let i = 0; i < 3; i++) {
+      sock().close();
+      await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(i + 1));
+      sock()._open();
+      sock()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+      await waitFor(() => expect(lastSent("GET_DEVICE_INFO")).toBeTruthy());
+      answerBootstrap(1, 1);
+    }
+
+    const heavy = FakeWebSocket.instances
+      .flatMap((s) => s.sent)
+      .filter(
+        (l) =>
+          l.includes("GET_MANIFEST") ||
+          l.includes("GET_GLOBAL") ||
+          l.includes("LIST_PATCHES"),
+      );
+    expect(heavy).toHaveLength(2); // still just the first-boot GLOBAL + LIST_PATCHES
+  });
+
+  it("never requests the heavy manifest at all", async () => {
+    // On the RP2040 the manifest streams as a background generator for
+    // ~7 s and a GET_PATCH mid-stream (every rig change) can wedge it,
+    // permanently queueing every CONTEXT push behind it. The Stage kiosk
+    // does without it (label fallbacks only).
+    vi.useFakeTimers();
+    try {
+      mountKiosk();
+      sock()._open();
+      sock()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(sock().sent.some((l) => l.includes("GET_MANIFEST"))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -600,6 +600,10 @@ def on_midi_in(port, channel, status, data, app):
             # Paint the LED live only when NOT settling a rig change (see
             # _BIDIR_STATE["settle_until_ms"]): mid-burst paints cause the flash.
             if app._now_ms() >= _BIDIR_STATE["settle_until_ms"]:
+                # Stage Mode block colour: a footswitch toggle comes back as
+                # this CC echo, not the SYSEX param path below - publish here
+                # too or the Stage view never sees switch-driven toggles.
+                _publish(app, {"kemper_block_" + block: "on" if on else "off"})
                 for sw_name, binding in app.current_bindings():
                     if _binding_targets_block(binding, block):
                         app.set_switch_latched(sw_name, on)
