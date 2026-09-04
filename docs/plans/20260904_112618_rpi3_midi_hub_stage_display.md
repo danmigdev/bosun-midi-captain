@@ -14,9 +14,10 @@ stage screen:
    done by a PC (`tools/midi_bridge.py` / editor `midi.rs`) or an Android
    phone (`BosunMidiBridge.kt`).
 2. **Bosun protocol link.** The Pi keeps a connection to the Captain's
-   data USB-CDC port and exposes the Bosun line-JSON protocol on the LAN,
-   so the desktop/Android editor can connect over WiFi (`tcpConnect`)
-   with no cable.
+   data USB-CDC port. It feeds the Stage display from that stream, and
+   exposes the Bosun line-JSON protocol on a wired LAN so the
+   desktop/Android editor can connect (`tcpConnect`) during setup /
+   soundcheck.
 3. **External Stage display.** The Pi drives a wide HDMI panel
    (reference: Waveshare 8.8" Side Monitor, 480x1920 native) showing the
    same **Stage View** currently used on Android, fed live from the
@@ -26,6 +27,49 @@ Target outcome: plug in power, the Captain, the Kemper and the monitor;
 the rig is playable and the stage screen is live, no laptop or phone
 required.
 
+## Live use is the primary target: everything wired
+
+The design point is a permanent, road-worthy pedalboard install, all
+connections by cable, no wireless in the critical path:
+
+```
+  [MIDI Captain] ==USB==>  [ Pi ]  <==USB== [Kemper Player]
+   (USB-MIDI + 2x CDC)        |             (USB-MIDI only, no DIN)
+                              |
+                        HDMI + USB 5V
+                              |
+                     [Waveshare 8.8" panel]
+
+  setup / soundcheck only:
+  [laptop or phone] ==Ethernet (or Pi 4 USB-C gadget)==> [ Pi ]  ->  editor over tcp://
+```
+
+Kemper audio out goes to the amp/PA as usual; the Pi is not in the audio
+path. Consequences that drive the rest of this plan:
+
+- **The MIDI path and the display are independent.** If the browser or
+  the HDMI panel dies mid-set, MIDI Captain <-> Kemper keeps working.
+  They are separate systemd services with no dependency between them
+  (`R-live-1`).
+- **No WiFi at the gig.** Editor access during setup is over an Ethernet
+  cable (mDNS `bosun-hub.local`, or a fixed link-local address) or, on a
+  Pi 4, over the USB-C port in gadget/ethernet mode so the laptop needs
+  one cable and zero network config. WiFi is optional and off by default;
+  enable it only at home for updates. This resolves the substance of
+  decision D3.
+- **Survives the pedalboard power switch.** Everything comes up on cold
+  power with no operator action, in any device power-on order, and a
+  hard power cut never corrupts the card: **read-only root filesystem**
+  (overlayfs) + the hardware watchdog + auto-restart on every service
+  (`R-live-2`).
+- **Pi 3 has no USB gadget mode** on its micro-USB (power only); only
+  Pi Zero / 4 / 5 can present themselves as a USB device to a laptop.
+  This is a concrete point in favour of a Pi 4 (see D2).
+- **Boot time is a UX factor.** Cold boot to "MIDI relay live" should be
+  a few seconds after the kernel is up (`amidiminder` is tiny); "Stage
+  screen live" will trail by the Chromium start time (tens of seconds on
+  a Pi 3). Acceptable for setup, but measure and trim (`R-live-3`).
+
 ## Hardware
 
 | Part | Notes |
@@ -33,12 +77,13 @@ required.
 | Raspberry Pi 3B / 3B+ | 1 GB RAM, quad A53. **See risk R1** - a Pi 4 (2 GB+) is strongly recommended for the browser-rendered Stage View. Keep the software Pi-3-compatible regardless. |
 | Waveshare 8.8" Side Monitor | 480x1920 IPS, HDMI in + USB for power, **no touch**. Needs a custom HDMI mode (`hdmi_timings`) and a display rotation for landscape 1920x480. Vendor recommends its own 5 V supply rather than drawing from the Pi. [wiki](https://www.waveshare.com/wiki/8.8inch_Side_Monitor) |
 | Powered USB hub | Almost certainly required. The Pi 3 caps total USB current low, and its USB + Ethernet share one 480 Mbps bus. The Android bridge already documents needing a powered hub for simultaneous Kemper + Captain. |
-| 5 V PSU(s) | One solid supply for the Pi, one for the monitor (or a single high-current supply feeding a powered hub). Power sequencing matters: the bridge must survive the Captain being powered after the Pi. |
-| microSD | 16 GB+. A2 card if possible; the browser is I/O sensitive. |
+| 5 V PSU(s) | One solid supply for the Pi (>= 2.5 A), one for the monitor. On a pedalboard, ideally a single high-current 5 V brick feeding the Pi and a powered hub. Every power-on order must be safe (see `R5`). |
+| microSD | 16 GB+, A2 endurance/industrial card. Root filesystem runs **read-only** (overlayfs) so a power cut cannot corrupt it. |
+| Short right-angle USB cables + panel mount | Road-worthy install: strain-relieved cables, the panel bracket-mounted, the Pi in a case screwed to the board. |
 
 Cabling: Captain USB (1 MIDI-class interface + 2 CDC-ACM interfaces on
 one connector), Kemper Player USB (MIDI-class only, no DIN), monitor
-HDMI + monitor USB power.
+HDMI + monitor USB power. Ethernet only used at setup/soundcheck.
 
 ## Distro selection
 
@@ -185,14 +230,21 @@ Why this shape:
   - Serve the static stage bundle over HTTP on the same port.
   - One connection at a time to the port; many readers. Backpressure:
     drop-oldest on a slow WS client, never block the port reader.
-- `systemd` units: `bosun-hub.service`, `bosun-kiosk.service`
-  (cage + chromium), `amidiminder` rule file for Captain<->Kemper.
+- `systemd` units, **mutually independent** (a display failure never
+  stops MIDI - `R-live-1`):
+  - `amidiminder` (packaged) - Captain<->Kemper ALSA seq rules.
+  - `bosun-hub.service` - the CDC bridge + TCP/WS server.
+  - `bosun-kiosk.service` - cage + chromium; `Wants=` bosun-hub but does
+    not block it, auto-restarts on crash.
+  All have `Restart=always` and a `WatchdogSec=`.
 - `install.sh` on top of stock Raspberry Pi OS Lite: apt deps, Blokas
   repo + `amidiminder`, `cage`/`chromium`, HDMI mode config, enable
-  services. Idempotent, re-runnable for updates.
-- `config/` : `/boot/firmware/config.txt` snippet for the Waveshare mode,
-  a udev rule so `/dev/ttyACM*` is stable, optional WiFi-AP config
-  (decision D3).
+  read-only overlay root + hardware watchdog, enable services.
+  Idempotent, re-runnable for updates (temporarily remounts rw).
+- `config/` : `/boot/firmware/config.txt` snippet for the Waveshare mode
+  + `dtparam=watchdog=on`, a udev rule so `/dev/ttyACM*` is stable,
+  Ethernet mDNS (`bosun-hub.local`) + link-local fallback, Pi 4 USB-C
+  `dwc2`/`g_ether` gadget config, WiFi left disabled.
 - `README.md` with wiring diagram, power notes, flashing steps.
 
 **2. `editor/` - the stage kiosk build (new build target, no runtime changes to StageView)**
@@ -264,16 +316,26 @@ so both are available.
 
 - **D1.** Base distro: Raspberry Pi OS Bookworm Lite 64-bit + amidiminder
   (recommended), or Patchbox OS (turnkey MIDI distro, heavier)?
-- **D2.** Pi 3 as a hard constraint, or is a Pi 4 acceptable for the
-  build target? (Affects how much effort goes into the `?lite`
-  render path and whether Chromium is even the renderer - see R1.)
-- **D3.** Networking: Pi joins existing WiFi, runs its own access point
-  (self-contained at a venue), or both (AP + optional uplink)?
+- **D2.** Pi 3 or Pi 4? The all-wired live target leans Pi 4: USB-C
+  gadget mode gives single-cable editor access with no network setup,
+  faster cold boot, and headroom so the full Stage View (blur effects,
+  no `?lite`) renders smoothly. Pi 3 works but is marginal on the
+  browser and cannot do gadget-mode editor access. **Recommend Pi 4
+  (2 GB), keep the software Pi-3-compatible.**
+- **D3.** (Substantially resolved by the all-wired target.) Setup-time
+  editor access over Ethernet + mDNS, plus Pi 4 USB-C gadget-ethernet.
+  WiFi off by default, enabled manually at home for updates. Still open:
+  do you also want an on-demand WiFi AP as a fallback editor path?
 - **D4.** Deliverable form: an `install.sh` on top of stock Raspberry Pi
   OS, or a prebuilt flashable image (pi-gen based) as a release artifact?
-- **D5.** Does the hub expose the protocol on the LAN unauthenticated
-  (simple, same as `tcp://` today) or gated (token / bound to the AP
-  interface only)? It can push patches and reboot the pedal.
+- **D5.** Because the protocol port is only reachable on a cable you
+  control (Ethernet / USB-C gadget), unauthenticated is probably fine
+  (same as `tcp://` today). Confirm, or add a token if the board ever
+  shares a house LAN. The port can push patches and reboot the pedal.
+- **D6.** Does the live rig ever need the editor connected *during* a
+  set, or is it strictly pre-configure then play? (If never, the LAN
+  path can be brought up only on demand, shrinking the live attack
+  surface and USB-bus contention further.)
 
 ## Risks (R)
 
@@ -287,9 +349,13 @@ so both are available.
   KMS driver, where the legacy `hdmi_timings` path is fragile. May need a
   `video=HDMI-A-1:...` cmdline mode or a custom EDID, plus a compositor
   output transform for landscape. Budget bring-up time.
-- **R3 - Pi 3 USB/LAN shared bus.** Two USB-MIDI devices + CDC + Ethernet
-  on one 480 Mbps bus. A powered hub and using WiFi (not Ethernet) for
-  the LAN link should keep MIDI latency sane; measure it.
+- **R3 - Pi 3 USB/LAN shared bus.** On a Pi 3, the 4 USB ports + Ethernet
+  share one 480 Mbps bus. During a set nothing else is on the wire (no
+  editor traffic), so MIDI latency is fine; the contention only matters
+  at soundcheck when the editor pulls the manifest / pushes patches.
+  Powered hub regardless. Pi 4 has Ethernet off the USB bus and USB 3,
+  removing this entirely (another D2 point). Measure MIDI round-trip on
+  the chosen board.
 - **R4 - ALSA seq real-time forwarding.** Confirm with `aseqdump` that a
   plain `amidiminder` connection passes Kemper SysEx and the `0x7E`
   sensing frames intact and does not choke on clock. Userspace filter is
@@ -297,6 +363,28 @@ so both are available.
 - **R5 - power sequencing.** Captain powered after the Pi, Kemper
   unplugged mid-set, etc. The `bosun-hub` self-heal and `amidiminder`
   hotplug rules must cover every order. Explicit test matrix in bring-up.
+
+### Live-specific risks
+
+- **R-live-1 - display failure must not touch MIDI.** Chromium crash,
+  HDMI unplugged, GPU wedged: the MIDI relay and `bosun-hub` keep
+  running. Enforced by making the kiosk its own service with no reverse
+  dependency, and by not routing MIDI through any userspace process by
+  default (kernel ALSA seq only).
+- **R-live-2 - unclean power loss.** Read-only overlayfs root, `fsync`
+  discipline anywhere the hub writes state, `dtparam=watchdog=on` +
+  `systemd` watchdog so a hung Pi self-reboots. Test: pull mains 50x
+  under load, confirm every boot is clean and relay-live in < T seconds.
+- **R-live-3 - cold-boot time.** Target: MIDI relay live within a few
+  seconds of kernel handoff; Stage screen within ~30 s on Pi 3 / ~15 s
+  on Pi 4. Trim with `quiet`, disabled swap, `systemd-analyze` review,
+  a preloaded Chromium profile, and a splash so the screen is never
+  just black.
+- **R-live-4 - single point of failure.** The Pi is now in the MIDI
+  path that today a laptop/phone occupies. Mitigate with a boring,
+  proven config (read-only FS, watchdog, no moving parts) and document
+  a fallback (spare SD card; or, in extremis, a direct DIN path is not
+  possible because the Player has no DIN - so the spare SD is the plan).
 
 ## Out of scope
 
