@@ -205,9 +205,13 @@ def driver() -> None:
         time.sleep(random.uniform(1.5, 3.5))
 
 
+class _Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True  # survive a quick restart while a socket is in TIME_WAIT
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     threading.Thread(target=driver, daemon=True).start()
     print(f"stage demo pedal on {HOST}:{PORT}", flush=True)
-    with socketserver.ThreadingTCPServer((HOST, PORT), H) as srv:
-        srv.daemon_threads = True
+    with _Server((HOST, PORT), H) as srv:
         srv.serve_forever()
