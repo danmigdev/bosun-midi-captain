@@ -106,16 +106,22 @@ class Hub:
 
     # -- upstream callbacks (called from the link thread) --------------
 
+    def _post(self, fn, *args) -> None:
+        """Hand work to the asyncio loop from the link thread, tolerating a
+        loop that is shutting down."""
+        if self._loop is None:
+            return
+        try:
+            self._loop.call_soon_threadsafe(fn, *args)
+        except RuntimeError:
+            pass  # loop closed during shutdown
+
     def _on_upstream_line(self, line: str) -> None:
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._dispatch, line)
+        self._post(self._dispatch, line)
 
     def _on_upstream_state(self, up: bool, detail: str) -> None:
         log.info("upstream link %s (%s)", "up" if up else "down", detail)
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(
-                self._dispatch_status, self._status_line(up)
-            )
+        self._post(self._dispatch_status, self._status_line(up))
 
     def _dispatch(self, line: str) -> None:
         for sub in self._subs:

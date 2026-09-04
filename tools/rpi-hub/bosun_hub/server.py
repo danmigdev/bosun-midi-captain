@@ -149,7 +149,11 @@ async def run(
     hub = Hub(target)
     hub.start()
 
-    servers = [await _serve_tcp(hub, host, tcp_port)]
+    servers = []
+    try:
+        servers.append(await _serve_tcp(hub, host, tcp_port))
+    except OSError as exc:
+        log.warning("raw TCP listener not started on :%d: %s", tcp_port, exc)
     try:
         servers.append(await _serve_ws(hub, host, ws_port))
     except Exception as exc:  # noqa: BLE001
