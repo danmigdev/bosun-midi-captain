@@ -1,0 +1,18 @@
+[Unit]
+Description=Bosun hub - MIDI Captain data-port owner and protocol fan-out
+After=network.target
+
+[Service]
+Type=simple
+User=bosun
+WorkingDirectory=/opt/bosun-hub
+ExecStart=/usr/bin/python3 -m bosun_hub --stage-dir /opt/bosun-hub/stage
+Restart=always
+RestartSec=2
+TimeoutStopSec=5
+KillMode=mixed
+# The display and the editor path must never take MIDI down with them,
+# so this unit is deliberately independent of bosun-midi.* and the kiosk.
+
+[Install]
+WantedBy=multi-user.target

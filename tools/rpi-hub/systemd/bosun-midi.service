@@ -1,0 +1,14 @@
+[Unit]
+Description=Wire MIDI Captain <-> Kemper Player in the ALSA sequencer
+After=sound.target
+
+[Service]
+Type=oneshot
+User=bosun
+WorkingDirectory=/opt/bosun-hub
+ExecStart=/usr/bin/python3 -m bosun_hub.midi_connect
+# exit 1 just means "both devices not present yet", not a failure
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target
