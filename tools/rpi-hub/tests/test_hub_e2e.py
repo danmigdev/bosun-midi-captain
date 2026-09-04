@@ -159,6 +159,53 @@ def test_hub_fans_out_to_two_subscribers():
     _run(body())
 
 
+def test_hub_forwards_pushed_lines_with_low_latency():
+    """A CONTEXT/EVENT the pedal pushes must reach every subscriber
+    within a few milliseconds - the Stage view's whole point is live
+    feedback."""
+
+    async def body():
+        pedal = FakePedal()
+        hub = Hub(f"tcp://127.0.0.1:{pedal.port}")
+        hub.start()
+        try:
+            assert await _wait(lambda: hub.link.connected)
+            sub = hub.subscribe()
+            got: "list[tuple[float, str]]" = []
+
+            async def drain():
+                async for line in sub.lines():
+                    got.append((asyncio.get_event_loop().time(), line))
+
+            task = asyncio.create_task(drain())
+            await asyncio.sleep(0.05)  # settle
+
+            samples = []
+            for i in range(20):
+                sent_at = asyncio.get_event_loop().time()
+                pedal.push({"type": "CONTEXT", "context": {"seq": i}})
+                assert await _wait(
+                    lambda: any(f'"seq": {i}' in l or f'"seq":{i}' in l for _, l in got),
+                    timeout=2,
+                )
+                recv_at = next(t for t, l in got if f'"seq": {i}' in l or f'"seq":{i}' in l)
+                samples.append(recv_at - sent_at)
+                await asyncio.sleep(0.02)
+
+            worst = max(samples)
+            avg = sum(samples) / len(samples)
+            # Generous bounds - CI hosts are noisy - but well under the
+            # "feels laggy" threshold. Regression net, not a benchmark.
+            assert worst < 0.20, f"worst forward latency {worst * 1000:.0f} ms"
+            assert avg < 0.05, f"avg forward latency {avg * 1000:.0f} ms"
+            task.cancel()
+        finally:
+            hub.stop()
+            pedal.close()
+
+    _run(body())
+
+
 def test_hub_slow_subscriber_drops_not_blocks():
     async def body():
         pedal = FakePedal()

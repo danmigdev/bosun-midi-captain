@@ -693,4 +693,145 @@ describe("StageView", () => {
       expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("");
     });
   });
+
+  // Every visible field must reflect a single firmware message within one
+  // flush - no polling delay, no waiting for the next unsolicited push.
+  // `pushFirmwareMessage` resolves after exactly one macrotask (the drain
+  // -> subscriber -> Svelte flush chain); each assertion runs immediately
+  // after, so a passing test means the update was synchronous with the
+  // message, not deferred. Regression net for the Pi kiosk, where
+  // StageView mounts before the link is confirmed.
+  describe("live update speed", () => {
+    const kemperToggle = (slot: string) => ({
+      messages: [{ type: "kemper_effect_toggle", plugin: "kemper", slot }],
+    });
+
+    function blockBinding(sw: string, slot: string, label: string): Binding {
+      return binding(sw, {
+        mode: "latched",
+        label,
+        actions: { toggle_on: kemperToggle(slot), toggle_off: kemperToggle(slot) },
+      });
+    }
+
+    async function loadPatch(rerender: (p: Partial<StageProps>) => Promise<void>) {
+      await pushFirmwareMessage({
+        type: "PATCH",
+        bank: 1,
+        slot: 1,
+        patch: {
+          name: "CLEAN",
+          bindings: [blockBinding("3", "X", "FLANG"), blockBinding("A", "Mod", "CHORUS")],
+        },
+      });
+    }
+
+    it("lights a bound switch the instant its kemper_block_* turns on", async () => {
+      const { container, rerender } = renderStage({
+        deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
+        manifest: fallbackManifest(),
+      });
+      await loadPatch(rerender);
+
+      // Off by default (latched map reset on patch load, no CONTEXT yet).
+      expect(switchById(container, "3")).not.toHaveClass("stage__switch--active");
+
+      await pushFirmwareMessage({
+        type: "CONTEXT",
+        context: { kemper_block_X: "on", kemper_block_Mod: "off" },
+      });
+      expect(switchById(container, "3")).toHaveClass("stage__switch--active");
+      expect(switchById(container, "A")).not.toHaveClass("stage__switch--active");
+
+      await pushFirmwareMessage({
+        type: "CONTEXT",
+        context: { kemper_block_X: "off", kemper_block_Mod: "on" },
+      });
+      expect(switchById(container, "3")).not.toHaveClass("stage__switch--active");
+      expect(switchById(container, "A")).toHaveClass("stage__switch--active");
+    });
+
+    it("subscribes and reflects state when mounted disconnected, then connected", async () => {
+      // The Pi kiosk mounts StageView before the hub link is confirmed.
+      const { container, rerender } = renderStage({
+        connected: false,
+        deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
+        manifest: fallbackManifest(),
+      });
+      expect(invokeMock).not.toHaveBeenCalledWith("send_command", expect.anything());
+
+      await rerender({ connected: true });
+      // On connect it pulls the current context + patch...
+      expect(invokeMock).toHaveBeenCalledWith(
+        "send_command",
+        expect.objectContaining({ line: expect.stringContaining("GET_CONTEXT") }),
+      );
+      // ...and now reacts to live messages.
+      await loadPatch(rerender);
+      await pushFirmwareMessage({
+        type: "CONTEXT",
+        context: { kemper_block_X: "on" },
+      });
+      expect(switchById(container, "3")).toHaveClass("stage__switch--active");
+    });
+
+    it("re-pulls context and patch after a reconnect", async () => {
+      const { rerender } = renderStage({
+        connected: true,
+        deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
+      });
+      invokeMock.mockClear();
+
+      await rerender({ connected: false });
+      await rerender({ connected: true });
+
+      const sent = invokeMock.mock.calls
+        .filter(([cmd]) => cmd === "send_command")
+        .map(([, arg]) => (arg as { line: string }).line);
+      expect(sent.some((l) => l.includes("GET_CONTEXT"))).toBe(true);
+      expect(sent.some((l) => l.includes("GET_PATCH"))).toBe(true);
+    });
+
+    it("updates rig name, BPM and tuner together from one CONTEXT", async () => {
+      const { container } = renderStage({
+        deviceInfo: { ...DEVICE, bank: 1, slot: 2 },
+      });
+      await pushFirmwareMessage({
+        type: "CONTEXT",
+        context: {
+          kemper_rig_name: "CRUNCH",
+          kemper_bpm: 132,
+          kemper_tuner: "on",
+          kemper_tuner_note: "A",
+          kemper_tuner_deviance: 8192,
+        },
+      });
+      expect(container.querySelector(".stage__rig-name")).toHaveTextContent("CRUNCH");
+      expect(container.querySelector(".stage__bpm")).toHaveTextContent("132");
+      expect(container.querySelector(".stage__tuner")).toHaveTextContent("A");
+    });
+
+    it("follows a rig change: bank/rig header and block colours track together", async () => {
+      const { container, rerender } = renderStage({
+        deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
+        manifest: fallbackManifest(),
+      });
+      await loadPatch(rerender);
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_block_X: "on" } });
+      expect(switchById(container, "3")).toHaveClass("stage__switch--active");
+
+      // Rig change: new deviceInfo, new PATCH, new CONTEXT with X now off.
+      await rerender({ deviceInfo: { ...DEVICE, bank: 1, slot: 2 } });
+      await pushFirmwareMessage({
+        type: "PATCH",
+        bank: 1,
+        slot: 2,
+        patch: { name: "LEAD", bindings: [blockBinding("3", "X", "FLANG")] },
+      });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_block_X: "off" } });
+
+      expect(container.querySelector(".stage__meta")).toHaveTextContent("RIG 2");
+      expect(switchById(container, "3")).not.toHaveClass("stage__switch--active");
+    });
+  });
 });

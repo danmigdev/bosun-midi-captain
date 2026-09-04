@@ -142,6 +142,19 @@ class WsLink {
     if (set) for (const h of set) h({ payload: null });
     try { window.dispatchEvent(new CustomEvent(event)); } catch { /* noop */ }
   }
+
+  /** Test hook: drop the current socket and let the next start() open a
+   *  fresh one. Keeps the doorbell/listener registrations, which
+   *  protocol.ts installs once per process. */
+  __cycleSocketForTest(): void {
+    try { this.ws?.close(); } catch { /* noop */ }
+    this.ws = null;
+    this.inbox = [];
+    this.socketOpen = false;
+    this.linkUp = false;
+    this.backoffStep = 0;
+    this.wantOpen = false;
+  }
 }
 
 export const wsLink = new WsLink();

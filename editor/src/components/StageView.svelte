@@ -224,16 +224,39 @@
   }
 
   // --- lifecycle ---
-  onMount(() => { _start(); return () => _stop(); });
+  onMount(() => () => _stop());
   onDestroy(() => { _stop(); });
 
+  // (Re)pull live state on every link transition into "connected". Covers
+  // three cases the desktop app never hit because it only shows Stage
+  // once already connected: (a) StageView mounted before the link was up
+  // (the Pi kiosk, editor/src/kiosk), (b) a reconnect after a drop, and
+  // (c) bank-step navigation changing deviceInfo. Without (a)/(b) the
+  // subscriber was never attached / the first CONTEXT+PATCH never
+  // re-fetched, so the grid sat on stale/empty state until the next
+  // unsolicited firmware push happened to arrive.
+  let _linkUp = false;
+  $effect(() => {
+    if (connected && !_linkUp) {
+      _linkUp = true;
+      _subscribe();
+      pollContext();
+      fetchPatch();
+    } else if (!connected) {
+      _linkUp = false;
+    }
+  });
+
+  // Re-fetch the patch whenever it (bank-step nav) or the connection
+  // changes. Reads both every run so Svelte tracks them as dependencies.
   $effect(() => {
     if (connected && deviceInfo) fetchPatch();
   });
 
-  async function _start() {
-    if (!connected) return;
-    pollContext(); fetchPatch();
+  let _subscribing = false;
+  async function _subscribe() {
+    if (unsubFw || _subscribing) return;
+    _subscribing = true;
     try {
       const unsub = await onFirmwareMessage((msg: FirmwareMessage) => {
         if (msg.type === "CONTEXT" && msg.context) {
@@ -261,7 +284,11 @@
         }
       });
       unsubFw = unsub;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore - the link-transition effect will retry */
+    } finally {
+      _subscribing = false;
+    }
   }
 
   function _stop() {
