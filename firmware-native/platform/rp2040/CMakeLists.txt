@@ -1,4 +1,4 @@
-add_library(bosun_board STATIC board.c usb_descriptors.c)
+add_library(bosun_board STATIC board.c cdc_session.c usb_descriptors.c)
 target_include_directories(bosun_board PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/../../include" "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_definitions(bosun_board PUBLIC BOSUN_PLATFORM_RP2040=1)

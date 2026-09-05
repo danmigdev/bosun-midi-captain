@@ -53,14 +53,15 @@ static unsigned alignment(const bosun_json_doc_t *doc, int entry, const char *ke
     return 0;
 }
 static void resolve(const char *field, const bosun_config_t *config,
-                    const bosun_kemper_state *kemper, char *out, size_t capacity,
+                    const bosun_kemper_state *kemper, const char *hold_effect, char *out, size_t capacity,
                     unsigned *status) {
     out[0] = 0;
     if (!strcmp(field, "patch_name")) {
         if (kemper && kemper->rig_name_fresh && kemper->rig_name[0])
             snprintf(out, capacity, "%s", kemper->rig_name);
         else string_field(&config->patch_doc, 0, "name", out, capacity, status);
-    } else if (!strcmp(field, "bank")) snprintf(out, capacity, "%u", config->bank);
+    } else if (!strcmp(field, "hold_effect")) snprintf(out, capacity, "%s", hold_effect);
+    else if (!strcmp(field, "bank")) snprintf(out, capacity, "%u", config->bank);
     else if (!strcmp(field, "slot")) snprintf(out, capacity, "%u", config->slot);
     else if (!strcmp(field, "expression_mode"))
         snprintf(out, capacity, "%s", kemper ? bosun_kemper_expression_label(kemper->expression_mode) : "---");
@@ -147,7 +148,7 @@ static void add_label(bosun_display_t *display, const bosun_json_doc_t *doc, int
     string_field(doc, entry, "font", font_name, sizeof font_name, &display->status);
     if (*font_name && strcmp(font_name, "system")) display->status |= BOSUN_DISPLAY_UNSUPPORTED_FONT;
     string_field(doc, entry, "field", field, sizeof field, &display->status);
-    if (*field) resolve(field, config, kemper, value, sizeof value, &display->status);
+    if (*field) resolve(field, config, kemper, display->hold_effect, value, sizeof value, &display->status);
     else string_field(doc, entry, "text", value, sizeof value, &display->status);
     label->badge = !strcmp(field, "expression_mode");
     label->icon = label->badge && kemper ? (uint8_t)kemper->expression_mode : 0;
@@ -220,7 +221,7 @@ static void prepare(bosun_display_t *display, const bosun_config_t *config,
     }
     if (!display->count) {
         char name[192];
-        resolve("patch_name", config, kemper, name, sizeof name, &display->status);
+        resolve("patch_name", config, kemper, display->hold_effect, name, sizeof name, &display->status);
         simple_label(display, *name ? name : "Bosun Native", 3, 0xffff, 120);
     }
 }
@@ -273,14 +274,18 @@ void bosun_display_init(bosun_display_t *display) {
     display->row = 240;
 }
 unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *config,
-                              const bosun_kemper_state *kemper, uint32_t now_ms) {
+                              const bosun_kemper_state *kemper, const char *hold_effect,
+                              uint32_t now_ms) {
     if (!display || !config) return BOSUN_DISPLAY_INVALID_LAYOUT;
+    if (!hold_effect) hold_effect = "";
     uint32_t kemper_revision = kemper ? kemper->revision : 0;
     if (display->row >= 240) {
         bool changed = !display->has_frame || config->revision != display->config_revision ||
-            config->patch_revision != display->patch_revision || kemper_revision != display->kemper_revision;
+            config->patch_revision != display->patch_revision || kemper_revision != display->kemper_revision ||
+            strcmp(display->hold_effect, hold_effect);
         if (!changed && (!display->scrolling || now_ms - display->frame_ms < 40)) return display->status;
         if (changed) display->animation_started_ms = now_ms;
+        snprintf(display->hold_effect, sizeof display->hold_effect, "%s", hold_effect);
         prepare(display, config, kemper);
         display->config_revision = config->revision;
         display->patch_revision = config->patch_revision;

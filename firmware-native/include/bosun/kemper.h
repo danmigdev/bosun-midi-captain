@@ -49,6 +49,7 @@ typedef struct {
     uint32_t last_beacon_ms, last_sensed_ms, settle_until_ms;
     uint32_t reconcile_deadline_ms, query_retire_ms, orphan_until_ms;
     uint32_t pending_name_ms, pending_name_generation;
+    uint32_t name_query_generation, name_query_retire_ms;
     uint32_t block_generation[BOSUN_KEMPER_BLOCKS];
     uint32_t guard_until_ms[BOSUN_KEMPER_BLOCKS];
     uint32_t wah_query_generation, wah_retire_ms, wah_next_ms;
@@ -66,6 +67,8 @@ typedef struct {
     int8_t wah_fixed;
     bool init_sent, settle_active, wah_pending, wah_query_valid, scheduled_pc;
     bool wah_retire_active;
+    bool rig_identity_known, bootstrap_name_pending;
+    bool name_query_active, name_query_retire_active, pending_name_requested;
 } bosun_kemper;
 
 void bosun_kemper_init(bosun_kemper *kemper, uint8_t channel,
@@ -85,7 +88,7 @@ bool bosun_kemper_select_rig_channel(bosun_kemper *kemper, uint8_t channel,
 /* Establish a local patch generation without MIDI, e.g. a non-rig patch edit. */
 bool bosun_kemper_begin_rig(bosun_kemper *kemper, uint8_t flat_rig,
     uint32_t now_ms);
-bool bosun_kemper_request_rig_name(bosun_kemper *kemper);
+bool bosun_kemper_request_rig_name(bosun_kemper *kemper, uint32_t now_ms);
 bool bosun_kemper_query_blocks(bosun_kemper *kemper, uint8_t mask);
 /* EFFECT index=block enum; FIXED index=Compressor/Gate/Booster/Wah/Transpose
  * (0..4); LOOP index=rec-play/stop-erase/trigger/reverse/half-speed (0..4).

@@ -215,6 +215,42 @@ def test_rig_oracles_require_both_exact_header_separators_and_location():
     assert MODULE.target_ready(clean) is False
 
 
+@pytest.mark.parametrize("header", ["· B%d · R%d", "· BANK %d · RIG %d"])
+@pytest.mark.parametrize("bank,slot", [(1, 1), (1, 2), (25, 5)])
+def test_location_accepts_default_and_saved_tft_prefixes(header, bank, slot):
+    assert MODULE.at_location({"meta": header % (bank, slot)}, bank, slot)
+
+
+@pytest.mark.parametrize("meta", [
+    "BANK 1 · RIG 2", "· BANK 1 RIG 2", "BANK 1 RIG 2",
+    "· BANK 1 · RIG 2 ·", "·· BANK 1 · RIG 2", "· B1 · R2 extra",
+    "· BANK 1 · RIG 20", "· BANK 11 · RIG 2", "· BANK 2 · RIG 2",
+    "· BANK 1 · RIG 1", "· BANK 1 · R2", "· B1 · RIG 2",
+    "· BANK 01 · RIG 2", "· BANK1 · RIG2", "· BANK 1 · RIG 2 ",
+    " · BANK 1 · RIG 2", "", None,
+])
+def test_location_rejects_wrong_coordinates_partial_headers_and_mixed_prefixes(meta):
+    assert not MODULE.at_location({"meta": meta}, 1, 2)
+
+
+def test_saved_tft_prefixes_preserve_passive_effect_and_transition_oracles():
+    acoustic = acoustic_state()
+    acoustic["meta"] = "· BANK 1 · RIG 1"
+    clean = clean_state()
+    clean["meta"] = "· BANK 1 · RIG 2"
+    settling = clean_state(flang=False)
+    settling["meta"] = clean["meta"]
+
+    assert MODULE.passive_effect_status(acoustic)[:2] == (True, "acoustic")
+    assert MODULE.passive_effect_status(clean)[:2] == (True, "clean")
+    assert MODULE.passive_effect_status(settling)[:2] == (False, "clean")
+    trace = {"records": [record(0, settling), record(40, clean)]}
+    assert MODULE.validate_target_trace(trace, 100) == (40, 1)
+    trace["records"].append(record(50, settling))
+    with pytest.raises(AssertionError, match="bounced"):
+        MODULE.validate_target_trace(trace, 100)
+
+
 def test_source_trace_requires_harm_label_and_stays_ready():
     trace = {"records": [record(0, acoustic_state(False)), record(40, acoustic_state())]}
 

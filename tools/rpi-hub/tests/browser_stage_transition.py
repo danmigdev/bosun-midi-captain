@@ -795,10 +795,13 @@ def named(state, expected):
 
 
 def at_location(state, bank, slot):
-    # This exact oracle also guards the requested title/bank/rig separators:
-    # the normalized DOM text must be "· Bn · Rn", not "BANK n RIG n" nor
-    # a header with only one separator.
-    return state.get("meta") == "· B%d · R%d" % (bank, slot)
+    # These test rigs use either the Stage defaults or the saved Captain TFT
+    # prefixes "BANK " / "RIG ". Both require the complete normalized header,
+    # including the separator before the bank and between bank and rig.
+    return state.get("meta") in (
+        "· B%d · R%d" % (bank, slot),
+        "· BANK %d · RIG %d" % (bank, slot),
+    )
 
 
 def source_identity(state):

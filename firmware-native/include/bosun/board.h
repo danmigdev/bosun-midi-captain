@@ -24,6 +24,8 @@ bool bosun_board_init(const bosun_board_config_t *config);
 void bosun_board_task(void);
 uint32_t bosun_board_millis(void);
 bool bosun_board_usb_connected(void); /* CDC data interface 1, DTR asserted. */
+/* Advances on each data-session edge, including gaps missed by polling. */
+uint32_t bosun_board_usb_session_generation(void);
 /* MIDI USB availability follows enumeration, independently of CDC DTR. */
 bool bosun_board_midi_connected(bosun_midi_port_t port);
 
@@ -50,6 +52,8 @@ bool bosun_board_expression_charge(uint8_t jack, bool high);
 bool bosun_board_expression_release(uint8_t jack);
 void bosun_board_leds_set(uint8_t index, uint32_t rgb24);
 bool bosun_board_leds_show(void); /* false if previous DMA/latch is busy. */
+/* Last submitted DMA frame, not a pending render or a physical light sensor. */
+uint32_t bosun_board_leds_get(uint8_t index);
 
 /* RGB565 words in host byte order. Rectangles are clipped to 240x240.
  * blit stride is in pixels and must be >= width. No framebuffer: at most

@@ -22,6 +22,7 @@ static struct timespec started;
 static uint16_t framebuffer[BOSUN_DISPLAY_HEIGHT][BOSUN_DISPLAY_WIDTH];
 static uint32_t led_colors[BOSUN_LED_COUNT], display_rows, led_frames;
 static uint64_t midi_bytes[2];
+static uint32_t usb_session_generation;
 static FILE *midi_log;
 
 static void stop(int signal_number) { (void)signal_number; stopping = 1; }
@@ -30,18 +31,15 @@ static bool nonblocking(int fd) {
     return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 static void disconnect(void) {
-    if (client >= 0) { close(client); client = -1; }
+    if (client >= 0) { close(client); client = -1; ++usb_session_generation; }
 }
 
 bool bosun_board_init(const bosun_board_config_t *config) { (void)config; return true; }
 void bosun_board_task(void) {
-    /* Give the shared application a full disconnected tick before accepting
-     * another client, so a new socket can never inherit old protocol bytes. */
-    if (client < 0 && application.connected) return;
     int incoming = accept(listener, NULL, NULL);
     if (incoming < 0) return;
     if (client >= 0 || !nonblocking(incoming)) { close(incoming); return; }
-    client = incoming;
+    client = incoming; ++usb_session_generation;
 }
 uint32_t bosun_board_millis(void) {
     struct timespec now; (void)clock_gettime(CLOCK_MONOTONIC, &now);
@@ -50,6 +48,7 @@ uint32_t bosun_board_millis(void) {
     return (uint32_t)milliseconds;
 }
 bool bosun_board_usb_connected(void) { return client >= 0; }
+uint32_t bosun_board_usb_session_generation(void) { return usb_session_generation; }
 bool bosun_board_midi_connected(bosun_midi_port_t port) {
     return port == BOSUN_MIDI_USB || port == BOSUN_MIDI_DIN;
 }
@@ -95,6 +94,9 @@ void bosun_board_leds_set(uint8_t index, uint32_t color) {
     if (index < BOSUN_LED_COUNT) led_colors[index] = color;
 }
 bool bosun_board_leds_show(void) { ++led_frames; return true; }
+uint32_t bosun_board_leds_get(uint8_t index) {
+    return index < BOSUN_LED_COUNT ? led_colors[index] : 0;
+}
 bool bosun_board_display_rotation(uint16_t value) { return value <= 270 && value % 90 == 0; }
 void bosun_board_display_brightness(uint8_t value) { (void)value; }
 bool bosun_board_display_blit_rgb565(int16_t x, int16_t y, uint16_t width, uint16_t height,

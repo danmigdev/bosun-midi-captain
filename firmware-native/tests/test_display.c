@@ -11,6 +11,7 @@ static bool fail_write;
 static bosun_config_t config;
 static bosun_display_t display;
 static bosun_kemper_state kemper;
+static char hold_effect[129];
 
 bool bosun_board_display_rotation(uint16_t value) { rotation = value; return value <= 270 && value % 90 == 0; }
 void bosun_board_display_brightness(uint8_t value) { brightness = value; }
@@ -26,6 +27,7 @@ bool bosun_board_display_blit_rgb565(int16_t x, int16_t y, uint16_t w, uint16_t 
 static void load(const char *device, const char *patch) {
     memset(&config, 0, sizeof config);
     memset(&kemper, 0, sizeof kemper);
+    hold_effect[0] = 0;
     memset(pixels, 0xa5, sizeof pixels);
     config.bank = 2; config.slot = 3;
     config.revision = 1; config.patch_revision = 1;
@@ -41,7 +43,7 @@ static unsigned frame(uint32_t now) {
     uint32_t before = writes;
     for (unsigned i = 0; i < 30; ++i) {
         uint32_t previous = writes;
-        status = bosun_display_render(&display, &config, &kemper, now);
+        status = bosun_display_render(&display, &config, &kemper, hold_effect, now);
         assert(writes - previous <= 8);
     }
     assert(writes - before == 240);
@@ -66,7 +68,7 @@ static void geometry_and_colors(void) {
     assert(pixels[228][232] == 0x07e0 && pixels[228][236] == 0x07e0);
     assert(colored(0xf800) == 18 * 4 && colored(0x07e0) == 18);
     uint32_t before = writes;
-    assert(bosun_display_render(&display, &config, &kemper, 1) == BOSUN_DISPLAY_OK);
+    assert(bosun_display_render(&display, &config, &kemper, hold_effect, 1) == BOSUN_DISPLAY_OK);
     assert(writes == before); /* Unchanged frame has no display I/O. */
 }
 static void expression_badges_and_raw_mode(void) {
@@ -127,7 +129,7 @@ static void scroll_snapshot_and_tuner(void) {
 static void failed_transfer_is_visible(void) {
     load("{}", "{\"name\":\"Fallback\"}");
     fail_write = true;
-    assert(bosun_display_render(&display, &config, &kemper, 0) & BOSUN_DISPLAY_IO);
+    assert(bosun_display_render(&display, &config, &kemper, hold_effect, 0) & BOSUN_DISPLAY_IO);
     assert(writes == 0 && display.row == 0);
     fail_write = false;
     frame(1);
@@ -156,6 +158,24 @@ static void slow_scroll_long_labels_do_not_overflow(void) {
         assert(!memcmp(observed, pixels[32], sizeof observed));
     }
 }
+static void momentary_hold_repaints_without_configuration_change(void) {
+    /* Actual Captain layout: the hold label appears below BANK/RIG and must
+     * clear on release even if neither configuration nor Kemper changed. */
+    load("{\"tft\":{\"layout\":[{\"field\":\"hold_effect\",\"x\":0,\"y\":180,"
+         "\"size\":5,\"font\":\"system\",\"color\":\"#ffffff\"}]}}", "{}");
+    assert(frame(0) == BOSUN_DISPLAY_OK && colored(0xffff) == 0);
+    strcpy(hold_effect, "BOOST");
+    assert(frame(1) == BOSUN_DISPLAY_OK && colored(0xffff) > 0);
+    assert(display.labels[0].length == 5 && !memcmp(display.labels[0].glyphs, "BOOST", 5));
+    assert(display.labels[0].x == 0 && display.labels[0].y == 180);
+    assert(config.revision == 1 && config.patch_revision == 1 && kemper.revision == 0);
+    uint32_t before = writes;
+    assert(bosun_display_render(&display, &config, &kemper, hold_effect, 2) == BOSUN_DISPLAY_OK);
+    assert(writes == before);
+    hold_effect[0] = 0;
+    assert(frame(3) == BOSUN_DISPLAY_OK && colored(0xffff) == 0);
+    assert(display.labels[0].length == 0);
+}
 int main(void) {
     assert(sizeof(bosun_display_t) < 4096);
     geometry_and_colors();
@@ -164,6 +184,7 @@ int main(void) {
     scroll_snapshot_and_tuner();
     failed_transfer_is_visible();
     slow_scroll_long_labels_do_not_overflow();
+    momentary_hold_repaints_without_configuration_change();
     printf("display snapshots, geometry, color, icons, UTF-8, scrolling, tuner: PASS (%zu bytes)\n", sizeof display);
     return 0;
 }

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "bosun/board.h"
+#include "cdc_session.h"
 #include "board_contracts.h"
+#include "uart_tx.h"
 #include <string.h>
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
@@ -24,11 +26,10 @@
  * LED helpers: GP25 is switch 2 on the Captain. */
 enum { LED_PIN = 7, TFT_PWM = 8, TFT_DC = 12, TFT_CS = 13,
        TFT_SCK = 14, TFT_MOSI = 15, MIDI_TX = 16, MIDI_RX = 17,
-       EXP1 = 27, EXP2 = 28, UART_RING_SIZE = 512, UART_RX_SIZE = 2048 };
+       EXP1 = 27, EXP2 = 28, UART_RX_SIZE = 2048 };
 static const uint8_t switch_pins[BOSUN_SWITCH_COUNT] = {
     1, 25, 24, 23, 20, 9, 10, 11, 18, 19
 };
-_Static_assert((UART_RING_SIZE & (UART_RING_SIZE - 1)) == 0, "Ring must be power of two");
 _Static_assert(PICO_FLASH_SIZE_BYTES > BOSUN_STORAGE_BYTES, "Flash too small for storage reserve");
 
 static bool initialised;
@@ -40,8 +41,7 @@ static uint8_t display_line[BOSUN_DISPLAY_WIDTH * 2];
  * ring addressing requires the buffer's alignment to equal its power-of-two
  * size. 2048 bytes covers about 655 ms at MIDI's 31250 baud (8N1). */
 static _Alignas(UART_RX_SIZE) volatile uint8_t din_rx[UART_RX_SIZE];
-static volatile uint8_t din_tx[UART_RING_SIZE];
-static volatile uint32_t din_tx_head, din_tx_tail;
+static bosun_uart_tx_t din_tx;
 static int din_rx_dma = -1;
 static uint64_t din_rx_completed;
 static bosun_dma_rx_tracker_t din_rx_tracker;
@@ -75,19 +75,19 @@ static size_t din_rx_poll(void) {
     return available;
 }
 
-static void din_irq(void) {
-    while (din_tx_tail != din_tx_head && uart_is_writable(uart0)) {
-        uart_get_hw(uart0)->dr = din_tx[din_tx_tail];
-        din_tx_tail = (din_tx_tail + 1) & (UART_RING_SIZE - 1);
-    }
-    if (din_tx_tail == din_tx_head) uart_set_irq_enables(uart0, false, false);
+static bool din_writable(void *context) { (void)context; return uart_is_writable(uart0); }
+static void din_write(void *context, uint8_t byte) { (void)context; uart_get_hw(uart0)->dr = byte; }
+static void din_interrupt(void *context, bool enabled) {
+    (void)context; uart_set_irq_enables(uart0, false, enabled);
 }
+static const bosun_uart_tx_fifo_t din_fifo = {din_writable, din_write, din_interrupt};
+static void din_irq(void) { bosun_uart_tx_service(&din_tx, &din_fifo, NULL); }
 
 void bosun_board_task(void) {
     din_rx_poll();
     tud_task();
     if (tud_cdc_n_connected(0)) tud_cdc_n_write_flush(0);
-    if (tud_cdc_n_connected(1)) tud_cdc_n_write_flush(1);
+    bosun_cdc_task();
 }
 
 static void display_delay(uint32_t duration_ms) {
@@ -225,14 +225,8 @@ bool bosun_board_init(const bosun_board_config_t *config) {
 }
 
 uint32_t bosun_board_millis(void) { return to_ms_since_boot(get_absolute_time()); }
-bool bosun_board_usb_connected(void) { return tud_mounted() && tud_cdc_n_connected(1); }
 bool bosun_board_midi_connected(bosun_midi_port_t port) {
     return port == BOSUN_MIDI_USB ? tud_mounted() : port == BOSUN_MIDI_DIN;
-}
-
-size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
-    if (!data || !capacity || !bosun_board_usb_connected()) return 0;
-    return tud_cdc_n_read(1, data, capacity);
 }
 
 static size_t cdc_write(uint8_t interface, const uint8_t *data, size_t length) {
@@ -243,7 +237,6 @@ static size_t cdc_write(uint8_t interface, const uint8_t *data, size_t length) {
     tud_cdc_n_write_flush(interface);
     return accepted;
 }
-size_t bosun_board_data_write(const uint8_t *data, size_t length) { return cdc_write(1, data, length); }
 size_t bosun_board_console_write(const uint8_t *data, size_t length) { return cdc_write(0, data, length); }
 
 size_t bosun_board_midi_read(bosun_midi_port_t port, uint8_t *data, size_t capacity) {
@@ -264,15 +257,8 @@ size_t bosun_board_midi_write(bosun_midi_port_t port, const uint8_t *data, size_
     if (!data || !length) return 0;
     if (port == BOSUN_MIDI_USB) return tud_midi_stream_write(0, data, length);
     if (port != BOSUN_MIDI_DIN) return 0;
-    size_t count = 0;
     uint32_t interrupts = save_and_disable_interrupts();
-    while (count < length) {
-        uint32_t next = (din_tx_head + 1) & (UART_RING_SIZE - 1);
-        if (next == din_tx_tail) break;
-        din_tx[din_tx_head] = data[count++];
-        din_tx_head = next;
-    }
-    uart_set_irq_enables(uart0, false, din_tx_head != din_tx_tail);
+    size_t count = bosun_uart_tx_write(&din_tx, &din_fifo, NULL, data, length);
     restore_interrupts(interrupts);
     return count;
 }
@@ -309,6 +295,11 @@ bool bosun_board_expression_release(uint8_t jack) {
 }
 void bosun_board_leds_set(uint8_t index, uint32_t rgb24) {
     if (index < BOSUN_LED_COUNT) led_colors[index] = rgb24 & 0xffffffu;
+}
+uint32_t bosun_board_leds_get(uint8_t index) {
+    if (index >= BOSUN_LED_COUNT) return 0;
+    uint32_t grb = led_dma_words[index] >> 8;
+    return ((grb & 0xff00u) << 8) | ((grb >> 8) & 0xff00u) | (grb & 0xffu);
 }
 bool bosun_board_leds_show(void) {
     if (!initialised || dma_channel_is_busy((uint)led_dma) || time_us_64() < led_ready_at) return false;

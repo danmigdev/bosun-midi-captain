@@ -67,7 +67,7 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * command envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "table", "on", "request"};
+        "table", "on", "request", "mode"};
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
         for (unsigned k = 0; k < sizeof names / sizeof *names; ++k)
@@ -260,6 +260,50 @@ static bool emit_ui_event(bosun_protocol_t *p) {
     }
     finish(p); return true;
 }
+static void tft_projection(bosun_protocol_t *p, const bosun_json_doc_t *d) {
+    int tft = bosun_json_get(d, 0, "tft");
+    int layout = bosun_json_get(d, tft, "layout");
+    bool array = layout >= 0 && d->tokens[layout].type == BOSUN_JSON_ARRAY;
+    field(&p->writer, "tft_colors"); bosun_json_puts(&p->writer, "{");
+    bool comma = false;
+    if (array) for (int entry = layout + 1; entry < d->tokens[layout].next; entry = d->tokens[entry].next) {
+        int color = bosun_json_get(d, entry, "color"), name_token = bosun_json_get(d, entry, "field");
+        char name[129];
+        if (color < 0 || d->tokens[color].type != BOSUN_JSON_STRING ||
+            !bosun_json_string(d, name_token, name, sizeof name) || !*name) continue;
+        bool duplicate = false;
+        for (int earlier = layout + 1; earlier < entry; earlier = d->tokens[earlier].next) {
+            int prior_color = bosun_json_get(d, earlier, "color");
+            if (prior_color >= 0 && d->tokens[prior_color].type == BOSUN_JSON_STRING &&
+                bosun_json_equal(d, bosun_json_get(d, earlier, "field"), name)) { duplicate = true; break; }
+        }
+        if (duplicate) continue;
+        if (comma) bosun_json_puts(&p->writer, ",");
+        raw(&p->writer, d, name_token); bosun_json_puts(&p->writer, ":"); raw(&p->writer, d, color);
+        comma = true;
+    }
+    bosun_json_puts(&p->writer, "}");
+    field(&p->writer, "tft_labels"); bosun_json_puts(&p->writer, "{");
+    static const char *const fields[] = {"bank", "kemper_bank", "kemper_rig_in_bank", "kemper_rig", "slot"};
+    uint8_t seen = 0; comma = false;
+    if (array) for (int entry = layout + 1; entry < d->tokens[layout].next; entry = d->tokens[entry].next) {
+        int name_token = bosun_json_get(d, entry, "field");
+        unsigned index = 0;
+        while (index < sizeof fields / sizeof *fields && !bosun_json_equal(d, name_token, fields[index])) ++index;
+        if (index == sizeof fields / sizeof *fields || (seen & (1u << index))) continue;
+        seen |= (uint8_t)(1u << index);
+        if (comma) bosun_json_puts(&p->writer, ",");
+        raw(&p->writer, d, name_token); bosun_json_puts(&p->writer, ":{\"prefix\":");
+        int prefix = bosun_json_get(d, entry, "prefix"), suffix = bosun_json_get(d, entry, "suffix");
+        if (prefix < 0 || d->tokens[prefix].type != BOSUN_JSON_STRING || !raw(&p->writer, d, prefix))
+            bosun_json_quote(&p->writer, "");
+        field(&p->writer, "suffix");
+        if (suffix < 0 || d->tokens[suffix].type != BOSUN_JSON_STRING || !raw(&p->writer, d, suffix))
+            bosun_json_quote(&p->writer, "");
+        bosun_json_puts(&p->writer, "}"); comma = true;
+    }
+    bosun_json_puts(&p->writer, "}");
+}
 static void device_info(bosun_protocol_t *p) {
     bosun_config_t *c = p->runtime->config; const bosun_json_doc_t *d = &c->device_doc;
     begin(p, "DEVICE_INFO"); string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
@@ -272,7 +316,10 @@ static void device_info(bosun_protocol_t *p) {
     int nav = bosun_json_get(d, 0, "preset_navigation");
     if (nav < 0 || d->tokens[nav].type != BOSUN_JSON_OBJECT || !raw(&p->writer, d, nav))
         bosun_json_puts(&p->writer, "{}");
-    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false");
+    /* Kiosk treats preset_navigation as the fast-bootstrap capability marker
+     * and skips GET_GLOBAL, so it also needs the compact Screen projection. */
+    tft_projection(p, d);
+    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false,\"reboot_modes\":[\"normal\",\"bootloader\"]");
 }
 /* The reply buffer is also the file read workspace. Validate saved JSON before
  * exposing it on wire; these handlers no longer need request tokens afterward. */
@@ -325,6 +372,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     } else if (!strcmp(p->type, "PUT_GLOBAL")) {
         if (!object_arg(p, "device", &data, &length)) r = BOSUN_STORE_INVALID;
         else r = bosun_config_put_device(c, profile, data, length);
+        if (r == BOSUN_STORE_OK && !*profile) p->ui_pending |= UI_GLOBAL;
     } else if (!strcmp(p->type, "LIST_PATCHES")) {
         begin(p, "PATCH_LIST"); string(&p->writer, "profile", *profile ? profile : c->profile);
         field(&p->writer, "patches"); r = bosun_config_patches(c, profile, &p->writer);
@@ -401,7 +449,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         if (token >= 0 && !bosun_json_boolean(&p->request, token, &want_request)) r = BOSUN_STORE_INVALID;
         else if (!rt->kemper_enabled) { error(p, "no_rig_info"); goto done; }
         else {
-            if (want_request) (void)bosun_kemper_request_rig_name(&rt->kemper);
+            if (want_request) (void)bosun_kemper_request_rig_name(&rt->kemper, now_ms);
             begin(p, "RIG_INFO"); string(&p->writer, "name", rt->kemper.last_name);
             if (rt->kemper.last_name_rig) integer(&p->writer, "rig", rt->kemper.last_name_rig);
             else bosun_json_puts(&p->writer, ",\"rig\":null");
@@ -411,8 +459,38 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             string(&p->writer, "color", rig >= 1 && rig <= 5 ? colors[rig - 1] :
                 rig >= 11 && rig <= 15 ? colors[rig - 6] : "#666666");
             field(&p->writer, "fresh"); bosun_json_puts(&p->writer,
-                rt->kemper.last_name_rig && rt->kemper.last_name_rig == rig ? "true" : "false");
+                rt->kemper.state.rig_name_fresh && rt->kemper.state.rig == rig &&
+                rt->kemper.last_name_rig == rig ? "true" : "false");
         }
+    } else if (!strcmp(p->type, "LED_DUMP")) {
+        if (!p->read_led) { error(p, "leds_unavailable"); goto done; }
+        static const char *const names[] = {"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"};
+        begin(p, "LED_DUMP"); bosun_json_puts(&p->writer, ",\"pixels\":[");
+        for (unsigned i = 0; i < 30; ++i) {
+            uint32_t rgb = p->read_led((uint8_t)i);
+            bosun_json_puts(&p->writer, i ? ",[" : "[");
+            bosun_json_write_integer(&p->writer, (int32_t)((rgb >> 16) & 255));
+            bosun_json_puts(&p->writer, ",");
+            bosun_json_write_integer(&p->writer, (int32_t)((rgb >> 8) & 255));
+            bosun_json_puts(&p->writer, ",");
+            bosun_json_write_integer(&p->writer, (int32_t)(rgb & 255));
+            bosun_json_puts(&p->writer, "]");
+        }
+        bosun_json_puts(&p->writer, "],\"switch_indices\":{");
+        for (unsigned sw = 0; sw < 10; ++sw) {
+            if (sw) bosun_json_puts(&p->writer, ",");
+            bosun_json_quote(&p->writer, names[sw]); bosun_json_puts(&p->writer, ":[");
+            for (unsigned i = 0; i < 3; ++i) {
+                if (i) bosun_json_puts(&p->writer, ",");
+                /* Bottom row ring order matches Captain board.py. */
+                unsigned within = sw >= 5 && i ? 3 - i : i;
+                bosun_json_write_integer(&p->writer, (int32_t)(sw * 3 + within));
+            }
+            bosun_json_puts(&p->writer, "]");
+        }
+        bosun_json_puts(&p->writer, "},\"current\":{\"bank\":");
+        bosun_json_write_integer(&p->writer, c->bank);
+        integer(&p->writer, "slot", c->slot); bosun_json_puts(&p->writer, "}");
     } else if (!strcmp(p->type, "LIST_FONTS")) {
         begin(p, "FONT_LIST"); bosun_json_puts(&p->writer, ",\"fonts\":[\"system\"]");
     } else if (!strcmp(p->type, "STATS")) {
@@ -424,7 +502,16 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         unsigned_integer(&p->writer, "storage_errors", rt->storage_errors);
         unsigned_integer(&p->writer, "midi_events_dropped", p->midi_events_dropped);
         field(&p->writer, "storage_ready"); bosun_json_puts(&p->writer, bosun_store_ready() ? "true" : "false");
-    } else if (!strcmp(p->type, "REBOOT")) p->reboot_requested = true;
+    } else if (!strcmp(p->type, "REBOOT")) {
+        int mode = get(p, "mode");
+        bool bootloader = mode >= 0 && bosun_json_equal(&p->request, mode, "bootloader");
+        if (mode >= 0 && !bootloader && !bosun_json_equal(&p->request, mode, "normal"))
+            r = BOSUN_STORE_INVALID;
+        else {
+            p->reboot_bootloader = bootloader;
+            p->reboot_requested = true;
+        }
+    }
     else if (!strncmp(p->type, "PUT_FILE_", 9)) error(p, "unsupported_native_firmware_ota");
     else error(p, "unknown_type");
     if (r != BOSUN_STORE_OK) error(p, store_error(r));
@@ -441,7 +528,7 @@ void bosun_protocol_init(bosun_protocol_t *p, bosun_runtime_t *runtime) {
 void bosun_protocol_session(bosun_protocol_t *p, bool connected) {
     if (p->connected == connected) return;
     p->connected = connected; p->rx_length = p->tx_length = p->tx_offset = 0;
-    p->discarding = p->reboot_requested = false;
+    p->discarding = p->reboot_requested = p->reboot_bootloader = false;
     p->event_head = p->event_length = 0;
     p->context_revision = p->kemper_revision = UINT32_MAX;
     p->runtime->midi_monitor = p->runtime->midi_learn = false;

@@ -25,6 +25,7 @@ typedef struct {
     uint16_t line[BOSUN_DISPLAY_WIDTH];
     uint32_t config_revision, patch_revision, kemper_revision;
     uint32_t frame_ms, animation_started_ms;
+    char hold_effect[129];
     uint16_t row, rotation, tuner_x, tuner_color;
     uint8_t count, brightness;
     unsigned status;
@@ -37,5 +38,6 @@ typedef struct {
  * Unknown context fields stay empty instead of displaying orphan prefixes. */
 void bosun_display_init(bosun_display_t *display);
 unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *config,
-                              const bosun_kemper_state *kemper, uint32_t now_ms);
+                              const bosun_kemper_state *kemper, const char *hold_effect,
+                              uint32_t now_ms);
 #endif

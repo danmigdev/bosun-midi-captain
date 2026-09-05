@@ -98,6 +98,8 @@ bosun_store_result_t bosun_runtime_switch_patch(bosun_runtime_t *runtime,
     unsigned bank, unsigned slot, bool fire_actions);
 void bosun_runtime_config_changed(bosun_runtime_t *runtime);
 bool bosun_runtime_context(const bosun_runtime_t *runtime, bosun_json_writer_t *writer);
+/* The same momentary-hold label is published in CONTEXT and on the TFT. */
+void bosun_runtime_hold_effect(const bosun_runtime_t *runtime, char *out, size_t capacity);
 /* Queue one validated message or an action {messages:[...]}; unsupported,
  * malformed or over-limit requests return false before anything is queued. */
 bool bosun_runtime_dispatch(bosun_runtime_t *runtime, const bosun_json_doc_t *doc,

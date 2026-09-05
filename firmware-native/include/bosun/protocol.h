@@ -13,9 +13,11 @@
 /* One bounded, nonblocking line at a time. feed returns bytes consumed: callers
  * retain the suffix while a reply drains. consume_output accepts partial writes.
  * Session reset discards old input/output without changing configuration/MIDI.
+ * REBOOT accepts mode="normal" (default) or "bootloader" (ROM BOOTSEL).
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;
+    uint32_t (*read_led)(uint8_t index); /* Optional last submitted RGB frame. */
     char rx[BOSUN_PROTOCOL_RX_BYTES + 1], tx[BOSUN_PROTOCOL_TX_BYTES];
     bosun_json_token_t tokens[BOSUN_PROTOCOL_TOKENS];
     bosun_json_doc_t request;
@@ -36,7 +38,7 @@ typedef struct {
     uint16_t observed_bank, observed_slot;
     char observed_profile[BOSUN_PROFILE_ID_BYTES];
     char id[257], type[49];
-    bool discarding, connected, reboot_requested, ui_observed;
+    bool discarding, connected, reboot_requested, reboot_bootloader, ui_observed;
 } bosun_protocol_t;
 
 void bosun_protocol_init(bosun_protocol_t *protocol, bosun_runtime_t *runtime);

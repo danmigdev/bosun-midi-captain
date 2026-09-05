@@ -448,12 +448,19 @@ class DifferentialTests(unittest.TestCase):
         for value in (40 * 64, 120 * 64 + 32, 121 * 64 + 32, 250 * 64, 16383):
             self.param(oracle, 18000, 4, 0, value)
 
-    def test_kemper_initial_name_is_available_while_boot_effects_settle(self):
+    def test_kemper_boot_name_waits_for_authoritative_coordinates(self):
         oracle = self.kemper_init(1 << 4)
-        self.name(oracle, 100, "Initial rig")
-        self.tick(oracle, 599)
-        self.tick(oracle, 600)
-        self.param(oracle, 601, 56, 3, 1)
+        # Intentional correction of CP's unsafe bootstrap assumption: the
+        # first untagged name may describe rig3 while the local fallback is1.
+        # Native does not publish it under rig1; test_kemper replays the full
+        # name-before-PC capture and verifies bounded 0x43 recovery after PC.
+        oracle.now = 100
+        payload = (0, 0x20, 0x33, 2, 127, 3, 0, 0, 1) + tuple(b"Initial rig\0")
+        oracle.plugin.on_midi_in("usb", 0, 0xf0, list(payload), oracle)
+        reply = self.native.command("h 100 0 240 " + bytes(payload).hex())
+        self.assertEqual(oracle.state()[8], 1)
+        self.assertEqual(reply["state"][8], 0)
+        self.assertEqual(reply["name"], "")
 
     def test_kemper_live_cc_at_settle_deadline_precedes_plugin_tick(self):
         oracle = self.kemper_init(1 << 4)
@@ -479,6 +486,9 @@ class DifferentialTests(unittest.TestCase):
         for start in (0x90000000, 0xffffffff - 1000):
             oracle = self.kemper_init()
             self.handle(oracle, start, 0xf0, (0, 0x20, 0x33, 2, 127, 0x7e), 0)
+            # Establish the current coordinates before testing the unrelated
+            # WAH retirement/deadline behavior across uptime rollover.
+            self.handle(oracle, start, 0xc0, (0,))
             self.name(oracle, start + 1, "Initial rig")
             self.tick(oracle, start + 501)
             self.param(oracle, start + 502, 5, 21, 1)

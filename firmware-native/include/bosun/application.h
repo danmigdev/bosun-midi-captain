@@ -27,16 +27,17 @@ typedef struct {
     size_t input_offset, input_length;
     uint32_t leds[BOSUN_LED_COUNT];
     uint32_t midi_rejected, midi_abandoned, din_dropped, ticks;
-    uint32_t led_ms, console_ms, reboot_ms;
-    char console[192];
+    uint32_t led_ms, console_ms, reboot_ms, usb_session_generation;
+    char console[256];
     size_t console_offset, console_length;
     bosun_store_result_t boot_result;
-    bool connected, leds_dirty, led_started, reboot_pending;
+    bool connected, leds_dirty, led_started, reboot_pending, reboot_bootloader, startup_action_pending;
 } bosun_application_t;
 
 /* Initializes board, mounts existing storage, loads configuration. A missing or
  * unrecognized filesystem stays untouched; diagnostics remain available. No
- * MIDI is generated or transmitted until the first application tick. */
+ * MIDI is generated or transmitted until the first application tick. A ready
+ * non-Kemper initial patch schedules on_enter once; Kemper owns its boot rig. */
 bool bosun_application_init(bosun_application_t *app, const char *host_root);
 void bosun_application_tick(bosun_application_t *app);
 /* Whole-packet admission to every currently connected output; false admits

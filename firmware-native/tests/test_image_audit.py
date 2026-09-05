@@ -25,20 +25,22 @@ class ImageAudit(unittest.TestCase):
                          0x10000000, 256, 0, 1, 0xe48bff56)
         struct.pack_into('<I', self.block, 508, 0x0ab16f30)
 
-    def audit(self):
+    def audit(self, flash_bytes=8 * 1024 * 1024):
         self.uf2.write_bytes(self.block)
         listing = ''.join(f'{value:08x} T {name}\n' for name, value in self.symbols.items())
         with patch.object(module.subprocess, 'check_output', return_value=listing):
-            return module.audit(Path('image.elf'), self.uf2, 2 * 1024 * 1024, 'fake-nm')
+            return module.audit(Path('image.elf'), self.uf2, flash_bytes, 'fake-nm')
 
     def test_valid_image(self):
         report = self.audit()
         self.assertEqual(report['stack_bytes'], 16384)
         self.assertEqual(report['flash_image_bytes'], 256)
         self.assertEqual(report['dynamic_allocator_symbols'], [])
+        self.assertEqual(report['storage_offset'], 0x780000)
+        self.assertEqual(report['storage_bytes'], 512 * 1024)
 
     def test_storage_overlap(self):
-        struct.pack_into('<I', self.block, 12, 0x10180000)
+        struct.pack_into('<I', self.block, 12, 0x10780000)
         with self.assertRaisesRegex(ValueError, 'reserved storage'):
             self.audit()
 
@@ -58,7 +60,7 @@ class ImageAudit(unittest.TestCase):
             self.audit()
 
     def test_elf_storage_overlap(self):
-        self.symbols['__flash_binary_end'] = 0x10180001
+        self.symbols['__flash_binary_end'] = 0x10780001
         with self.assertRaisesRegex(ValueError, 'ELF flash image'):
             self.audit()
 
@@ -66,6 +68,12 @@ class ImageAudit(unittest.TestCase):
         self.block.pop()
         with self.assertRaisesRegex(ValueError, '512-byte'):
             self.audit()
+
+    def test_explicit_smaller_flash_geometry_still_checked(self):
+        self.assertEqual(self.audit(2 * 1024 * 1024)['storage_offset'], 0x180000)
+        struct.pack_into('<I', self.block, 12, 0x10180000)
+        with self.assertRaisesRegex(ValueError, 'reserved storage'):
+            self.audit(2 * 1024 * 1024)
 
 
 if __name__ == '__main__':

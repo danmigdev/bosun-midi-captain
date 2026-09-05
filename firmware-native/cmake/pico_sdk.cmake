@@ -20,7 +20,7 @@ endif()
 set(PICO_BOARD bosun_midi_captain CACHE STRING "Verified MIDI Captain pin map")
 list(APPEND PICO_BOARD_HEADER_DIRS "${CMAKE_CURRENT_LIST_DIR}/boards")
 set(PICO_PLATFORM rp2040 CACHE STRING "MIDI Captain MCU")
-set(PICO_FLASH_SIZE_BYTES 2097152 CACHE STRING "Physical flash bytes; verify hardware before installing")
+set(PICO_FLASH_SIZE_BYTES 8388608 CACHE STRING "Physical flash bytes; 8 MiB verified on the tested Captain, verify other units")
 # SDK 2.3.0 uses picotool to generate UF2. Pin the tool as well as the SDK;
 # this is its official 2.3.0 release commit, never a moving branch.
 set(PICOTOOL_GIT_BRANCH 6f6458d792b93685a11423b244a585eaa99eafcf CACHE STRING "Pinned picotool 2.3.0")

@@ -41,9 +41,103 @@ static void is_error(const char *value) {
         fprintf(stderr, "Expected error %s, received %s\n", value, output);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "error"), value));
 }
+static uint32_t diagnostic_led(uint8_t index) { return ((uint32_t)index << 16) | 0x8000u | (255u - index); }
+static void led_dump(void) {
+    request("{\"type\":\"LED_DUMP\"}", "ERROR"); is_error("leds_unavailable");
+    protocol.read_led = diagnostic_led;
+    request("{\"type\":\"LED_DUMP\",\"id\":\"led-check\"}", "LED_DUMP");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "id"), "led-check"));
+    int pixels = bosun_json_get(&reply, 0, "pixels");
+    for (unsigned i = 0; i < 30; ++i) {
+        int pixel = bosun_json_at(&reply, pixels, i); int32_t channel;
+        assert(bosun_json_integer(&reply, bosun_json_at(&reply, pixel, 0), &channel) && channel == (int32_t)i);
+        assert(bosun_json_integer(&reply, bosun_json_at(&reply, pixel, 1), &channel) && channel == 128);
+        assert(bosun_json_integer(&reply, bosun_json_at(&reply, pixel, 2), &channel) && channel == 255 - (int32_t)i);
+        assert(bosun_json_at(&reply, pixel, 3) < 0);
+    }
+    assert(bosun_json_at(&reply, pixels, 30) < 0);
+    static const char *const names[] = {"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"};
+    static const unsigned physical[10][3] = {{0,1,2},{3,4,5},{6,7,8},{9,10,11},{12,13,14},
+        {15,17,16},{18,20,19},{21,23,22},{24,26,25},{27,29,28}};
+    int mapping = bosun_json_get(&reply, 0, "switch_indices");
+    for (unsigned sw = 0; sw < 10; ++sw) {
+        int ring = bosun_json_get(&reply, mapping, names[sw]);
+        for (unsigned i = 0; i < 3; ++i) {
+            int32_t index;
+            assert(bosun_json_integer(&reply, bosun_json_at(&reply, ring, i), &index) && index == (int32_t)physical[sw][i]);
+        }
+    }
+    int current = bosun_json_get(&reply, 0, "current"); int32_t coordinate;
+    assert(bosun_json_integer(&reply, bosun_json_get(&reply, current, "bank"), &coordinate) && coordinate == config.bank);
+    assert(bosun_json_integer(&reply, bosun_json_get(&reply, current, "slot"), &coordinate) && coordinate == config.slot);
+    protocol.read_led = NULL;
+}
+static void reboot_modes(void) {
+    static const char *const invalid[] = {
+        "null", "true", "false", "0", "1.5", "[]", "{}", "\"\"",
+        "\"BOOTLOADER\"", "\"format\"", "\"bootloader\\u0000\""
+    };
+    char command[160];
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"REBOOT\",\"mode\":%s}", invalid[i]);
+        request(command, "ERROR"); is_error("invalid_request");
+        assert(!protocol.reboot_requested && !protocol.reboot_bootloader);
+    }
+    request("{\"type\":\"REBOOT\",\"mode\":\"normal\",\"mode\":\"bootloader\"}", "ERROR");
+    is_error("invalid_json"); assert(!protocol.reboot_requested && !protocol.reboot_bootloader);
+    request("{\"type\":\"REBOOT\",\"mode\":\"bootloader\",\"m\\u006fde\":\"normal\"}", "ERROR");
+    is_error("invalid_json"); assert(!protocol.reboot_requested && !protocol.reboot_bootloader);
+    request("{\"type\":\"REBOOT\",\"mode\":\"normal\"}", "ACK");
+    assert(protocol.reboot_requested && !protocol.reboot_bootloader);
+    bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
+
+    /* A full reply owns TX: a bootloader request cannot reset the board or
+     * overwrite that reply until its complete command is admitted. */
+    const char manifest[] = "{\"type\":\"GET_MANIFEST\"}\n";
+    const char reboot[] = "{\"type\":\"REBOOT\",\"id\":\"recovery\",\"mode\":\"bootloader\"}\n";
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)manifest, sizeof manifest - 1, 1) == sizeof manifest - 1);
+    assert(!bosun_protocol_feed(&protocol, (const uint8_t *)reboot, sizeof reboot - 1, 2));
+    assert(!protocol.reboot_requested && !protocol.reboot_bootloader);
+    read_reply("MANIFEST", NULL);
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)reboot, sizeof reboot - 1, 3) == sizeof reboot - 1);
+    assert(protocol.reboot_requested && protocol.reboot_bootloader);
+    read_reply("ACK", "recovery");
+    bosun_protocol_tick(&protocol, 2000); assert(!protocol.tx_length);
+    assert(!bosun_protocol_feed(&protocol, (const uint8_t *)manifest, sizeof manifest - 1, 2001));
+    bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
+    assert(!protocol.reboot_requested && !protocol.reboot_bootloader);
+}
 static void event_is(const char *name) {
     read_reply("EVENT", NULL);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "event"), name));
+}
+static void device_info_screen_projection(void) {
+    const char device[] = "{\"tft\":{\"layout\":["
+        "{\"field\":\"bank\",\"color\":\"#9aa1ad\",\"prefix\":\"BANK \",\"suffix\":\"\"},"
+        "{\"field\":\"kemper_rig_in_bank\",\"color\":\"#6fd99b\",\"prefix\":\"RIG \"},"
+        "{\"field\":\"expression_mode\",\"color\":\"#ff7f00\"},"
+        "{\"field\":\"hold_effect\",\"color\":\"#ffffff\"},"
+        "{\"field\":\"bank\",\"color\":\"#000000\",\"prefix\":\"WRONG\"},"
+        "null,{\"field\":\"slot\",\"color\":123,\"prefix\":false,\"suffix\":[]},"
+        "{\"field\":\"slot\",\"color\":\"#abcdef\",\"prefix\":\"IGNORED\"}]}}";
+    char previous[BOSUN_DEVICE_BYTES + 1]; size_t previous_length = config.device_doc.length;
+    memcpy(previous, config.device, previous_length);
+    assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
+    int colors = bosun_json_get(&reply, 0, "tft_colors"), labels = bosun_json_get(&reply, 0, "tft_labels");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "bank"), "#9aa1ad"));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "kemper_rig_in_bank"), "#6fd99b"));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "expression_mode"), "#ff7f00"));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "hold_effect"), "#ffffff"));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "slot"), "#abcdef"));
+    int bank = bosun_json_get(&reply, labels, "bank"), rig = bosun_json_get(&reply, labels, "kemper_rig_in_bank");
+    int slot = bosun_json_get(&reply, labels, "slot");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, bank, "prefix"), "BANK "));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, rig, "prefix"), "RIG "));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, rig, "suffix"), ""));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, slot, "prefix"), ""));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, slot, "suffix"), ""));
+    assert(bosun_config_put_device(&config, NULL, previous, previous_length) == BOSUN_STORE_OK);
 }
 static void array_is(const char *key, const uint8_t *data, size_t length) {
     int array = bosun_json_get(&reply, 0, key);
@@ -123,13 +217,23 @@ static void rig_info(void) {
     unsigned before = sent;
     request("{\"type\":\"GET_RIG_INFO\",\"request\":\"yes\"}", "ERROR"); is_error("invalid_request");
     assert(sent == before);
+    request("{\"type\":\"GET_RIG_INFO\"}", "RIG_INFO"); assert(sent == before);
+    runtime.kemper.rig_identity_known = true;
     request("{\"type\":\"GET_RIG_INFO\"}", "RIG_INFO"); assert(sent == before + 1);
     strcpy(runtime.kemper.last_name, "Cached rig"); runtime.kemper.last_name_rig = 2;
+    strcpy(runtime.kemper.state.rig_name, "Cached rig");
+    runtime.kemper.state.rig_name_fresh = true;
     request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "RIG_INFO");
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "name"), "Cached rig"));
     assert(bosun_config_bool(&reply, 0, "fresh", false));
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "color"), "#f5dc34"));
     assert(sent == before + 1);
+    /* Returning to the cached coordinates does not make an old-generation
+     * name fresh. CONTEXT and RIG_INFO must agree while the rig settles. */
+    assert(bosun_kemper_begin_rig(&runtime.kemper, 2, 90));
+    request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "RIG_INFO");
+    assert(!bosun_config_bool(&reply, 0, "fresh", true));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "name"), "Cached rig"));
     config.bank = 3; config.slot = 5;
     assert(bosun_kemper_begin_rig(&runtime.kemper, 15, 100));
     request("{\"type\":\"GET_RIG_INFO\"}", "RIG_INFO");
@@ -289,6 +393,11 @@ int main(void) {
     is_error("unsupported_native_firmware_ota");
     request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
     assert(strstr(output, "native_experimental") && strstr(output, "preset_navigation"));
+    int modes = bosun_json_get(&reply, 0, "reboot_modes");
+    assert(bosun_json_equal(&reply, bosun_json_at(&reply, modes, 0), "normal"));
+    assert(bosun_json_equal(&reply, bosun_json_at(&reply, modes, 1), "bootloader"));
+    reboot_modes();
+    led_dump();
     request("{\"type\":\"GET_MANIFEST\"}", "MANIFEST");
     int plugins = bosun_json_get(&reply, 0, "plugins");
     assert(bosun_json_get(&reply, plugins, "kemper_player") >= 0);
@@ -296,6 +405,7 @@ int main(void) {
     assert(bosun_json_get(&reply, plugins, "headrush_core") < 0);
     request("{\"type\":\"CREATE_PROFILE\",\"profile_id\":\"test\",\"name\":\"Test\",\"kind\":\"generic_midi\"}", "ACK");
     request("{\"type\":\"SWITCH_PROFILE\",\"profile_id\":\"test\"}", "ACK");
+    device_info_screen_projection();
     request("{\"type\":\"PUT_GLOBAL\",\"device\":{\"unknown\":{\"preserved\":[1,true,null]},\"autosave\":{\"enabled\":false}}}", "ACK");
     request("{\"type\":\"GET_GLOBAL\"}", "GLOBAL");
     int device = bosun_json_get(&reply, 0, "device");
@@ -381,7 +491,7 @@ int main(void) {
     read_reply("ERROR", NULL); assert(!protocol.reboot_requested);
     request("{\"type\":\"PING\"}", "ACK");
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)"{\"type\":\"REBOOT\"}\n", 18, 5002) == 18);
-    assert(protocol.reboot_requested);
+    assert(protocol.reboot_requested && !protocol.reboot_bootloader);
     size_t reboot_length = protocol.tx_length;
     bosun_protocol_tick(&protocol, 9000); assert(protocol.tx_length == reboot_length);
     read_reply("ACK", NULL);
@@ -400,6 +510,8 @@ int main(void) {
     request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("invalid_request");
     assert(!bosun_store_mount("/no-such-native-storage-root"));
     request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("storage_unavailable");
+    request("{\"type\":\"REBOOT\",\"mode\":\"bootloader\"}", "ACK");
+    assert(protocol.reboot_requested && protocol.reboot_bootloader);
     puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect passed");
     return 0;
 }

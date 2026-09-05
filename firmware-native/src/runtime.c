@@ -531,7 +531,7 @@ static bool execute(bosun_runtime_t *rt, const bosun_runtime_command_t *c) {
             (bosun_kemper_command_type)c->index, (uint8_t)c->first, c->value);
     case BOSUN_COMMAND_KEMPER_QUERY: {
         if (!rt->kemper_enabled) { ++rt->unsupported_messages; return false; }
-        bool ok = bosun_kemper_request_rig_name(&rt->kemper);
+        bool ok = bosun_kemper_request_rig_name(&rt->kemper, rt->now_ms);
         return bosun_kemper_query_blocks(&rt->kemper, rt->kemper.bound_blocks) && ok;
     }
     case BOSUN_COMMAND_PATCH: return bosun_runtime_switch_patch(rt, c->first, c->second, true) == BOSUN_STORE_OK;
@@ -698,6 +698,19 @@ static bool integer_field(bosun_json_writer_t *w, const char *name, int32_t valu
     return key(w, name) && bosun_json_write_integer(w, value);
 }
 
+void bosun_runtime_hold_effect(const bosun_runtime_t *rt, char *out, size_t capacity) {
+    if (!out || !capacity) return;
+    out[0] = 0;
+    if (!rt || !rt->config) return;
+    const bosun_json_doc_t *d = &rt->config->patch_doc;
+    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) if (rt->held_mask & (1u << i)) {
+        int binding = rt->bindings[i].patch_token;
+        if (!bosun_json_string(d, field(d, binding, "hold_text"), out, capacity) || !*out)
+            if (!bosun_json_string(d, field(d, binding, "label"), out, capacity)) out[0] = 0;
+        if (*out) break;
+    }
+}
+
 bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
     if (!rt || !rt->config || !w) return false;
     const bosun_json_doc_t *d = &rt->config->patch_doc;
@@ -730,13 +743,7 @@ bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
             if (!string_field(w, block_key, k->effects[i] ? "on" : "off")) return false;
         }
     }
-    name[0] = 0;
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) if (rt->held_mask & (1u << i)) {
-        int binding = rt->bindings[i].patch_token;
-        if (!bosun_json_string(d, field(d, binding, "hold_text"), name, sizeof name) || !*name)
-            if (!bosun_json_string(d, field(d, binding, "label"), name, sizeof name)) name[0] = 0;
-        if (*name) break;
-    }
+    bosun_runtime_hold_effect(rt, name, sizeof name);
     if (!string_field(w, "hold_effect", name) || !integer_field(w, "hold_mask", rt->held_mask) ||
         !key(w, "switches") || !bosun_json_puts(w, "{")) return false;
     for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) {

@@ -44,7 +44,7 @@ if [[ "$platform" == rp2040 || "$platform" == all ]]; then
         -DBOSUN_PLATFORM=rp2040 -DCMAKE_BUILD_TYPE=Release \
         -DPICO_SDK_PATH="$PICO_SDK_PATH" -DPICO_NO_PICOTOOL=OFF \
         -DPICOTOOL_FETCH_FROM_GIT_PATH="$repo_root/firmware-native/.deps/picotool" \
-        -DPICO_FLASH_SIZE_BYTES="${BOSUN_FLASH_BYTES:-2097152}"
+        -DPICO_FLASH_SIZE_BYTES="${BOSUN_FLASH_BYTES:-8388608}"
     cmake --build "$build_root-rp2040" --target bosun_native --parallel "$jobs"
     test -s "$build_root-rp2040/bosun_native.uf2"
     printf 'Built (not installed): %s\n' "$build_root-rp2040/bosun_native.uf2"

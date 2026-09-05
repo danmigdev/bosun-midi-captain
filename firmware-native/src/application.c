@@ -126,13 +126,19 @@ static void flush_protocol(bosun_application_t *app) {
 
 static void protocol_input(bosun_application_t *app, uint32_t now) {
     bool connected = bosun_board_usb_connected();
-    if (connected != app->connected) {
+    uint32_t generation = bosun_board_usb_session_generation();
+    if (connected != app->connected || generation != app->usb_session_generation) {
         app->connected = connected;
+        app->usb_session_generation = generation;
         app->input_offset = app->input_length = 0;
+        /* A complete fall/rise may have occurred inside one board_task.
+         * Force a protocol reset even when the observed boolean stayed true. */
+        bosun_protocol_session(&app->protocol, false);
         bosun_protocol_session(&app->protocol, connected);
     }
     if (!connected) return;
     flush_protocol(app);
+    if (app->reboot_pending) return;
     if (!app->input_length) {
         app->input_length = bosun_board_data_read(app->input, sizeof app->input);
         app->input_offset = 0;
@@ -194,7 +200,7 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
                 rgb = color(patch, bosun_json_get(patch, led, "on"), 0);
                 /* Match CircuitPython: only latched bindings dim when off;
                  * momentary/tap bindings keep their configured on colour. */
-                bool active = runtime->switches[sw].latched_on || (runtime->held_mask & (1u << sw));
+                bool active = runtime->switches[sw].latched_on;
                 if (binding->mode == BOSUN_SWITCH_LATCHED && !active) {
                     uint32_t off = color(patch, bosun_json_get(patch, led, "off"), 0);
                     rgb = off ? off : scale(rgb, dim);
@@ -221,11 +227,12 @@ static void console_status(bosun_application_t *app, uint32_t now) {
     if (!app->console_length && (uint32_t)(now - app->console_ms) >= 3000) {
         app->console_ms = now;
         int count = snprintf(app->console, sizeof app->console,
-            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u\r\n",
+            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u\r\n",
             bosun_store_ready() ? "ready" : "unavailable", (unsigned)app->boot_result,
             (unsigned long)app->ticks, (unsigned long)app->runtime.midi_rx_count,
             (unsigned long)app->runtime.midi_tx_count, (unsigned long)app->midi_rejected,
-            (unsigned long)app->midi_abandoned, app->display.status);
+            (unsigned long)app->midi_abandoned, app->display.status,
+            (unsigned)app->midi[0].count, (unsigned)app->midi[1].count);
         if (count > 0) app->console_length = bounded((size_t)count, sizeof app->console - 1);
         app->console_offset = 0;
     }
@@ -244,7 +251,10 @@ bool bosun_application_init(bosun_application_t *app, const char *host_root) {
     (void)bosun_store_mount(host_root); /* Deliberately no format/fallback write. */
     app->boot_result = bosun_config_init(&app->config);
     bosun_runtime_init(&app->runtime, &app->config, bosun_application_send_midi, app);
+    app->startup_action_pending = app->boot_result == BOSUN_STORE_OK &&
+        app->config.has_patch && !app->runtime.kemper_enabled;
     bosun_protocol_init(&app->protocol, &app->runtime);
+    app->protocol.read_led = bosun_board_leds_get;
     bosun_display_init(&app->display);
     const bosun_expression_presence_backend_t presence_backend = {
         expression_charge, expression_release, expression_read
@@ -259,6 +269,14 @@ void bosun_application_tick(bosun_application_t *app) {
     bosun_board_task();
     uint32_t now = bosun_board_millis();
     ++app->ticks;
+    if (app->startup_action_pending) {
+        app->startup_action_pending = false;
+        /* Match CP boot: generic targets run the initial on_enter once;
+         * Kemper's authoritative rig must never be overwritten at boot.
+         * Queue before processing user commands, execute during runtime_tick. */
+        int action = bosun_json_get(&app->config.patch_doc, 0, "on_enter");
+        if (action >= 0) (void)bosun_runtime_action(&app->runtime, &app->config.patch_doc, action);
+    }
     midi_connections(app);
     flush_midi(app);
     receive_midi(app, now);
@@ -271,19 +289,24 @@ void bosun_application_tick(bosun_application_t *app) {
                        app->expression_raw[0], app->expression_raw[1]);
     bosun_config_tick(&app->config, now);
     flush_midi(app);
-    if (!app->input_length) bosun_protocol_tick(&app->protocol, now);
+    if (!app->input_length && !app->reboot_pending) bosun_protocol_tick(&app->protocol, now);
     if (app->connected) flush_protocol(app);
     render_leds(app, now);
+    char hold_effect[129];
+    bosun_runtime_hold_effect(&app->runtime, hold_effect, sizeof hold_effect);
     (void)bosun_display_render(&app->display, &app->config,
-        app->runtime.kemper_enabled ? &app->runtime.kemper.state : NULL, now);
+        app->runtime.kemper_enabled ? &app->runtime.kemper.state : NULL, hold_effect, now);
     console_status(app, now);
     bosun_board_watchdog_feed();
-    if (app->protocol.reboot_requested) {
-        if (!app->reboot_pending) { app->reboot_pending = true; app->reboot_ms = now; }
+    if (app->protocol.reboot_requested && !app->reboot_pending) {
+        app->reboot_pending = true; app->reboot_ms = now;
+        app->reboot_bootloader = app->protocol.reboot_bootloader;
+    }
+    if (app->reboot_pending) {
         size_t remaining; (void)bosun_protocol_output(&app->protocol, &remaining);
         /* Allow the ACK to drain; a vanished client cannot postpone an
-         * explicitly requested reboot indefinitely. No ROM BOOTSEL shortcut. */
+         * accepted reboot or change its mode by opening a new CDC session. */
         if ((!remaining && (uint32_t)(now - app->reboot_ms) >= 100) ||
-            (uint32_t)(now - app->reboot_ms) >= 1000) bosun_board_reboot(false);
-    } else app->reboot_pending = false;
+            (uint32_t)(now - app->reboot_ms) >= 1000) bosun_board_reboot(app->reboot_bootloader);
+    }
 }

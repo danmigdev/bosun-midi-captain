@@ -55,6 +55,14 @@ static size_t queries(const wire *w, uint8_t page, uint8_t address) {
     return count;
 }
 
+static size_t name_queries(const wire *w) {
+    static const uint8_t request[] = {0xf0,0,0x20,0x33,2,0x7f,0x43,0,0,1,0xf7};
+    size_t count = 0;
+    for (size_t i = 0; i < w->count; ++i)
+        if (w->lengths[i] == sizeof(request) && !memcmp(w->packets[i], request, sizeof(request))) ++count;
+    return count;
+}
+
 static void ready(bosun_kemper *k, wire *w) {
     memset(w, 0, sizeof(*w));
     bosun_kemper_init(k, 1, 0, send_packet, w);
@@ -274,6 +282,7 @@ static void wah_timeout_generation_and_slot_fence(void) {
 static void names_bounded_and_pc_wrap(void) {
     bosun_kemper k; wire w = {0};
     bosun_kemper_init(&k, 1, 0, send_packet, &w);
+    pc(&k, 0, 0);
     char long_name[90]; memset(long_name, 'A', 89); long_name[89] = 0;
     name(&k, long_name, 10); bosun_kemper_tick(&k, 510);
     assert(strlen(k.state.rig_name) == 64);
@@ -296,9 +305,11 @@ static void names_bounded_and_pc_wrap(void) {
 static void boot_name_and_live_cc_deadline(void) {
     bosun_kemper k; wire w = {0};
     bosun_kemper_init(&k, 1, 1u << BOSUN_KEMPER_X, send_packet, &w);
+    pc(&k, 0, 0);
     name(&k, "First rig", 100);
+    bosun_kemper_tick(&k, 500);
+    param(&k, 56, 3, 0, 501);
     assert(k.state.rig_name_fresh && !strcmp(k.state.rig_name, "First rig"));
-    assert(bosun_kemper_transition_active(&k));
     assert(bosun_kemper_begin_rig(&k, 3, 1000));
     cc(&k, 22, 127, 1499);
     assert(!k.state.effect_known);
@@ -338,12 +349,109 @@ static void reinitialize_wah_after_long_uptime(void) {
         bosun_kemper k; wire w = {0};
         bosun_kemper_init(&k, 1, 0, send_packet, &w);
         sense(&k, now);
+        pc(&k, 0, now);
         name(&k, "Current rig", now + 1);
         bosun_kemper_tick(&k, now + 501);
         assert(queries(&w, 5, 21) == 1);
         param(&k, 5, 21, 1, now + 502);
         assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
     }
+}
+
+static void bootstrap_identity_and_string_recovery(void) {
+    bosun_kemper k; wire w = {0};
+    bosun_kemper_init(&k, 1, 0, send_packet, &w);
+    bosun_kemper_tick(&k, 0);
+    sense(&k, 10);
+    name(&k, "CRUNCH", 11); /* Hardware boot: name precedes current PC2. */
+    assert(!k.rig_identity_known && !k.state.rig_name_fresh && !k.last_name_rig);
+    assert(!k.state.rig_name[0] && !k.last_name[0]);
+    assert(!bosun_kemper_request_rig_name(&k, 12));
+    for (uint32_t now = 12; now < 1000; ++now) bosun_kemper_tick(&k, now);
+    assert(w.count == 1); /* Sensing alone must not end the snapshot retry. */
+    bosun_kemper_tick(&k, 1000);
+    assert(w.count == 2 && w.packets[1][10] == 0x23);
+    pc(&k, 2, 1010);
+    assert(k.rig_identity_known && k.state.rig == 3 && k.state.external_rig_changes == 1);
+    bosun_kemper_tick(&k, 1509);
+    assert(!name_queries(&w));
+    bosun_kemper_tick(&k, 1510);
+    assert(name_queries(&w) == 1 && !k.state.rig_name_fresh);
+    param(&k, 0, 1, 0, 1511); /* Numeric 0x01 is not a name response. */
+    assert(!k.state.rig_name_fresh);
+    for (uint32_t now = 1511; now < 2710; ++now) bosun_kemper_tick(&k, now);
+    assert(name_queries(&w) == 1);
+    bosun_kemper_tick(&k, 2710);
+    assert(name_queries(&w) == 2);
+    name(&k, "CRUNCH", 2711);
+    assert(k.last_name_rig == 3 && k.state.rig_name_fresh && !strcmp(k.last_name, "CRUNCH"));
+    bosun_kemper_tick(&k, 3300);
+    assert(name_queries(&w) == 2 && !k.bootstrap_name_pending);
+}
+
+static void duplicate_names_require_current_string_request(void) {
+    bosun_kemper k; wire w;
+    ready(&k, &w);
+    assert(bosun_kemper_select_rig(&k, 2, 4, 700));
+    bosun_kemper_tick(&k, 705);
+    name(&k, "Crunch", 720); /* Could be the previous rig's delayed broadcast. */
+    bosun_kemper_tick(&k, 1200);
+    assert(!k.state.rig_name_fresh && !k.pending_name[0]);
+    assert(name_queries(&w) == 1 && k.name_query_active); /* Autonomous recovery. */
+    name(&k, "Crunch", 1210); /* Same text is valid on two different rigs. */
+    name(&k, "Crunch", 1250); /* Repeated broadcast retains the request evidence. */
+    bosun_kemper_tick(&k, 1710);
+    assert(k.state.rig_name_fresh && k.last_name_rig == 9);
+    assert(!strcmp(k.state.rig_name, "Crunch"));
+
+    /* A name request in flight cannot authorize an old name in a later rig.
+     * Even after settling, the next request waits out that reply window. */
+    assert(bosun_kemper_request_rig_name(&k, 2500));
+    assert(bosun_kemper_select_rig(&k, 2, 3, 2510));
+    bosun_kemper_tick(&k, 2515);
+    name(&k, "Crunch", 2600);
+    bosun_kemper_tick(&k, 3010);
+    assert(!k.state.rig_name_fresh && !k.pending_name[0]);
+    assert(!bosun_kemper_request_rig_name(&k, 3699));
+    bosun_kemper_tick(&k, 3700);
+    assert(k.name_query_active);
+    name(&k, "Crunch", 3710);
+    bosun_kemper_tick(&k, 4210);
+    assert(k.state.rig_name_fresh && k.last_name_rig == 8);
+}
+
+static void bootstrap_query_backpressure_and_wrap(void) {
+    bosun_kemper k; wire w = {0};
+    uint32_t start = UINT32_MAX - 1000;
+    bosun_kemper_init(&k, 1, 0, send_packet, &w);
+    sense(&k, start);
+    pc(&k, 2, start);
+    w.fail = true;
+    bosun_kemper_tick(&k, start + 500);
+    assert(name_queries(&w) == 1 && !k.name_query_active);
+    uint32_t failures = k.tx_failures;
+    for (uint32_t delta = 501; delta < 1700; ++delta) bosun_kemper_tick(&k, start + delta);
+    assert(name_queries(&w) == 1 && k.tx_failures == failures);
+    w.fail = false;
+    bosun_kemper_tick(&k, start + 1700);
+    assert(name_queries(&w) == 2 && k.name_query_active);
+    name(&k, "CRUNCH", start + 1701);
+    assert(k.last_name_rig == 3 && k.state.rig_name_fresh);
+}
+
+static void selected_rig_recovers_missing_broadcast(void) {
+    bosun_kemper k; wire w;
+    ready(&k, &w);
+    assert(bosun_kemper_select_rig(&k, 1, 5, 700));
+    bosun_kemper_tick(&k, 705);
+    pc(&k, 4, 800);
+    bosun_kemper_tick(&k, 1199);
+    assert(!name_queries(&w));
+    bosun_kemper_tick(&k, 1200);
+    assert(name_queries(&w) == 1 && !k.state.rig_name_fresh);
+    name(&k, "LEAD", 1210); /* Reply to the automatic request, no broadcast. */
+    bosun_kemper_tick(&k, 1710);
+    assert(k.state.rig_name_fresh && k.last_name_rig == 5 && !strcmp(k.last_name, "LEAD"));
 }
 
 int main(void) {
@@ -353,6 +461,10 @@ int main(void) {
     boot_name_and_live_cc_deadline();
     message_channel_overrides();
     reinitialize_wah_after_long_uptime();
+    bootstrap_identity_and_string_recovery();
+    duplicate_names_require_current_string_request();
+    bootstrap_query_backpressure_and_wrap();
+    selected_rig_recovers_missing_broadcast();
     printf("Kemper: codecs, lease, tuner, PC echo, generations, names, 8-slot WAH, retries passed (%zu bytes state)\n", sizeof(bosun_kemper));
     return 0;
 }

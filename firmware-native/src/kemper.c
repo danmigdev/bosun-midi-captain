@@ -171,6 +171,8 @@ static void query_wah(bosun_kemper *k, uint32_t now) {
 }
 
 static void expire_orphans(bosun_kemper *k, uint32_t now) {
+    if (k->name_query_retire_active && due(now, k->name_query_retire_ms))
+        k->name_query_retire_active = k->name_query_active = false;
     uint8_t count = 0;
     for (unsigned i = 0; i < k->orphan_pc_count; ++i)
         if (!due(now, k->orphan_pc[i].expires_ms)) k->orphan_pc[count++] = k->orphan_pc[i];
@@ -224,8 +226,10 @@ static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
     k->state.rig_in_bank = (uint8_t)((rig - 1) % 5 + 1);
     k->state.rig_name[0] = 0;
     k->state.rig_name_fresh = false;
+    k->bootstrap_name_pending = true;
     k->state.effect_known = 0;
     k->pending_name[0] = 0;
+    k->pending_name_requested = k->name_query_active = false;
     k->scheduled_pc = false;
     reset_reconcile(k, now, 500);
     ++k->state.revision;
@@ -248,6 +252,7 @@ void bosun_kemper_init(bosun_kemper *k, uint8_t channel,
     k->state.rig = k->state.bank = k->state.rig_in_bank = 1;
     k->state.tuner_deviance = 8192;
     k->wah_fixed = -1;
+    k->bootstrap_name_pending = true;
 }
 
 void bosun_kemper_set_bound_blocks(bosun_kemper *k, uint8_t mask) {
@@ -273,9 +278,19 @@ bool bosun_kemper_select_rig_channel(bosun_kemper *k, uint8_t channel,
     return true;
 }
 
-bool bosun_kemper_request_rig_name(bosun_kemper *k) {
-    return k && !bosun_kemper_transition_active(k) && !k->pending_name[0] &&
-        request(k, 0, 1);
+bool bosun_kemper_request_rig_name(bosun_kemper *k, uint32_t now) {
+    if (!k || !k->rig_identity_known || bosun_kemper_transition_active(k) ||
+        k->pending_name[0] ||
+        (k->name_query_retire_active && !due(now, k->name_query_retire_ms))) return false;
+    /* Kemper MIDI Parameter Documentation, Request String Parameter: 0x43
+     * returns function 0x03; numeric 0x41 at the same address returns no name.
+     * Keep untagged replies from a previous generation out of a new request. */
+    const uint8_t packet[] = {0xf0,0,0x20,0x33,2,0x7f,0x43,0,0,1,0xf7};
+    k->name_query_generation = k->generation;
+    k->name_query_retire_ms = now + 1200;
+    k->name_query_retire_active = true;
+    k->name_query_active = transmit(k, packet, sizeof(packet));
+    return k->name_query_active;
 }
 
 static void publish_block(bosun_kemper *k, unsigned i, bool on) {
@@ -303,12 +318,13 @@ static void accept_name(bosun_kemper *k, const char name[BOSUN_KEMPER_NAME_CAPAC
     }
     memcpy(k->last_name, name, sizeof(k->last_name));
     k->last_name_rig = k->state.rig;
+    k->bootstrap_name_pending = false;
 }
 
 static void commit_name(bosun_kemper *k, uint32_t now) {
     if (!k->pending_name[0] || bosun_kemper_transition_active(k) ||
         k->pending_name_generation != k->generation || now - k->pending_name_ms < 150) return;
-    if (k->last_name_rig && k->last_name_rig != k->state.rig &&
+    if (!k->pending_name_requested && k->last_name_rig && k->last_name_rig != k->state.rig &&
         strcmp(k->pending_name, k->last_name) == 0) {
         k->pending_name[0] = 0;
         return;
@@ -319,6 +335,9 @@ static void commit_name(bosun_kemper *k, uint32_t now) {
 
 static void receive_name(bosun_kemper *k, const uint8_t *data, size_t length,
                          uint32_t now) {
+    /* The boot configuration is a local fallback, not evidence of the rig
+     * currently loaded by the Kemper. Its initial name can precede its PC. */
+    if (!k->rig_identity_known) return;
     char name[BOSUN_KEMPER_NAME_CAPACITY] = {0};
     size_t used = 0;
     for (size_t i = 0; i < length && data[i] && used < sizeof(name) - 1; ++i)
@@ -328,14 +347,17 @@ static void receive_name(bosun_kemper *k, const uint8_t *data, size_t length,
     while (start < used && name[start] == ' ') ++start;
     if (start) { memmove(name, name + start, used - start + 1); used -= start; }
     if (!used) return;
+    bool requested = k->name_query_active && k->name_query_generation == k->generation &&
+        !due(now, k->name_query_retire_ms);
+    k->name_query_active = false;
     if (!bosun_kemper_transition_active(k) && !k->pending_name[0]) {
         bool initial = !k->last_name[0] && !k->last_name_rig;
         if ((k->last_name[0] && strcmp(name, k->last_name)) ||
             (k->last_name_rig && k->last_name_rig != k->state.rig) ||
             initial) {
             arm(k, k->state.rig, now);
-            /* Boot has no previous rig identity to quarantine. Publish the
-             * first observed name immediately while effect queries settle. */
+            /* Once its coordinates are established, the first name has no
+             * previous rig identity to quarantine while effects settle. */
             if (initial) { accept_name(k, name); return; }
         }
         else {
@@ -343,9 +365,14 @@ static void receive_name(bosun_kemper *k, const uint8_t *data, size_t length,
             return;
         }
     }
+    /* An identical broadcast during settling cannot revoke the evidence
+     * from the current request; a different value still replaces it. */
+    requested = requested || (k->pending_name_requested &&
+        k->pending_name_generation == k->generation && !strcmp(k->pending_name, name));
     memcpy(k->pending_name, name, sizeof(name));
     k->pending_name_ms = now;
     k->pending_name_generation = k->generation;
+    k->pending_name_requested = requested;
 }
 
 static void tuner(bosun_kemper *k, bool active) {
@@ -472,6 +499,7 @@ static void receive_pc(bosun_kemper *k, uint8_t pc, uint32_t now) {
         --k->orphan_pc_count;
         return;
     }
+    k->rig_identity_known = true;
     arm(k, rig, now);
     ++k->state.external_rig_changes;
 }
@@ -501,6 +529,7 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
     if (k->scheduled_pc && due(now, k->scheduled_pc_ms)) {
         k->scheduled_pc = false;
         if (voice_channel(k, k->scheduled_pc_channel, 0xc0, (uint8_t)(k->scheduled_pc_rig - 1), 0)) {
+            k->rig_identity_known = true;
             retire_pc(k, now);
             k->local_pc = (bosun_kemper_pc_token){k->generation, now + 10000,
                 k->scheduled_pc_rig, true};
@@ -540,7 +569,11 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
         invalidate_wah(k, now);
     }
     query_wah(k, now);
-    bool initialize = !k->init_sent || !k->state.connected;
+    if (k->state.connected && k->bootstrap_name_pending)
+        (void)bosun_kemper_request_rig_name(k, now);
+    /* A sensing reply confirms the lease, but does not identify the current
+     * rig. Retry the initial snapshot at most once per second until its PC. */
+    bool initialize = !k->init_sent || !k->state.connected || !k->rig_identity_known;
     if (k->init_sent && now - k->last_beacon_ms < (initialize ? 1000u : 5000u)) return;
     const uint8_t packet[] = {0xf0,0,0x20,0x33,2,0x7f,0x7e,0,0x40,2,
         initialize ? 0x23 : 0x22,5,0xf7};
