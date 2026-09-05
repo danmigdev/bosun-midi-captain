@@ -234,6 +234,74 @@ def responses():
     return out
 
 
+def test_run_arms_the_circuitpython_watchdog_after_boot_and_feeds_completed_ticks():
+    from unittest.mock import patch
+    import captain.app as app_module
+
+    class StopRun(BaseException):
+        pass
+
+    reset_mode = object()
+    events = []
+
+    class Timer:
+        mode = None
+
+        @property
+        def timeout(self):
+            return self._timeout
+
+        @timeout.setter
+        def timeout(self, value):
+            if not 0 < value <= 8:
+                raise ValueError("RP2040 timeout must be at most eight seconds")
+            self._timeout = value
+            events.append(("timeout", value))
+
+        def feed(self):
+            events.append(("feed", self.mode))
+
+    timer = Timer()
+    # Match the real API: the timer is in microcontroller, the enum is not.
+    modules = {
+        "microcontroller": types.SimpleNamespace(watchdog=timer),
+        "watchdog": types.SimpleNamespace(WatchDogMode=types.SimpleNamespace(RESET=reset_mode)),
+    }
+    app = object.__new__(Captain)
+    app._last_tick_ms = app_module._TICK_BUDGET_MS
+    app.boot = lambda: events.append(("boot", timer.mode))
+    turns = [0]
+
+    def step():
+        turns[0] += 1
+        if turns[0] > 3:
+            raise StopRun()
+        events.append(("tick", timer.mode))
+
+    app.tick_once = step
+    with patch.dict(sys.modules, modules):
+        try:
+            app.run()
+        except StopRun:
+            pass
+    check("run arms the real watchdog API only after boot and feeds completed ticks",
+          events == [("boot", None), ("timeout", 8)]
+          + [(kind, reset_mode) for _ in range(3) for kind in ("tick", "feed")],
+          repr(events))
+
+    events.clear()
+    turns[0] = 0
+    timer.mode = None
+    with patch.dict(sys.modules, {"microcontroller": types.SimpleNamespace(watchdog=None)}):
+        try:
+            app.run()
+        except StopRun:
+            pass
+    check("run remains usable when the board has no hardware watchdog",
+          events == [("boot", None)] + [("tick", None)] * 3,
+          repr(events))
+
+
 # ---------------- A. protocol resilience ----------------
 
 def test_protocol_barrage():
@@ -1069,6 +1137,7 @@ def main():
     test_protocol_barrage()
     test_protocol_fuzz()
     print("B. main-loop resilience")
+    test_run_arms_the_circuitpython_watchdog_after_boot_and_feeds_completed_ticks()
     test_loop_survives_subcomponent_exceptions()
     test_switch_press_survives_midi_stall()
     test_context_retries_failed_delivery()

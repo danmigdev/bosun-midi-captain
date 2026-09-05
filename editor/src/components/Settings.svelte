@@ -385,7 +385,7 @@
         continuous MIDI message (CC, or a plugin control) with the live
         0-127 position.
       </p>
-      <ExpressionPedals bind:expression={working.expression!} {manifest} {connected} />
+      <ExpressionPedals bind:expression={working.expression!} {manifest} {activeKind} device={working} {connected} />
     </section>
 
     {#each pluginConfigs as cfg (cfg.key)}

@@ -276,3 +276,6 @@ __KIOSK_SCRIPT__
         Remove-Item -LiteralPath $candidate -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+# Expected failures above leave a native exit code behind. Report success only
+# after every assertion and cleanup completed; uncaught failures still terminate.
+exit 0

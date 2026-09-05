@@ -118,6 +118,7 @@ jobs:
       # endurance soak test that guards against leaks over hours of use.
       - name: Run firmware offline test battery
         run: |
+          python -m pip install pyserial==3.5
           python tools/run_all_tests.py
 
   hub:

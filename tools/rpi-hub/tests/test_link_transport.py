@@ -39,6 +39,50 @@ def _serial_transport(serial_port, name: str = "/dev/ttyACM-test") -> SerialTran
     return transport
 
 
+@pytest.mark.parametrize("respond", (True, False))
+def test_write_only_watchdog_reads_the_threshold_write_response_first(monkeypatch, respond):
+    now = [0.0]
+    monkeypatch.setattr(link_module.time, "monotonic", lambda: now[0])
+    received = []
+    link = UpstreamLink(None, received.append)
+    response = b'{"type":"ACK","id":"threshold"}\n'
+
+    class ThresholdTransport:
+        writes = 0
+        waiting = b""
+
+        def read_available(self, _limit):
+            chunk, self.waiting = self.waiting, b""
+            return chunk
+
+        def write_some(self, data):
+            self.writes += 1
+            if respond and self.writes == link_module.WRITE_ONLY_STALL:
+                self.waiting = response
+            return len(data)
+
+        def read(self, limit):
+            now[0] += link_module.WRITE_ONLY_GRACE_S
+            chunk = self.read_available(limit)
+            if chunk:
+                link._stop.set()
+            return chunk
+
+    transport = ThresholdTransport()
+    link._transport = transport
+    for index in range(link_module.WRITE_ONLY_STALL):
+        link._tx.put('{"type":"PING","id":"%d"}\n' % index)
+    if respond:
+        link._pump()
+        assert received == [response.decode().strip()]
+        assert transport.waiting == b""
+    else:
+        with pytest.raises(ConnectionError, match="write-only stall"):
+            link._pump()
+        assert received == []
+    assert transport.writes == link_module.WRITE_ONLY_STALL
+
+
 def test_serial_write_does_not_call_pyserial_write_or_unbounded_flush(monkeypatch):
     class FakeSerial:
         def __init__(self):

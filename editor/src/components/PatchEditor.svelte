@@ -26,6 +26,7 @@
   import { MODE_HELP } from "../lib/help-text";
   import { listSnippets, saveSnippet, bindingFromSnippet, type Snippet } from "../lib/snippets";
   import { History } from "../lib/undo-stack";
+  import { filterManifestForProfile } from "../lib/profile-message-types";
 
   type Props = {
     bank: number;
@@ -33,6 +34,7 @@
     patch: Patch;
     manifest: Manifest;
     activeKind?: string;
+    device?: Record<string, unknown> | null;
     /** All patches on the device, used to populate the "Linked to" picker.
      *  Without it we'd have to round-trip to LIST_PATCHES every render. */
     allPatches?: import("../lib/protocol").PatchSummary[];
@@ -44,7 +46,7 @@
     onToggleLock?: (slot: number) => void;
   };
 
-  let { bank, slot, patch, manifest, activeKind = "", allPatches = [], linkConfig, onToggleLock }: Props = $props();
+  let { bank, slot, patch, manifest, activeKind = "", device = null, allPatches = [], linkConfig, onToggleLock }: Props = $props();
 
   /** Is this patch's slot column locked across banks? */
   let slotLocked = $derived(isSlotLocked(slot, linkConfig, allPatches));
@@ -96,18 +98,7 @@
     snapshotHistory();
   }
 
-  // Filtered manifest: drop plugins that don't match the active profile's
-  // kind so the message-type picker only offers core + relevant plugin
-  // messages. Empty activeKind means we haven't loaded the profile yet
-  // (allow everything to avoid showing a bare picker).
-  let filteredManifest = $derived.by<Manifest>(() => {
-    if (!activeKind) return manifest;
-    const plugins: Manifest["plugins"] = {};
-    for (const [id, plug] of Object.entries(manifest.plugins)) {
-      if (id === activeKind) plugins[id] = plug;
-    }
-    return { core_messages: manifest.core_messages, plugins };
-  });
+  let filteredManifest = $derived(filterManifestForProfile(manifest, activeKind, device));
 
   // Local mutable working copy. Re-syncs from the upstream `patch` prop
   // whenever App.svelte reassigns currentPatch (i.e. the prop reference
@@ -176,9 +167,18 @@
 
   let expanded = $state<Set<string>>(new Set());
   let allTypes = $derived<FlattenedSchema[]>(flattenManifest(filteredManifest));
-  let typesByName = $derived<Record<string, FlattenedSchema>>(
+  let availableTypesByName = $derived<Record<string, FlattenedSchema>>(
     Object.fromEntries(allTypes.map(t => [t.type, t]))
   );
+  // Retain schemas for saved messages from another/older profile. Filtering
+  // changes the available choices, never the saved value or its parameters.
+  let typesByName = $derived<Record<string, FlattenedSchema>>(
+    Object.fromEntries(flattenManifest(manifest).map(t => [t.type, t]))
+  );
+  function savedTypeLabel(type: string): string {
+    const schema = typesByName[type];
+    return schema ? `${schema.source} · ${schema.label} (saved)` : `${type} (saved)`;
+  }
 
   function toggle(sw: string) {
     // Expansion is purely a UI affordance: no binding is created just by
@@ -237,7 +237,7 @@
   }
 
   function addMessage(b: Binding, actionKey: string, msgType: string) {
-    const schema = typesByName[msgType];
+    const schema = availableTypesByName[msgType];
     if (!schema) return;
     if (!b.actions[actionKey]) b.actions[actionKey] = { messages: [] };
     b.actions[actionKey].messages.push(defaultMessageFromSchema(msgType, schema));
@@ -250,7 +250,7 @@
   }
 
   function changeMessageType(b: Binding, actionKey: string, idx: number, newType: string) {
-    const schema = typesByName[newType];
+    const schema = availableTypesByName[newType];
     if (!schema) return;
     b.actions[actionKey].messages[idx] = defaultMessageFromSchema(newType, schema);
     commit(b);
@@ -283,7 +283,7 @@
   }
 
   function addOnEnterMessage(msgType: string) {
-    const schema = typesByName[msgType];
+    const schema = availableTypesByName[msgType];
     if (!schema) return;
     ensureOnEnter().messages.push(defaultMessageFromSchema(msgType, schema));
     persistPatch();
@@ -296,7 +296,7 @@
   }
 
   function changeOnEnterMessageType(idx: number, newType: string) {
-    const schema = typesByName[newType];
+    const schema = availableTypesByName[newType];
     if (!schema) return;
     ensureOnEnter().messages[idx] = defaultMessageFromSchema(newType, schema);
     persistPatch();
@@ -313,7 +313,7 @@
   }
 
   function addOnExitMessage(msgType: string) {
-    const schema = typesByName[msgType];
+    const schema = availableTypesByName[msgType];
     if (!schema) return;
     ensureOnExit().messages.push(defaultMessageFromSchema(msgType, schema));
     persistPatch();
@@ -326,7 +326,7 @@
   }
 
   function changeOnExitMessageType(idx: number, newType: string) {
-    const schema = typesByName[newType];
+    const schema = availableTypesByName[newType];
     if (!schema) return;
     ensureOnExit().messages[idx] = defaultMessageFromSchema(newType, schema);
     persistPatch();
@@ -390,12 +390,13 @@
   }
 
   function changeExpType(jack: number, newType: string) {
+    if (!expTypes.some(t => t.type === newType)) return;
     const o = overrideFor(jack);
     if (!o) return;
     if (newType === "cc") {
       o.message = defaultExpMessage();
     } else {
-      const schema = typesByName[newType];
+      const schema = availableTypesByName[newType];
       o.message = schema ? defaultMessageFromSchema(newType, schema) : { type: newType, value: 0 };
     }
     persistPatch();
@@ -513,6 +514,9 @@
           <div class="msg">
             <select value={msg.type}
                     onchange={(e) => changeOnEnterMessageType(mi, (e.target as HTMLSelectElement).value)}>
+              {#if !availableTypesByName[msg.type]}
+                <option value={msg.type} disabled>{savedTypeLabel(msg.type)}</option>
+              {/if}
               {#each allTypes as t}
                 <option value={t.type}>{t.source} · {t.label}</option>
               {/each}
@@ -588,6 +592,9 @@
           <div class="msg">
             <select value={msg.type}
                     onchange={(e) => changeOnExitMessageType(mi, (e.target as HTMLSelectElement).value)}>
+              {#if !availableTypesByName[msg.type]}
+                <option value={msg.type} disabled>{savedTypeLabel(msg.type)}</option>
+              {/if}
               {#each allTypes as t}
                 <option value={t.type}>{t.source} · {t.label}</option>
               {/each}
@@ -684,6 +691,9 @@
               <div class="msg">
                 <select value={msg.type}
                         onchange={(e) => changeExpType(jack, (e.target as HTMLSelectElement).value)}>
+                  {#if !expTypes.some(t => t.type === msg.type)}
+                    <option value={msg.type} disabled>{savedTypeLabel(msg.type)}</option>
+                  {/if}
                   {#each expTypes as t}
                     <option value={t.type}>{t.label}</option>
                   {/each}
@@ -863,6 +873,9 @@
                   <div class="msg">
                     <select value={msg.type}
                             onchange={(e) => changeMessageType(b, actionKey, mi, (e.target as HTMLSelectElement).value)}>
+                      {#if !availableTypesByName[msg.type]}
+                        <option value={msg.type} disabled>{savedTypeLabel(msg.type)}</option>
+                      {/if}
                       {#each allTypes as t}
                         <option value={t.type}>{t.source} · {t.label}</option>
                       {/each}

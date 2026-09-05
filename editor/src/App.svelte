@@ -1688,6 +1688,7 @@
               {/if}
               <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
                            patch={currentPatch.patch} {manifest} {activeKind}
+                           device={globalDevice}
                            allPatches={patches} {linkConfig}
                            onToggleLock={(s) => { void toggleSlotLock(s); }} />
             {:else if editorTab === "quicksetup"}

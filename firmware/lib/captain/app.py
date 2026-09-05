@@ -6,7 +6,7 @@ from . import VERSION, config
 # Hardware watchdog timeout. Must exceed the longest legitimate single
 # operation (profile switch, settings save, big TFT render) but stay
 # short enough that a wedged loop self-recovers quickly.  The RP2040
-# hardware watchdog tops out at 8.3 s in CircuitPython.
+# CircuitPython RP2040 implementation accepts at most 8 seconds.
 WATCHDOG_TIMEOUT_S = 8
 from .bindings import BindingRunner, SwitchArray
 from .board import LED_INDEX_PER_SWITCH
@@ -247,13 +247,14 @@ class Captain:
         # itself within WATCHDOG_TIMEOUT_S instead of staying frozen until
         # someone power-cycles it.  The editor's auto-reconnect + the
         # Kemper beacon re-init recover the link automatically, so a wedge
-        # degrades to a ~10 s blip.  Enabled AFTER boot() (which takes
+        # recovers after the watchdog timeout and reboot. Enabled AFTER boot() (which takes
         # longer than the timeout).
         try:
             import microcontroller
+            from watchdog import WatchDogMode
             wdt = microcontroller.watchdog
             wdt.timeout = WATCHDOG_TIMEOUT_S
-            wdt.mode = microcontroller.WatchDogMode.RESET
+            wdt.mode = WatchDogMode.RESET
             _wdt = wdt
         except Exception:
             _wdt = None

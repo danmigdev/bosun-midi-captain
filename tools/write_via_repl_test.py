@@ -54,6 +54,10 @@ class WriteViaReplIdentityTests(unittest.TestCase):
                          writer.READ_CHUNK_SIZE)
         self.assertTrue(all(int(code.split("(", 1)[1].split(")", 1)[0]) <=
                             writer.READ_CHUNK_SIZE for code in reads))
+        # Large readbacks take longer than the Captain's eight-second watchdog.
+        # Feed on every bounded read, just as the writer does for every chunk.
+        self.assertTrue(all("microcontroller.watchdog.feed()" in code
+                            for code in reads))
 
     def test_empty_file_has_standard_sha256_and_closes(self):
         remote = RemoteFile(b"")

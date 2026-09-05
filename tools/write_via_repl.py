@@ -116,7 +116,8 @@ def _remote_identity(port, path):
     """
     output = execute_raw(
         port,
-        "import binascii,os\n"
+        "import binascii,os,microcontroller\n"
+        "microcontroller.watchdog.feed()\n"
         "print(os.stat(%r)[6])\n"
         "f=open(%r,'rb')" % (path, path),
     )
@@ -136,7 +137,9 @@ def _remote_identity(port, path):
             read_size = min(READ_CHUNK_SIZE, size - offset)
             output = execute_raw(
                 port,
-                "b=f.read(%d)\nprint(binascii.hexlify(b).decode())" %
+                "b=f.read(%d)\n"
+                "microcontroller.watchdog.feed()\n"
+                "print(binascii.hexlify(b).decode())" %
                 read_size,
             )
             encoded = output.strip()

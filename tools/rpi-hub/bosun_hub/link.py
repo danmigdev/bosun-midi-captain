@@ -538,9 +538,6 @@ class UpstreamLink:
                     last_tx = time.monotonic()
                 if not pending:
                     writes_since_rx += 1
-                    if (writes_since_rx >= WRITE_ONLY_STALL
-                            and now - last_rx >= WRITE_ONLY_GRACE_S):
-                        raise ConnectionError("write-only stall (pedal not answering)")
 
             # -- read ---------------------------------------------------
             chunk = transport.read(READ_CHUNK)
@@ -548,8 +545,16 @@ class UpstreamLink:
                 last_rx = time.monotonic()
                 writes_since_rx = 0
                 self._feed_bytes(chunk)
-            elif now - last_rx >= STALL_S:
-                raise ConnectionError(f"no data for {STALL_S:.0f}s")
+            else:
+                # A response can arrive during the write above. Drain it
+                # before deciding the pedal is silent, including the write
+                # which crosses the watchdog's request/grace threshold.
+                quiet_for = time.monotonic() - last_rx
+                if (writes_since_rx >= WRITE_ONLY_STALL
+                        and quiet_for >= WRITE_ONLY_GRACE_S):
+                    raise ConnectionError("write-only stall (pedal not answering)")
+                if quiet_for >= STALL_S:
+                    raise ConnectionError(f"no data for {STALL_S:.0f}s")
 
             if not chunk and not written:
                 time.sleep(0.01)
