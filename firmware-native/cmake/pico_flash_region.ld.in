@@ -1,0 +1,2 @@
+/* Reserve the final 512 KiB for explicitly initialized littlefs storage. */
+FLASH(rx) : ORIGIN = 0x10000000, LENGTH = @BOSUN_PROGRAM_FLASH_BYTES@

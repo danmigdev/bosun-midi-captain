@@ -1,0 +1,4 @@
+# Native build inputs must also work from a Windows checkout through WSL.
+/firmware-native/** text eol=lf
+/tools/native-build.sh text eol=lf
+/.github/workflows/native.yml text eol=lf

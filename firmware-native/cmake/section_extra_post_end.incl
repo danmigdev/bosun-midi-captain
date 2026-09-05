@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+SECTIONS
+{
+    ASSERT(SIZEOF(.stack_dummy) == 16384, "Bosun requires a 16 KiB core-0 stack")
+    ASSERT(SIZEOF(.stack1_dummy) == 0, "Bosun flash driver requires core 1 unused")
+    ASSERT(__HeapLimit == __end__, "Bosun dynamic heap must remain disabled")
+    ASSERT(__StackBottom >= __end__ + 16384, "Bosun requires 16 KiB RAM margin beyond data and stack")
+}
