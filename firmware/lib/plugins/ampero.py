@@ -39,82 +39,97 @@ _SLOT_VALUES   = list(_SLOT_CC.keys())
 _LOOPER_VALUES = list(_LOOPER_CC.keys())
 
 
-MESSAGE_TYPES = {
-    "ampero_patch": {
-        "label": "Select Patch (P##-#)",
-        "params": {
-            "patch":   {"type": "string", "pattern": "^P[0-6][0-9]-[1-5]$", "default": "P01-1", "label": "Patch"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+MESSAGE_TYPE_NAMES = (
+    'ampero_patch',
+    'ampero_scene',
+    'ampero_slot_toggle',
+    'ampero_looper',
+    'ampero_tap_tempo',
+    'ampero_set_tempo',
+    'ampero_tuner',
+    'ampero_engage',
+    'ampero_qa_param',
+)
+
+
+def manifest_message_types():
+    """Allocate editor schemas only on demand, never for MIDI registration."""
+    return {
+        "ampero_patch": {
+            "label": "Select Patch (P##-#)",
+            "params": {
+                "patch":   {"type": "string", "pattern": "^P[0-6][0-9]-[1-5]$", "default": "P01-1", "label": "Patch"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Patch {patch}",
         },
-        "summary": "Patch {patch}",
-    },
-    "ampero_scene": {
-        "label": "Scene",
-        "params": {
-            "scene":   {"type": "int", "min": 1, "max": 5, "default": 1, "label": "Scene"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_scene": {
+            "label": "Scene",
+            "params": {
+                "scene":   {"type": "int", "min": 1, "max": 5, "default": 1, "label": "Scene"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Scene {scene}",
         },
-        "summary": "Scene {scene}",
-    },
-    "ampero_slot_toggle": {
-        "label": "Effect Slot On/Off",
-        "params": {
-            "slot":    {"type": "enum", "values": _SLOT_VALUES, "default": "A1", "label": "Slot"},
-            "value":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "Value"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_slot_toggle": {
+            "label": "Effect Slot On/Off",
+            "params": {
+                "slot":    {"type": "enum", "values": _SLOT_VALUES, "default": "A1", "label": "Slot"},
+                "value":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "Value"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Slot {slot} {value}",
         },
-        "summary": "Slot {slot} {value}",
-    },
-    "ampero_looper": {
-        "label": "Looper",
-        "params": {
-            "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "rec", "label": "Action"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_looper": {
+            "label": "Looper",
+            "params": {
+                "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "rec", "label": "Action"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Looper {action}",
         },
-        "summary": "Looper {action}",
-    },
-    "ampero_tap_tempo": {
-        "label": "Tap Tempo",
-        "params": {
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_tap_tempo": {
+            "label": "Tap Tempo",
+            "params": {
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Tap",
         },
-        "summary": "Tap",
-    },
-    "ampero_set_tempo": {
-        "label": "Set BPM",
-        "params": {
-            "bpm":     {"type": "int", "min": 40, "max": 300, "default": 120, "label": "BPM"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_set_tempo": {
+            "label": "Set BPM",
+            "params": {
+                "bpm":     {"type": "int", "min": 40, "max": 300, "default": 120, "label": "BPM"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "BPM {bpm}",
         },
-        "summary": "BPM {bpm}",
-    },
-    "ampero_tuner": {
-        "label": "Tuner",
-        "params": {
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_tuner": {
+            "label": "Tuner",
+            "params": {
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "Tuner {state}",
         },
-        "summary": "Tuner {state}",
-    },
-    "ampero_engage": {
-        "label": "Engage / Bypass",
-        "params": {
-            "state":   {"type": "enum", "values": ["engage", "analog_bypass", "dsp_bypass"], "default": "engage", "label": "State"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_engage": {
+            "label": "Engage / Bypass",
+            "params": {
+                "state":   {"type": "enum", "values": ["engage", "analog_bypass", "dsp_bypass"], "default": "engage", "label": "State"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "{state}",
         },
-        "summary": "{state}",
-    },
-    "ampero_qa_param": {
-        "label": "Quick Access Param",
-        "params": {
-            "param":   {"type": "enum", "values": [1, 2, 3], "default": 1, "label": "Param"},
-            "action":  {"type": "enum", "values": ["step_up", "step_down", "set"], "default": "step_up", "label": "Action"},
-            "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value", "if": {"action": "set"}},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+        "ampero_qa_param": {
+            "label": "Quick Access Param",
+            "params": {
+                "param":   {"type": "enum", "values": [1, 2, 3], "default": 1, "label": "Param"},
+                "action":  {"type": "enum", "values": ["step_up", "step_down", "set"], "default": "step_up", "label": "Action"},
+                "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value", "if": {"action": "set"}},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 16, "label": "Channel"},
+            },
+            "summary": "QA{param} {action}",
         },
-        "summary": "QA{param} {action}",
-    },
-}
+    }
 
 
 def dispatch(msg, midi):

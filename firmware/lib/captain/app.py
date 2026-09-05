@@ -6,7 +6,7 @@ from . import VERSION, config
 # Hardware watchdog timeout. Must exceed the longest legitimate single
 # operation (profile switch, settings save, big TFT render) but stay
 # short enough that a wedged loop self-recovers quickly.  The RP2040
-# hardware watchdog tops out at 8.3 s in CircuitPython.
+# CircuitPython RP2040 implementation accepts at most 8 seconds.
 WATCHDOG_TIMEOUT_S = 8
 from .bindings import BindingRunner, SwitchArray
 from .board import LED_INDEX_PER_SWITCH
@@ -111,10 +111,6 @@ class Captain:
         self.current_bank = 1
         self.current_slot = 1
         self.current_patch = None
-        # Timestamp of the last LOCAL (pedal/editor/boot) patch switch, i.e. NOT
-        # one triggered by an inbound device echo. Plugins use it to tell their
-        # own echo apart from a genuine external change (see kemper auto-follow).
-        self.last_local_switch_ms = 0
         self._binding_index = {}
         self._mode_index = {}
         # Generic Bank MSB/LSB tracking so plugins reacting to a downstream
@@ -136,6 +132,7 @@ class Captain:
             # threshold (its hold_text); "" (nothing shown) the rest of the time.
             "hold_effect": "",
         }
+        self._pending_context_updates = {}
         # Cached layout from device.json (tft.layout). Render falls back to
         # a centered patch name if this is empty.
         self.display_layout = self.device.get("tft", {}).get("layout") or []
@@ -171,6 +168,12 @@ class Captain:
         # buffer and drops block on/off deltas (which left effect LEDs stale,
         # worst on a direct pedal<->Player USB link). 0 = nothing pending.
         self._refresh_due_ms = 0
+        # Earliest time at which the MIDI-quiet shortcut may render. Without
+        # this lower bound, an old _last_midi_in_ms makes a newly dirtied TFT
+        # look "quiet" immediately, so it can block in the same tick as an
+        # outbound rig PC before the device has had a chance to reply. The
+        # hard deadline above still wins, including the tuner's 30 ms cadence.
+        self._refresh_not_before_ms = 0
         # Deferred LED repaint (see apply_global + _tick_body). A settings save
         # that changes leds.dim needs the strip repainted to take effect live,
         # but doing it inline in apply_global piled onto the settings-save heap
@@ -244,13 +247,14 @@ class Captain:
         # itself within WATCHDOG_TIMEOUT_S instead of staying frozen until
         # someone power-cycles it.  The editor's auto-reconnect + the
         # Kemper beacon re-init recover the link automatically, so a wedge
-        # degrades to a ~10 s blip.  Enabled AFTER boot() (which takes
+        # recovers after the watchdog timeout and reboot. Enabled AFTER boot() (which takes
         # longer than the timeout).
         try:
             import microcontroller
+            from watchdog import WatchDogMode
             wdt = microcontroller.watchdog
             wdt.timeout = WATCHDOG_TIMEOUT_S
-            wdt.mode = microcontroller.WatchDogMode.RESET
+            wdt.mode = WatchDogMode.RESET
             _wdt = wdt
         except Exception:
             _wdt = None
@@ -414,8 +418,10 @@ class Captain:
         # deltas. The splash gate in _refresh_display holds this at boot.
         if self._refresh_due_ms and (
                 now_ms >= self._refresh_due_ms
-                or now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS):
+                or (now_ms >= self._refresh_not_before_ms
+                    and now_ms - self._last_midi_in_ms >= _REFRESH_QUIET_MS)):
             self._refresh_due_ms = 0
+            self._refresh_not_before_ms = 0
             self._refresh_display()
         _t = self._now_ms(); self._bump_section("tft_render", _t - _pt); _pt = _t
         # Deferred LED repaint, on the same quiet-drain gate as the TFT render.
@@ -506,9 +512,30 @@ class Captain:
             "expression": self.expression.stats(),
         }
 
+    def iter_stats_fields(self):
+        # Protocol streams these directly. current/expression stay separate
+        # so this path creates neither the large dict nor per-jack containers.
+        yield "uptime_ms", self._now_ms() - self._boot_ms
+        yield "mem_free", gc.mem_free()
+        yield "mem_alloc", gc.mem_alloc()
+        yield "loop_iters", self.loop_iters
+        yield "last_tick_ms", self._last_tick_ms
+        yield "max_tick_ms", self.max_tick_ms
+        yield "slow_tick_count", self.slow_tick_count
+        yield "section_max_ms", self._section_max_ms
+        yield "midi_rx_count", self.midi_rx_count
+        yield "midi_tx_count", getattr(self.midi, "tx_count", 0)
+        yield "usb_tx_dropped", getattr(self.midi, "usb_tx_dropped", 0)
+        yield "sysex_rx_count", getattr(self.midi, "sysex_rx_count", 0)
+        yield "last_patch_switch_duration_ms", getattr(
+            self, "last_patch_switch_duration_ms", 0)
+        yield "protocol_cmd_count", self.protocol_cmd_count
+        yield "last_patch_switch_ms", self.last_patch_switch_ms
+
     # ---------- patch operations (called from Protocol) ----------
 
-    def switch_patch(self, bank, slot, source="editor", fire_on_enter=True):
+    def switch_patch(self, bank, slot, source="editor", fire_on_enter=True,
+                     force_reload=False):
         if not self.patches.has(bank, slot):
             return False
         # Any real patch load ends an in-progress preset preview: the commit
@@ -526,7 +553,8 @@ class Captain:
         if (source == "midi_in"
                 and self.current_patch is not None
                 and (bank, slot) == (self.current_bank, self.current_slot)
-                and (self._now_ms() - self.last_patch_switch_ms) < 1200):
+                and (self._now_ms() - self.last_patch_switch_ms) < 1200
+                and not force_reload):
             # Echo of a patch WE just loaded (pedal-initiated rig change). The
             # Player sends this PC echo only AFTER it has streamed the new rig's
             # block deltas (verified: PC lands ~400 ms in, after the deltas at
@@ -551,23 +579,18 @@ class Captain:
         self.current_bank = bank
         self.current_slot = slot
         self.last_patch_switch_ms = t0
-        # A local switch arms the plugins' echo window; an inbound-echo-driven
-        # switch (source="midi_in") must NOT, or it would re-arm forever. Also
-        # gated on fire_on_enter: a load that sent no outbound MIDI (e.g.
-        # boot() deferring to an authoritative Kemper - see
-        # wants_authoritative_boot) has nothing to echo, so arming the window
-        # here would make the very NEXT inbound state announcement from the
-        # device look like a self-echo and get swallowed by the branch above
-        # instead of being followed - the current patch would then stay
-        # stuck on whatever boot loaded, forever, even though the device
-        # itself is on a different rig (2026-08-15: TFT correctly showed the
-        # Kemper's real rig name, but the switch/effect layout stayed on the
-        # boot patch's - the rig-name string broadcast bypasses switch_patch
-        # entirely, so only this echo-window miscount hid the symptom there).
-        if source != "midi_in" and fire_on_enter:
-            self.last_local_switch_ms = t0
         self.current_patch = self.patches.get(bank, slot)
+        self.patches.protect(bank, slot)
         self._reindex_patch()
+        # Establish a new device-state generation before any outbound rig
+        # command or patch_switched EVENT can be observed. A target such as
+        # the Kemper reports a rig change as a multi-frame burst; retaining
+        # the previous rig's block values under the new bank/slot makes an
+        # immediate GET_CONTEXT look authoritative and visibly flashes stale
+        # effects in Stage. Plugins keep their private cache for later
+        # reconciliation, but invalidate public old-patch values here.
+        self.plugins.on_patch_switch_started(
+            self, source=source, fire_on_enter=fire_on_enter)
         # Per-patch expression override: a patch may retarget the expression
         # jacks (which MIDI message each jack sends) while calibration/curve
         # stay device-wide. Rebuild the jacks from the merged config; a bad
@@ -594,9 +617,14 @@ class Captain:
             self.plugins.on_patch_loaded(self)
         self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
         self._paint_preset_nav_leds()
-        self.display_context["patch_name"] = (self.current_patch or {}).get("name", "")
-        self.display_context["bank"] = bank
-        self.display_context["slot"] = slot
+        # Location must travel in the same first CONTEXT delta as the new rig.
+        # Consumers can then reject delayed effect values from the old rig
+        # without guessing from message timing.
+        self.update_context({
+            "patch_name": (self.current_patch or {}).get("name", ""),
+            "bank": bank,
+            "slot": slot,
+        })
         self._update_setlist_pos(bank, slot)
         # Order matters for perceived latency: fire on_enter (which dispatches
         # kemper_rig and any other plugin MIDI) BEFORE rendering the TFT, so
@@ -632,6 +660,14 @@ class Captain:
             return
         try:
             self.display.render(self.display_context, self.display_layout)
+        except MemoryError:
+            # Retain the last complete frame and retry after transient protocol
+            # or patch allocations have gone away, even on an otherwise idle rig.
+            gc.collect()
+            retry_ms = self._now_ms() + _REFRESH_MAX_DEFER_MS
+            self._refresh_due_ms = retry_ms
+            self._refresh_not_before_ms = retry_ms
+            print("display refresh deferred: low memory")
         except Exception as e:
             print("display refresh failed:", e)
 
@@ -670,6 +706,7 @@ class Captain:
                           for sw_name, b in self._binding_index.items()}
             prev_latched = {sw.name: sw.latched_on for sw in self.switches.switches}
             self.current_patch = patch
+            self.patches.protect(bank, slot)
             self._reindex_patch()
             self.switches.reset_all()
             for sw in self.switches.switches:
@@ -681,6 +718,35 @@ class Captain:
                     sw.latched_on = True
             self.leds.render_patch(self.current_patch, self.switches.switches, show=False)
             self._paint_preset_nav_leds()
+
+    def delete_patch(self, bank, slot):
+        """Delete one patch without leaving a stale active runtime snapshot.
+
+        PatchStore performs the durable unlink first and raises on a real
+        filesystem failure, so everything below runs only after a committed
+        delete. Deleting the active location enters the same supported blank
+        state as booting with no 01/01 patch; choosing another rig remains the
+        editor/user's job, avoiding an unsolicited MIDI program change here.
+        """
+        was_current = (bank, slot) == (self.current_bank, self.current_slot)
+        self.patches.delete(bank, slot)
+        if not was_current:
+            return
+        self._preview = None
+        self.display_context.pop("preview", None)
+        self.reload_current_patch()
+        # Drop any per-patch expression retargeting with the deleted patch.
+        # No messages are emitted by configure(); the jack simply returns to
+        # the device-wide mapping for subsequent physical movement.
+        try:
+            self.expression.configure(self._expression_for_patch(self.current_patch))
+        except Exception as e:
+            print("expression patch delete configure failed:", e)
+        self.update_context({
+            "patch_name": (self.current_patch or {}).get("name", ""),
+            "bank": self.current_bank,
+            "slot": self.current_slot,
+        })
 
     def put_binding(self, bank, slot, binding):
         self.patches.put_binding(bank, slot, binding, self._now_ms())
@@ -893,6 +959,7 @@ class Captain:
     def reload_current_patch(self):
         try:
             self.current_patch = self.patches.get(self.current_bank, self.current_slot)
+            self.patches.protect(self.current_bank, self.current_slot)
         except OSError:
             self.current_patch = None
         self._reindex_patch()
@@ -1132,6 +1199,7 @@ class Captain:
         if not updates:
             return
         self.display_context.update(updates)
+        self._pending_context_updates.update(updates)
         self._mark_display_dirty()
 
     def _mark_display_dirty(self):
@@ -1139,11 +1207,16 @@ class Captain:
         burst to go quiet (see _tick_body), capped at _REFRESH_MAX_DEFER_MS.
         Already-pending renders keep their original cap so a steady update
         stream still refreshes at a bounded rate."""
+        now_ms = self._now_ms()
+        # Every new update gets a real initial reply/coalescing opportunity.
+        # This timestamp is written only when the display becomes dirty; the
+        # idle tick path below merely compares integers and allocates nothing.
+        self._refresh_not_before_ms = now_ms + _REFRESH_QUIET_MS
         if not self._refresh_due_ms:
             ctx = self.display_context
             tuner_on = ctx.get("tuner") == "on" or ctx.get("kemper_tuner") == "on"
             cap = _TUNER_REFRESH_MS if tuner_on else _REFRESH_MAX_DEFER_MS
-            self._refresh_due_ms = self._now_ms() + cap
+            self._refresh_due_ms = now_ms + cap
 
     def _push_context(self, now_ms):
         """Push the current display_context over the data port for the editor's
@@ -1193,53 +1266,68 @@ class Captain:
         if port is None or not port.connected:
             return
         ctx = self.display_context
+        delta = getattr(self, "_pending_context_updates", {})
         # Build a cheap fingerprint - just key count + repr of key-value pairs
         fp = (len(ctx), tuple(sorted((str(k), str(v)) for k, v in ctx.items())))
         if fp == getattr(self, "_last_context_fp", None):
             return
-        # Build a JSON-safe copy
-        safe = {}
-        for k, v in ctx.items():
-            try:
-                import json as _j
-                _j.dumps({k: v})
-                safe[k] = v
-            except Exception:
-                safe[k] = str(v)
+
+        import gc as _gc
+        import json as _j
+
         # protocol._send() never raises - it catches every exception
         # internally (including MemoryError) and only prints "[protocol]
-        # _send EXC" to the REPL, so it cannot signal failure back here,
-        # and its own single gc.collect()-and-retry on json.dumps() isn't
-        # always enough right after a big Kemper rig-change SYSEX burst
-        # leaves the heap freshly fragmented (2026-08-15: confirmed live,
-        # twice - a CONTEXT push right after a rig change hit MemoryError
-        # both with and without an extra proactive gc.collect() beforehand,
-        # and because _send() swallows that silently, this function had no
-        # way to know the push actually failed and would commit the
-        # fingerprint as "delivered" anyway - permanently losing that
-        # state change until the next unrelated one). So dry-run the same
-        # encode here first, with our own gc.collect()-and-retry: on
-        # failure, return WITHOUT committing _last_context_fp, so the next
-        # 1 Hz tick retries the same state instead of losing it. Once this
-        # succeeds, _send()'s own internal (redundant but harmless)
-        # re-encode of the same now-uncontested payload is essentially
-        # guaranteed to succeed too.
-        obj = {"type": "CONTEXT", "context": safe}
+        # _send EXC" to the REPL, so it cannot signal failure back here.
+        # We must know whether the push actually went out, or the
+        # fingerprint gets committed as "delivered" and the state change
+        # is lost until some later unrelated one (2026-08-15: confirmed
+        # live). So dry-run the encode here first: on failure, return
+        # WITHOUT committing _last_context_fp so the next tick retries.
+        #
+        # On the Kemper-on-a-Pi setup the heap sits very tight (~10 KB
+        # free) and the old code re-encoded the context ~17x per push
+        # (a json.dumps per key for the safety check, then the whole
+        # object, then _send's own re-encode) - so effect-toggle pushes
+        # MemoryError'd every tick and never got through (2026-09-04).
+        # Now: one proactive gc, one dry-run dumps, and only fall back to
+        # the per-key JSON-safety coercion if that hits a real TypeError
+        # (a plugin put a non-serialisable value in the context).
+        _gc.collect()
+        # Plugin changes (especially effect states) travel as small deltas:
+        # faster and far less likely to need a large contiguous RP2040 heap
+        # allocation. A newly connected Stage obtains the full snapshot via
+        # streamed GET_CONTEXT.
+        payload_ctx = dict(delta) if delta else ctx
+        obj = {"type": "CONTEXT", "context": payload_ctx}
+        if delta:
+            obj["partial"] = True
         try:
-            import json as _j
             _j.dumps(obj)
         except MemoryError:
-            try:
-                import gc as _gc
-                _gc.collect()
-            except Exception:
-                pass
+            _gc.collect()
             try:
                 _j.dumps(obj)
             except MemoryError:
                 return
-        self.protocol._send(obj)
-        self._last_context_fp = fp
+        except TypeError:
+            safe = {}
+            for k, v in ctx.items():
+                try:
+                    _j.dumps(v)
+                    safe[k] = v
+                except Exception:
+                    safe[k] = str(v)
+            obj = {"type": "CONTEXT", "context": safe}
+            try:
+                _j.dumps(obj)
+            except MemoryError:
+                return
+        if self.protocol._send(obj):
+            self._last_context_fp = fp
+            if delta:
+                for k, v in list(payload_ctx.items()):
+                    if self._pending_context_updates.get(k) == v:
+                        self._pending_context_updates.pop(k, None)
 
     def find_binding(self, switch_name):
         """Return the current patch's binding for the given switch, or
@@ -1270,8 +1358,14 @@ class Captain:
             return
         bank_colors = nav.get("bank_colors") or {}
         bank_color = bank_colors.get(str(self.current_bank)) or "#888888"
-        available_slots = {p["slot"] for p in self.patches.list()
-                           if p["bank"] == self.current_bank}
+        # This runs in the rig-switch hot path.  Do not call PatchStore.list():
+        # listing materialises metadata for every patch and, on disk-backed
+        # profiles, parses every patch JSON before on_enter can send MIDI.
+        # We only need existence for the distinct slots visible in this row;
+        # has() also sees unsaved RAM-only patches without parsing disk JSON.
+        target_slots = {int(slot) for slot in sw_map.values()}
+        available_slots = {slot for slot in target_slots
+                           if self.patches.has(self.current_bank, slot)}
         bright_rgb = parse_hex(bank_color)
         d = self.leds.dim
         dim_rgb = ((bright_rgb[0] * d + 127) // 255,
@@ -1335,8 +1429,12 @@ class Captain:
         # _paint_preset_nav_leds), otherwise pressing it would still tell the
         # Kemper to load a rig that has no patch behind it.
         nav_switches = (self.device.get("preset_navigation") or {}).get("switches") or {}
-        available_slots = {p["slot"] for p in self.patches.list()
-                           if p["bank"] == self.current_bank}
+        # Reindexing is part of switch_patch before on_enter dispatches the
+        # target rig.  Probe just the distinct configured targets rather than
+        # loading metadata for the complete patch inventory.
+        target_slots = {int(slot) for slot in nav_switches.values()}
+        available_slots = {slot for slot in target_slots
+                           if self.patches.has(self.current_bank, slot)}
         for sw_name, target_slot in nav_switches.items():
             if sw_name in self._binding_index:
                 continue

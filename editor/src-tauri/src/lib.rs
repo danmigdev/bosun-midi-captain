@@ -4,6 +4,7 @@
 // the JNI entry point that Android needs to load the Rust code.
 
 mod export;
+mod hub_discovery;
 mod midi;
 #[cfg(target_os = "android")]
 mod midi_android;
@@ -15,9 +16,7 @@ mod installer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .manage(serial::AppState::default());
+    let mut builder = tauri::Builder::default().manage(serial::AppState::default());
 
     // Window state persistence is desktop-only (no window sizing on Android).
     #[cfg(not(target_os = "android"))]
@@ -74,6 +73,7 @@ pub fn run() {
             midi::midi_bridge_status,
             tcp_serial::tcp_list_ports,
             tcp_serial::tcp_connect,
+            hub_discovery::discover_hubs,
         ]);
     }
 
@@ -97,6 +97,7 @@ pub fn run() {
             midi_android::midi_bridge_status,
             tcp_serial::tcp_list_ports,
             tcp_serial::tcp_connect,
+            hub_discovery::discover_hubs,
         ]);
     }
 

@@ -36,6 +36,8 @@ const { harness } = vi.hoisted(() => {
       inbox: [] as string[],
       sent: [] as string[],
       doorbell: null as (() => void) | null,
+      drainGate: null as Promise<void> | null,
+      onDrainSnapshot: null as (() => void) | null,
     },
   };
 });
@@ -49,6 +51,15 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "drain_inbox": {
         const batch = harness.inbox;
         harness.inbox = [];
+        // Tests can pause a drain after the backend snapshot has been taken.
+        // This reproduces a second native doorbell arriving while the first
+        // invoke() is still in flight -- the race a normal immediate mock
+        // cannot exercise.
+        harness.onDrainSnapshot?.();
+        harness.onDrainSnapshot = null;
+        const gate = harness.drainGate;
+        harness.drainGate = null;
+        if (gate) await gate;
         return batch;
       }
       case "disconnect":
@@ -81,6 +92,7 @@ import {
   onFirmwareRawLine,
   debouncedPutBinding,
   cmd,
+  FirmwareCommandTimeoutError,
   type Binding,
   type FirmwareMessage,
 } from "../src/lib/protocol";
@@ -113,6 +125,8 @@ function fakeDisconnect(reason = "test cleanup") {
 beforeEach(() => {
   harness.inbox = [];
   harness.sent = [];
+  harness.drainGate = null;
+  harness.onDrainSnapshot = null;
 });
 
 afterEach(async () => {
@@ -135,6 +149,39 @@ afterEach(async () => {
 // ----------------------------------------------------------------------
 
 describe("sendAndAwait: concurrent request/response correlation", () => {
+  it("PUT_FILE_BEGIN carries the exact expected size used by firmware integrity checks", async () => {
+    const pending = cmd.putFileBegin("/lib/captain/app.mpy", 13_557);
+    await flushMicrotasks();
+
+    const request = JSON.parse(harness.sent[harness.sent.length - 1]);
+    expect(request).toMatchObject({
+      type: "PUT_FILE_BEGIN",
+      path: "/lib/captain/app.mpy",
+      size: 13_557,
+    });
+
+    enqueue({ type: "ACK", id: request.id });
+    await flush();
+    await expect(pending).resolves.toMatchObject({ type: "ACK" });
+
+    const chunkPending = cmd.putFileChunk(
+      "/lib/captain/app.mpy",
+      "TWFu",
+      96,
+    );
+    await flushMicrotasks();
+    const chunk = JSON.parse(harness.sent[harness.sent.length - 1]);
+    expect(chunk).toMatchObject({
+      type: "PUT_FILE_CHUNK",
+      path: "/lib/captain/app.mpy",
+      data_b64: "TWFu",
+      offset: 96,
+    });
+    enqueue({ type: "ACK", id: chunk.id });
+    await flush();
+    await expect(chunkPending).resolves.toMatchObject({ type: "ACK" });
+  });
+
   it("correlates 500 concurrent requests by id, even when responses arrive out of order", async () => {
     const N = 500;
     // Fire N requests in parallel. Use a long timeout - we don't
@@ -186,6 +233,37 @@ describe("sendAndAwait: concurrent request/response correlation", () => {
     enqueue({ type: "ACK", id });
     await flush();
     await expect(p).resolves.toMatchObject({ type: "ACK" });
+  });
+
+  it("late and duplicate OTA ACKs cannot complete the next chunk", async () => {
+    const first = sendAndAwait({ type: "PUT_FILE_CHUNK", path: "/x", offset: 0 }, 30);
+    await flushMicrotasks();
+    const firstId = JSON.parse(harness.sent[harness.sent.length - 1]).id as string;
+
+    await expect(first).rejects.toMatchObject({
+      name: "FirmwareCommandTimeoutError",
+      commandType: "PUT_FILE_CHUNK",
+      commandId: firstId,
+    } satisfies Partial<FirmwareCommandTimeoutError>);
+
+    const second = sendAndAwait({ type: "PUT_FILE_CHUNK", path: "/x", offset: 96 }, 5000);
+    let secondSettled = false;
+    void second.finally(() => { secondSettled = true; });
+    await flushMicrotasks();
+    const secondId = JSON.parse(harness.sent[harness.sent.length - 1]).id as string;
+    expect(secondId).not.toBe(firstId);
+
+    // Both copies are stale: the timed-out resolver was removed and ids are
+    // never reused, so neither can be mistaken for the second chunk's ACK.
+    enqueue({ type: "ACK", id: firstId });
+    enqueue({ type: "ACK", id: firstId });
+    await flush();
+    expect(secondSettled).toBe(false);
+
+    enqueue({ type: "ACK", id: secondId });
+    enqueue({ type: "ACK", id: secondId });
+    await flush();
+    await expect(second).resolves.toMatchObject({ type: "ACK", id: secondId });
   });
 
   it("rust-disconnected event rejects every in-flight sendAndAwait at once", async () => {
@@ -349,6 +427,70 @@ describe("_drainOnce: re-entry / burst safety", () => {
       expect(seen.map(m => (m as { id?: string }).id)).toEqual(["1", "2", "3", "4"]);
     } finally {
       unsub();
+    }
+  });
+
+  it("delivers a line whose doorbell arrives during an in-flight drain within 500 ms", async () => {
+    const seen: string[] = [];
+    let secondDelivered!: () => void;
+    const delivered = new Promise<void>((resolve) => { secondDelivered = resolve; });
+    const unsub = await onFirmwareMessage((m) => {
+      const id = (m as { id?: string }).id;
+      if (id) seen.push(id);
+      if (id === "during-drain") secondDelivered();
+    });
+
+    try {
+      // Let _ensureDoorbell's eager initial drain finish before pausing the
+      // drain this test controls.
+      await flushMicrotasks();
+
+      let releaseDrain!: () => void;
+      harness.drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+      const snapshotTaken = new Promise<void>((resolve) => {
+        harness.onDrainSnapshot = resolve;
+      });
+
+      enqueue({ type: "ACK", id: "first" });
+      harness.doorbell?.();
+      await snapshotTaken;
+
+      // The first drain has already removed "first" from the backend inbox,
+      // but has not resolved yet. This second notification must schedule a
+      // follow-up drain; there will deliberately be no third doorbell.
+      enqueue({ type: "ACK", id: "during-drain" });
+      harness.doorbell?.();
+      releaseDrain();
+
+      await expect(Promise.race([
+        delivered.then(() => "delivered"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 450)),
+      ])).resolves.toBe("delivered");
+      expect(seen).toEqual(["first", "during-drain"]);
+    } finally {
+      unsub();
+    }
+  });
+
+  it("isolates a throwing subscriber so the rest of an already-drained batch is delivered", async () => {
+    const seen: string[] = [];
+    const broken = await onFirmwareMessage(() => { throw new Error("subscriber exploded"); });
+    const healthy = await onFirmwareMessage((msg) => {
+      const id = (msg as { id?: string }).id;
+      if (id) seen.push(id);
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      enqueue({ type: "ACK", id: "one" });
+      enqueue({ type: "ACK", id: "two" });
+      enqueue({ type: "ACK", id: "three" });
+      await flush();
+      expect(seen).toEqual(["one", "two", "three"]);
+      expect(error).toHaveBeenCalledTimes(3);
+    } finally {
+      error.mockRestore();
+      broken();
+      healthy();
     }
   });
 });

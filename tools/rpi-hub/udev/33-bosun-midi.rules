@@ -1,0 +1,4 @@
+# Re-wire the Captain <-> Kemper ALSA sequencer connection whenever a
+# USB sound/MIDI device is plugged or changes. The bosun-midi.timer is
+# the periodic backstop; this makes hot-plug instant.
+ACTION=="add|change", SUBSYSTEM=="sound", KERNEL=="card[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="bosun-midi.service"

@@ -1,0 +1,61 @@
+/* The kiosk is a stage panel: always dark, no theme toggle. The full
+   dark design-token set from App.svelte, so every component the Stage
+   view pulls in (StageThemeEditor and friends) renders correctly - not
+   just the handful StageView itself reads. */
+:root {
+  --bg: #14161b;
+  --bg-elevated: #181b21;
+  --bg-card: #1c1f26;
+  --bg-input: #14161b;
+  --bg-hover: #22262e;
+  --bg-hover-strong: #2a2f38;
+  --bg-active: #1f2e26;
+  --border: #2a2e36;
+  --border-strong: #3a414c;
+  --border-stronger: #4a515c;
+  --text: #e4e6eb;
+  --text-muted: #9aa1ad;
+  --text-dim: #6a7280;
+  --text-soft: #c6cad2;
+  --accent: #6fd99b;
+  --accent-bg: #1c2924;
+  --accent-border: #2d4c3a;
+  --accent-hover-bg: #243a30;
+  --accent-hover-border: #3d6650;
+  --accent-glow: rgba(111, 217, 155, 0.18);
+  --warn: #d99b6f;
+  --warn-bg: rgba(217, 155, 111, 0.18);
+  --warn-text: #f4cd7a;
+  --err: #ef9b9b;
+  --err-bg: #2a1a1a;
+  --err-border: #5a3030;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  --shadow-card-strong: 0 4px 24px rgba(0, 0, 0, 0.25);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+body {
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+  color: var(--text);
+}
+
+.kiosk-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  font-size: clamp(1.2rem, 4vw, 2.4rem);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}

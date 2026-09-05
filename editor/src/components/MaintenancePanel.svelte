@@ -8,6 +8,7 @@
     type BackupProgress, type RestoreProgress, type ConfigBackup,
   } from "../lib/config-backup";
   import { pickFirmwareSource, prepareFirmwareSource } from "../lib/installer";
+  import { IS_ANDROID } from "../lib/platform";
 
   type Props = { connected: boolean; activeProfile?: ProfileInfo | null };
   let { connected, activeProfile = null }: Props = $props();
@@ -616,30 +617,32 @@
     {#if restoreMsg}<p class="curr">{restoreMsg}</p>{/if}
   </section>
 
-  <section class="block">
-    <h3>Update firmware (OTA)</h3>
-    <p class="muted small">
-      Pushes a firmware tree to the pedal over USB - no bootloader, no drive,
-      works in performance mode. Use the editor's bundled firmware, or point
-      it at your own firmware folder or a <code>.zip</code>. The pedal reboots
-      and reconnects when done.
-    </p>
-    <div class="row">
-      <button class="primary" disabled={!connected || fwSrcBusy}
-              onclick={() => openPush()}>
-        Update from bundled
-      </button>
-      <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(false)}>
-        From folder…
-      </button>
-      <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(true)}>
-        From .zip…
-      </button>
-    </div>
-    {#if !connected}<p class="muted small">Connect the pedal first.</p>{/if}
-    {#if fwSrcBusy}<p class="curr">Reading the selected firmware…</p>{/if}
-    {#if fwSrcMsg}<p class="curr err">{fwSrcMsg}</p>{/if}
-  </section>
+  {#if !IS_ANDROID}
+    <section class="block">
+      <h3>Update firmware (OTA)</h3>
+      <p class="muted small">
+        Pushes a firmware tree to the pedal over USB - no bootloader, no drive,
+        works in performance mode. Use the editor's bundled firmware, or point
+        it at your own firmware folder or a <code>.zip</code>. The pedal reboots
+        and reconnects when done.
+      </p>
+      <div class="row">
+        <button class="primary" disabled={!connected || fwSrcBusy}
+                onclick={() => openPush()}>
+          Update from bundled
+        </button>
+        <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(false)}>
+          From folder…
+        </button>
+        <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(true)}>
+          From .zip…
+        </button>
+      </div>
+      {#if !connected}<p class="muted small">Connect the pedal first.</p>{/if}
+      {#if fwSrcBusy}<p class="curr">Reading the selected firmware…</p>{/if}
+      {#if fwSrcMsg}<p class="curr err">{fwSrcMsg}</p>{/if}
+    </section>
+  {/if}
 
   <section class="block">
     <h3>Reboot</h3>

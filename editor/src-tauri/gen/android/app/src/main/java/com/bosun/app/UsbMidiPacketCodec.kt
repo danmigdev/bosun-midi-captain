@@ -135,16 +135,31 @@ object UsbMidiPacketCodec {
      * and a SysEx-continuation CIN with no message in progress is treated
      * as the start of a new one rather than crashing on unexpected state.
      */
-    class Decoder {
+    class Decoder(
+        private val maxSysexBytes: Int = DEFAULT_MAX_SYSEX_BYTES,
+    ) {
+        init {
+            require(maxSysexBytes > 0) { "maxSysexBytes must be positive" }
+        }
+
+        companion object {
+            /** Large enough for Kemper dumps, bounded to protect a long-lived bridge. */
+            const val DEFAULT_MAX_SYSEX_BYTES = 64 * 1024
+        }
+
         private val sysexBuf = ArrayList<Byte>()
+        private var partialPacket = ByteArray(0)
+        private var discardingOversizeSysex = false
 
         fun feed(data: ByteArray): List<ByteArray> {
             val out = ArrayList<ByteArray>()
+            val framed = if (partialPacket.isEmpty()) data else partialPacket + data
             var i = 0
-            while (i + 4 <= data.size) {
-                decodeOne(data[i], data[i + 1], data[i + 2], data[i + 3], out)
+            while (i + 4 <= framed.size) {
+                decodeOne(framed[i], framed[i + 1], framed[i + 2], framed[i + 3], out)
                 i += 4
             }
+            partialPacket = framed.copyOfRange(i, framed.size)
             return out
         }
 
@@ -156,12 +171,16 @@ object UsbMidiPacketCodec {
                     // sends these; drop silently rather than guess.
                 }
                 0x4 -> {
-                    sysexBuf.add(b1); sysexBuf.add(b2); sysexBuf.add(b3)
+                    appendSysex(b1, b2, b3)
                 }
                 0x5 -> {
                     if ((b1.toInt() and 0xFF) == 0xF7) {
-                        sysexBuf.add(b1)
-                        out.add(flushSysex())
+                        if (discardingOversizeSysex) resetSysex()
+                        else {
+                            appendSysex(b1)
+                            if (!discardingOversizeSysex) out.add(flushSysex())
+                            else resetSysex()
+                        }
                     } else {
                         // Genuine single-byte System Common (undefined
                         // 0xF4/0xF5, or Tune Request 0xF6) - unrelated to
@@ -171,12 +190,10 @@ object UsbMidiPacketCodec {
                     }
                 }
                 0x6 -> {
-                    sysexBuf.add(b1); sysexBuf.add(b2)
-                    out.add(flushSysex())
+                    finishSysex(out, b1, b2)
                 }
                 0x7 -> {
-                    sysexBuf.add(b1); sysexBuf.add(b2); sysexBuf.add(b3)
-                    out.add(flushSysex())
+                    finishSysex(out, b1, b2, b3)
                 }
                 0xF -> {
                     // Single-byte Real-Time message. These legitimately
@@ -194,6 +211,30 @@ object UsbMidiPacketCodec {
                     out.add(byteArrayOf(b1, b2, b3).copyOfRange(0, len))
                 }
             }
+        }
+
+        private fun appendSysex(vararg bytes: Byte) {
+            if (discardingOversizeSysex) return
+            if (sysexBuf.size + bytes.size > maxSysexBytes) {
+                sysexBuf.clear()
+                discardingOversizeSysex = true
+                return
+            }
+            bytes.forEach { sysexBuf.add(it) }
+        }
+
+        private fun finishSysex(out: MutableList<ByteArray>, vararg bytes: Byte) {
+            if (discardingOversizeSysex) {
+                resetSysex()
+                return
+            }
+            appendSysex(*bytes)
+            if (!discardingOversizeSysex) out.add(flushSysex()) else resetSysex()
+        }
+
+        private fun resetSysex() {
+            sysexBuf.clear()
+            discardingOversizeSysex = false
         }
 
         private fun flushSysex(): ByteArray {

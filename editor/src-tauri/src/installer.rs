@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use sysinfo::Disks;
@@ -213,6 +213,20 @@ pub struct FirmwareFile {
     pub size: u64,
 }
 
+fn sort_firmware_files(files: &mut [FirmwareFile]) {
+    // Install the lazy OTA dependency before protocol, then application roots.
+    // An interrupted update must retain the ability to resume via PUT_FILE.
+    fn rank(dst: &str) -> u8 {
+        match dst {
+            "/lib/captain_ota.py" | "/lib/captain_ota.mpy" => 0,
+            "/lib/captain/app.py" | "/lib/captain/app.mpy" => 2,
+            "/code.py" | "/code.mpy" => 3,
+            _ => 1,
+        }
+    }
+    files.sort_by(|a, b| rank(&a.dst).cmp(&rank(&b.dst)).then(a.dst.cmp(&b.dst)));
+}
+
 #[tauri::command]
 pub fn list_firmware_files(app: AppHandle) -> Result<Vec<FirmwareFile>, String> {
     let root = app
@@ -224,7 +238,7 @@ pub fn list_firmware_files(app: AppHandle) -> Result<Vec<FirmwareFile>, String> 
     }
     let mut out = Vec::new();
     walk_collect(&root, &root, &mut out).map_err(|e| format!("walk: {}", e))?;
-    out.sort_by(|a, b| a.dst.cmp(&b.dst));
+    sort_firmware_files(&mut out);
     Ok(out)
 }
 
@@ -234,7 +248,11 @@ fn walk_collect(root: &Path, dir: &Path, out: &mut Vec<FirmwareFile>) -> std::io
         let path = entry.path();
         let name = entry.file_name();
         let s = name.to_string_lossy();
-        if path.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             if s == "__pycache__" || s.starts_with('.') {
                 continue;
             }
@@ -248,8 +266,15 @@ fn walk_collect(root: &Path, dir: &Path, out: &mut Vec<FirmwareFile>) -> std::io
                 continue;
             }
             walk_collect(root, &path, out)?;
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             if s.ends_with(".pyc") || s.ends_with(".tmp") || s == ".DS_Store" || s == "Thumbs.db" {
+                continue;
+            }
+            // Source remains in the repository for review and host-side
+            // tests, but shipping both forms defeats precompilation: a later
+            // app.py upload can shadow/recreate the large source which the
+            // validated app.mpy transaction deliberately removed.
+            if has_compiled_sibling(&path) {
                 continue;
             }
             let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
@@ -268,10 +293,7 @@ pub fn read_firmware_file_b64(rel: String, app: AppHandle) -> Result<String, Str
         .path()
         .resolve("firmware", BaseDirectory::Resource)
         .map_err(|e| format!("resource path: {}", e))?;
-    let path = root.join(&rel);
-    if !path.starts_with(&root) {
-        return Err("path escapes firmware root".into());
-    }
+    let path = secure_existing_file(&root, &rel)?;
     let mut data = std::fs::read(&path).map_err(|e| format!("read {:?}: {}", path, e))?;
     // Strip UTF-8 BOM from .json / .py files - CircuitPython's json refuses BOMs.
     let strip = rel.ends_with(".json") || rel.ends_with(".py");
@@ -338,14 +360,10 @@ pub fn prepare_firmware_source(source: String) -> Result<String, String> {
         .map(|e| e.eq_ignore_ascii_case("zip"))
         .unwrap_or(false)
     {
-        let tmp = std::env::temp_dir().join(format!("bosun-fw-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).map_err(|e| format!("temp dir: {}", e))?;
+        let tmp = unique_temp_dir()?;
         let f = std::fs::File::open(&p).map_err(|e| format!("open zip: {}", e))?;
         let mut archive = zip::ZipArchive::new(f).map_err(|e| format!("read zip: {}", e))?;
-        archive
-            .extract(&tmp)
-            .map_err(|e| format!("extract zip: {}", e))?;
+        extract_zip_safely(&mut archive, &tmp)?;
         tmp
     } else {
         return Err("Source must be a folder or a .zip file".into());
@@ -399,7 +417,7 @@ pub fn list_firmware_files_at(root: String) -> Result<Vec<FirmwareFile>, String>
     }
     let mut out = Vec::new();
     walk_collect(&root, &root, &mut out).map_err(|e| format!("walk: {}", e))?;
-    out.sort_by(|a, b| a.dst.cmp(&b.dst));
+    sort_firmware_files(&mut out);
     Ok(out)
 }
 
@@ -408,10 +426,7 @@ pub fn list_firmware_files_at(root: String) -> Result<Vec<FirmwareFile>, String>
 pub fn read_firmware_file_at_b64(root: String, rel: String) -> Result<String, String> {
     use base64::Engine;
     let root = PathBuf::from(&root);
-    let path = root.join(&rel);
-    if !path.starts_with(&root) {
-        return Err("path escapes firmware root".into());
-    }
+    let path = secure_existing_file(&root, &rel)?;
     let mut data = std::fs::read(&path).map_err(|e| format!("read {:?}: {}", path, e))?;
     let strip = rel.ends_with(".json") || rel.ends_with(".py");
     if strip && data.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -427,7 +442,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path, written: &mut Vec<String>) -> std:
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         let file_type = entry.file_type()?;
-        if file_type.is_dir() {
+        if file_type.is_symlink() {
+            continue;
+        } else if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path, written)?;
         } else if file_type.is_file() {
             // Skip __pycache__ leftovers and .DS_Store
@@ -436,9 +453,173 @@ fn copy_dir_recursive(src: &Path, dst: &Path, written: &mut Vec<String>) -> std:
                     continue;
                 }
             }
+            if has_compiled_sibling(&src_path) {
+                continue;
+            }
             std::fs::copy(&src_path, &dst_path)?;
             written.push(dst_path.to_string_lossy().into_owned());
         }
     }
     Ok(())
+}
+
+fn safe_relative(rel: &str) -> Result<&Path, String> {
+    let path = Path::new(rel);
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err("path escapes firmware root".into());
+    }
+    Ok(path)
+}
+
+fn secure_existing_file(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel = safe_relative(rel)?;
+    let canonical_root = root.canonicalize().map_err(|e| format!("firmware root: {e}"))?;
+    let path = canonical_root.join(rel);
+    let canonical_path = path.canonicalize().map_err(|e| format!("read {:?}: {}", path, e))?;
+    if !canonical_path.starts_with(&canonical_root) || !canonical_path.is_file() {
+        return Err("path escapes firmware root".into());
+    }
+    Ok(canonical_path)
+}
+
+fn unique_temp_dir() -> Result<PathBuf, String> {
+    let base = std::env::temp_dir();
+    for attempt in 0..100u32 {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = base.join(format!("bosun-fw-{}-{nonce}-{attempt}", std::process::id()));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("temp dir: {e}")),
+        }
+    }
+    Err("could not allocate unique firmware temp directory".into())
+}
+
+fn extract_zip_safely<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target: &Path,
+) -> Result<(), String> {
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
+        let Some(rel) = entry.enclosed_name() else {
+            return Err(format!("unsafe zip path: {}", entry.name()));
+        };
+        // Reject Unix symlinks; following one during a later read/copy could escape target.
+        if entry.unix_mode().map(|m| m & 0o170000 == 0o120000).unwrap_or(false) {
+            return Err(format!("zip symlink not allowed: {}", entry.name()));
+        }
+        let out = target.join(rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| format!("extract dir: {e}"))?;
+        } else {
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("extract dir: {e}"))?;
+            }
+            let mut file = std::fs::OpenOptions::new()
+                .write(true).create_new(true).open(&out)
+                .map_err(|e| format!("extract file: {e}"))?;
+            std::io::copy(&mut entry, &mut file).map_err(|e| format!("extract file: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn has_compiled_sibling(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("py")
+        && path.with_extension("mpy").is_file()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upload_order_keeps_dependencies_present_after_each_file() {
+        for extension in ["py", "mpy"] {
+            let root = unique_temp_dir().unwrap();
+            let names = [
+                format!("lib/captain/app.{extension}"),
+                format!("code.{extension}"),
+                format!("lib/captain/protocol.{extension}"),
+                format!("lib/captain_ota.{extension}"),
+            ];
+            for name in &names {
+                let file = root.join(name);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, b"fixture").unwrap();
+            }
+            let files = list_firmware_files_at(root.to_string_lossy().into_owned()).unwrap();
+            let mut installed = std::collections::HashSet::new();
+            for file in files {
+                let dependency = if file.dst == format!("/code.{extension}") {
+                    Some(format!("/lib/captain/app.{extension}"))
+                } else if file.dst == format!("/lib/captain/app.{extension}") {
+                    Some(format!("/lib/captain/protocol.{extension}"))
+                } else if file.dst == format!("/lib/captain/protocol.{extension}") {
+                    Some(format!("/lib/captain_ota.{extension}"))
+                } else { None };
+                if let Some(dependency) = dependency {
+                    assert!(installed.contains(&dependency), "{} preceded {}", file.dst, dependency);
+                }
+                installed.insert(file.dst);
+            }
+            assert_eq!(installed.len(), names.len());
+            for name in names { std::fs::remove_file(root.join(name)).unwrap(); }
+            std::fs::remove_dir(root.join("lib/captain")).unwrap();
+            std::fs::remove_dir(root.join("lib")).unwrap();
+            std::fs::remove_dir(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn relative_paths_reject_traversal_and_absolute_paths() {
+        assert!(safe_relative("lib/captain/app.py").is_ok());
+        assert!(safe_relative("../secret").is_err());
+        assert!(safe_relative("lib/../secret").is_err());
+        assert!(safe_relative("/secret").is_err());
+        assert!(safe_relative("").is_err());
+    }
+
+    #[test]
+    fn temp_directories_are_unique() {
+        let a = unique_temp_dir().unwrap();
+        let b = unique_temp_dir().unwrap();
+        assert_ne!(a, b);
+        std::fs::remove_dir(a).unwrap();
+        std::fs::remove_dir(b).unwrap();
+    }
+
+    #[test]
+    fn compiled_modules_exclude_source_from_ota_and_initial_copy() {
+        let temp = unique_temp_dir().unwrap();
+        let source = temp.join("source");
+        let modules = source.join("lib").join("captain");
+        std::fs::create_dir_all(&modules).unwrap();
+        std::fs::write(modules.join("app.py"), b"large source").unwrap();
+        std::fs::write(modules.join("app.mpy"), b"C\x06\0\x1fcompiled").unwrap();
+        std::fs::write(modules.join("bindings.py"), b"source only").unwrap();
+
+        let mut listed = Vec::new();
+        walk_collect(&source, &source, &mut listed).unwrap();
+        let names: Vec<_> = listed.iter().map(|file| file.rel.as_str()).collect();
+        assert!(names.contains(&"lib/captain/app.mpy"));
+        assert!(names.contains(&"lib/captain/bindings.py"));
+        assert!(!names.contains(&"lib/captain/app.py"));
+
+        let target = temp.join("target");
+        let mut written = Vec::new();
+        copy_dir_recursive(&source, &target, &mut written).unwrap();
+        assert!(target.join("lib/captain/app.mpy").is_file());
+        assert!(target.join("lib/captain/bindings.py").is_file());
+        assert!(!target.join("lib/captain/app.py").exists());
+
+        std::fs::remove_dir_all(temp).unwrap();
+    }
 }

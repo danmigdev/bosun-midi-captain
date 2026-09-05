@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Stage Preview (dev only)</title>
+    <style>
+      :root {
+        --bg: #14161b;
+        --bg-card: #1c1f26;
+        --text: #e4e6eb;
+        --text-muted: #9aa1ad;
+        --text-dim: #6a7280;
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); font-family: system-ui, sans-serif; }
+      #app { height: 100%; }
+
+      #controls {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000;
+        width: 320px; overflow-y: auto;
+        background: rgba(18, 20, 25, 0.96); color: #e4e6eb;
+        border-right: 1px solid rgba(255,255,255,0.12);
+        padding: 12px; box-sizing: border-box;
+        font-size: 13px;
+        transition: transform 0.2s;
+      }
+      #controls.collapsed { transform: translateX(-100%); }
+      #controls h3 { margin: 0 0 8px; font-size: 14px; }
+      #controls h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; color: #9aa1ad; }
+      #controls label { display: block; margin: 6px 0 2px; color: #9aa1ad; }
+      #controls input[type=text], #controls input[type=number] {
+        width: 100%; box-sizing: border-box; padding: 4px 6px;
+        background: #0e1014; color: #e4e6eb; border: 1px solid #333a45; border-radius: 4px;
+      }
+      #controls .sw-row {
+        display: grid; grid-template-columns: 22px 1fr 62px 28px 46px; gap: 4px;
+        align-items: center; margin-bottom: 4px;
+      }
+      #controls .sw-row input[type=text] { padding: 3px 4px; }
+      #controls .sw-row select { width: 100%; font-size: 11px; }
+      #controls .sw-row input[type=color] { width: 100%; padding: 0; height: 22px; border: none; }
+      #controls button.toggle-active { font-size: 10px; padding: 3px; cursor: pointer; }
+      #controls button.toggle-active.on { background: #2f855a; color: white; }
+      #applyBtn {
+        width: 100%; margin-top: 10px; padding: 8px; font-weight: 600;
+        background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;
+      }
+      #toggleBtn {
+        position: fixed; top: 8px; left: 8px; z-index: 1001;
+        width: 28px; height: 28px; border-radius: 50%; border: none;
+        background: rgba(255,255,255,0.15); color: white; cursor: pointer;
+      }
+      #controls.collapsed ~ #toggleBtn { left: 8px; }
+    </style>
+  </head>
+  <body>
+    <button id="toggleBtn" title="Show/hide controls">☰</button>
+    <div id="controls">
+      <h3>Stage Preview Controls</h3>
+
+      <label>Rig name</label>
+      <input id="rigName" type="text" value="Vintage Deluxe Reverb Ultra Mega Long Rig Name" />
+
+      <label>Bank</label>
+      <input id="bank" type="number" value="1" min="1" />
+      <label>Slot</label>
+      <input id="slot" type="number" value="1" min="1" />
+
+      <label>BPM (blank = hidden)</label>
+      <input id="bpm" type="number" value="120" />
+
+      <label><input id="tunerOn" type="checkbox" style="width:auto" /> Tuner on</label>
+      <label>Tuner note</label>
+      <input id="tunerNote" type="text" value="A" />
+
+      <h4>Switches</h4>
+      <div id="switchList"></div>
+
+      <button id="applyBtn">Apply (push PATCH + CONTEXT)</button>
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/dev-preview/stage-preview.ts"></script>
+  </body>
+</html>

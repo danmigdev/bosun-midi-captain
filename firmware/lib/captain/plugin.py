@@ -22,10 +22,13 @@ class PluginRegistry:
         name = getattr(module, "NAME", None)
         if not name:
             return False
-        if not hasattr(module, "MESSAGE_TYPES") or not callable(getattr(module, "dispatch", None)):
+        message_types = getattr(module, "MESSAGE_TYPES", None)
+        if message_types is None:
+            message_types = getattr(module, "MESSAGE_TYPE_NAMES", None)
+        if message_types is None or not callable(getattr(module, "dispatch", None)):
             return False
         self._plugins[name] = module
-        for msg_type in module.MESSAGE_TYPES:
+        for msg_type in message_types:
             self._handlers[msg_type] = module
         return True
 
@@ -74,6 +77,25 @@ class PluginRegistry:
                     m.on_patch_loaded(app)
                 except Exception as e:
                     print("plugin on_patch_loaded failed:", getattr(m, "NAME", "?"), "-", e)
+
+    def on_patch_switch_started(self, app, source="editor", fire_on_enter=True):
+        """Notify plugins after the new patch has been indexed but before its
+        outbound ``on_enter`` messages and ``patch_switched`` event.
+
+        Device mirrors can invalidate state that belonged to the previous
+        patch and arm a fresh reconciliation generation. This is distinct
+        from ``on_patch_loaded``: the latter paints values already known to be
+        current, while this hook establishes that old values are no longer
+        authoritative. Absence is a no-op and one faulty plugin cannot block
+        the patch change.
+        """
+        for m in self._plugins.values():
+            if hasattr(m, "on_patch_switch_started"):
+                try:
+                    m.on_patch_switch_started(app, source, fire_on_enter)
+                except Exception as e:
+                    print("plugin on_patch_switch_started failed:",
+                          getattr(m, "NAME", "?"), "-", e)
 
     def on_navigate(self, app, bank, slot):
         """A preset switch selected (bank, slot) but the core has NO patch
@@ -157,10 +179,14 @@ class PluginRegistry:
         return []
 
     def _manifest_entry(self, name, m):
+        message_types = getattr(m, "MESSAGE_TYPES", None)
+        factory = getattr(m, "manifest_message_types", None)
+        if callable(factory):
+            message_types = factory()
         return {
             "label":    getattr(m, "LABEL", name),
             "version":  getattr(m, "VERSION", "0"),
-            "messages": m.MESSAGE_TYPES,
+            "messages": message_types or {},
             "default_layout": getattr(m, "DEFAULT_LAYOUT", []),
             "tft_fields":     getattr(m, "TFT_FIELDS", {}),
             "config_schema":  getattr(m, "CONFIG_SCHEMA", None),
@@ -197,13 +223,29 @@ class PluginRegistry:
                 return os.stat(base_path + "/" + entry)[6]
             except OSError:
                 return 0
-        entries.sort(key=_size, reverse=True)
+        # Precompiled files are much smaller than their source, so sorting only
+        # by file size can accidentally move the heaviest runtime module behind
+        # several other imports.  Kemper owns the largest schemas/state and must
+        # get the fresh heap even when it ships as a compact .mpy.
+        entries.sort(
+            key=lambda entry: (entry.rsplit(".", 1)[0] == "kemper", _size(entry)),
+            reverse=True,
+        )
+        seen = set()
         for entry in entries:
-            if entry.endswith(".py"):
-                self._import("plugins." + entry[:-3], entry[:-3])
+            if entry.endswith(".py") or entry.endswith(".mpy"):
+                leaf = entry.rsplit(".", 1)[0]
+            elif "." not in entry:
+                leaf = entry
             else:
-                # Directory plugin (package with __init__.py).
-                self._import("plugins." + entry, entry)
+                continue
+            # A source + precompiled pair is one plugin. CircuitPython's
+            # importer selects the compatible .mpy and avoids compiling the
+            # large source on the RP2040; never try "plugins.foo.mpy".
+            if leaf in seen:
+                continue
+            seen.add(leaf)
+            self._import("plugins." + leaf, leaf)
 
     def _import(self, full_name, leaf_name):
         # Coalesce the heap before each plugin import. Compiling a large plugin

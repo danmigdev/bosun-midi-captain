@@ -179,129 +179,150 @@ def _build_cc_index(app):
 
 # -- self-description for the editor -----------------------------------------
 
-MESSAGE_TYPES = {
-    "headrush_rig": {
-        "label": "Load Rig",
-        "params": {
-            "rig":     {"type": "int", "min": 1, "max": 128, "default": 1, "label": "Rig (1-128)"},
-            "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+MESSAGE_TYPE_NAMES = (
+    'headrush_rig',
+    'headrush_rig_step',
+    'headrush_bank_step',
+    'headrush_scene',
+    'headrush_block',
+    'headrush_footswitch',
+    'headrush_expression',
+    'headrush_pedal_switch',
+    'headrush_looper',
+    'headrush_drums',
+    'headrush_tempo',
+    'headrush_tuner',
+    'headrush_fs_mode',
+    'headrush_practice',
+    'headrush_misc',
+)
+
+
+def manifest_message_types():
+    """Allocate editor schemas only on demand, never for MIDI registration."""
+    return {
+        "headrush_rig": {
+            "label": "Load Rig",
+            "params": {
+                "rig":     {"type": "int", "min": 1, "max": 128, "default": 1, "label": "Rig (1-128)"},
+                "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+            },
+            "summary": "Rig {rig}",
         },
-        "summary": "Rig {rig}",
-    },
-    "headrush_rig_step": {
-        "label": "Step Rig",
-        "params": {
-            "direction": {"type": "enum", "values": ["up", "down"], "default": "up", "label": "Direction"},
-            "channel":   {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_rig_step": {
+            "label": "Step Rig",
+            "params": {
+                "direction": {"type": "enum", "values": ["up", "down"], "default": "up", "label": "Direction"},
+                "channel":   {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Rig {direction}",
         },
-        "summary": "Rig {direction}",
-    },
-    "headrush_bank_step": {
-        "label": "Step Bank",
-        "params": {
-            "direction": {"type": "enum", "values": ["up", "down"], "default": "up", "label": "Direction"},
-            "channel":   {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_bank_step": {
+            "label": "Step Bank",
+            "params": {
+                "direction": {"type": "enum", "values": ["up", "down"], "default": "up", "label": "Direction"},
+                "channel":   {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Bank {direction}",
         },
-        "summary": "Bank {direction}",
-    },
-    "headrush_scene": {
-        "label": "Scene",
-        "params": {
-            "scene":   {"type": "int",  "min": 1, "max": 10,  "default": 1, "label": "Scene (1-10)"},
-            "channel": {"type": "int",  "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+        "headrush_scene": {
+            "label": "Scene",
+            "params": {
+                "scene":   {"type": "int",  "min": 1, "max": 10,  "default": 1, "label": "Scene (1-10)"},
+                "channel": {"type": "int",  "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+            },
+            "summary": "Scene {scene}",
         },
-        "summary": "Scene {scene}",
-    },
-    "headrush_block": {
-        "label": "Block On/Off",
-        "params": {
-            "block":   {"type": "int",   "min": 1, "max": 14, "default": 1, "label": "Block (1-14)"},
-            "state":   {"type": "enum",  "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": {"type": "int",   "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_block": {
+            "label": "Block On/Off",
+            "params": {
+                "block":   {"type": "int",   "min": 1, "max": 14, "default": 1, "label": "Block (1-14)"},
+                "state":   {"type": "enum",  "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": {"type": "int",   "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Block {block} {state}",
         },
-        "summary": "Block {block} {state}",
-    },
-    "headrush_footswitch": {
-        "label": "Footswitch Press/Release",
-        "params": {
-            "fs":      {"type": "int",   "min": 1, "max": 5,   "default": 1, "label": "Footswitch (1-5)"},
-            "action":  {"type": "enum",  "values": ["press", "release"], "default": "press", "label": "Action"},
-            "channel": {"type": "int",   "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+        "headrush_footswitch": {
+            "label": "Footswitch Press/Release",
+            "params": {
+                "fs":      {"type": "int",   "min": 1, "max": 5,   "default": 1, "label": "Footswitch (1-5)"},
+                "action":  {"type": "enum",  "values": ["press", "release"], "default": "press", "label": "Action"},
+                "channel": {"type": "int",   "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+            },
+            "summary": "FS {fs} {action}",
         },
-        "summary": "FS {fs} {action}",
-    },
-    "headrush_expression": {
-        "label": "Expression Pedal",
-        "params": {
-            "value":   {"type": "int",  "min": 0, "max": 127, "default": 64, "label": "Value (0-127)"},
-            "channel": {"type": "int",  "min": 1, "max": 16,  "default": 1,  "label": "Channel"},
+        "headrush_expression": {
+            "label": "Expression Pedal",
+            "params": {
+                "value":   {"type": "int",  "min": 0, "max": 127, "default": 64, "label": "Value (0-127)"},
+                "channel": {"type": "int",  "min": 1, "max": 16,  "default": 1,  "label": "Channel"},
+            },
+            "summary": "Exp {value}",
         },
-        "summary": "Exp {value}",
-    },
-    "headrush_pedal_switch": {
-        "label": "Expression Pedal A/B Toggle",
-        "params": {
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_pedal_switch": {
+            "label": "Expression Pedal A/B Toggle",
+            "params": {
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Exp pedal A/B toggle",
         },
-        "summary": "Exp pedal A/B toggle",
-    },
-    "headrush_looper": {
-        "label": "Looper",
-        "params": {
-            "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "start_stop", "label": "Action"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_looper": {
+            "label": "Looper",
+            "params": {
+                "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "start_stop", "label": "Action"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Looper {action}",
         },
-        "summary": "Looper {action}",
-    },
-    "headrush_drums": {
-        "label": "Drum Machine",
-        "params": {
-            "action":  {"type": "enum", "values": _DRUM_VALUES, "default": "play_stop", "label": "Action"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_drums": {
+            "label": "Drum Machine",
+            "params": {
+                "action":  {"type": "enum", "values": _DRUM_VALUES, "default": "play_stop", "label": "Action"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Drums {action}",
         },
-        "summary": "Drums {action}",
-    },
-    "headrush_tempo": {
-        "label": "Tempo",
-        "params": {
-            "action":  {"type": "enum", "values": ["tap", "increase", "decrease"], "default": "tap", "label": "Action"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_tempo": {
+            "label": "Tempo",
+            "params": {
+                "action":  {"type": "enum", "values": ["tap", "increase", "decrease"], "default": "tap", "label": "Action"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Tempo {action}",
         },
-        "summary": "Tempo {action}",
-    },
-    "headrush_tuner": {
-        "label": "Tuner",
-        "params": {
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_tuner": {
+            "label": "Tuner",
+            "params": {
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Tuner {state}",
         },
-        "summary": "Tuner {state}",
-    },
-    "headrush_fs_mode": {
-        "label": "Footswitch Mode",
-        "params": {
-            "mode":    {"type": "enum", "values": _FS_MODE_VALUES, "default": "stomp", "label": "Mode"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_fs_mode": {
+            "label": "Footswitch Mode",
+            "params": {
+                "mode":    {"type": "enum", "values": _FS_MODE_VALUES, "default": "stomp", "label": "Mode"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "FS mode {mode}",
         },
-        "summary": "FS mode {mode}",
-    },
-    "headrush_practice": {
-        "label": "Practice Tool",
-        "params": {
-            "action":  {"type": "enum", "values": _PRACTICE_VALUES, "default": "play_pause", "label": "Action"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_practice": {
+            "label": "Practice Tool",
+            "params": {
+                "action":  {"type": "enum", "values": _PRACTICE_VALUES, "default": "play_pause", "label": "Action"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Practice {action}",
         },
-        "summary": "Practice {action}",
-    },
-    "headrush_misc": {
-        "label": "Misc Action",
-        "params": {
-            "action":  {"type": "enum", "values": _MISC_VALUES, "default": "hands_free", "label": "Action"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "headrush_misc": {
+            "label": "Misc Action",
+            "params": {
+                "action":  {"type": "enum", "values": _MISC_VALUES, "default": "hands_free", "label": "Action"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "{action}",
         },
-        "summary": "{action}",
-    },
-}
+    }
 
 
 # -- dispatch ----------------------------------------------------------------

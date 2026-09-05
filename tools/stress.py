@@ -37,7 +37,9 @@ except ImportError:
 
 class CaptainClient:
     def __init__(self, port: str, baud: int = 115200):
-        self.ser = serial.Serial(port, baud, timeout=0.05)
+        # serial_for_url keeps ordinary COM/tty behaviour and also makes the
+        # same stress suite usable through the RPi hub's socket:// endpoint.
+        self.ser = serial.serial_for_url(port, baud, timeout=0.05)
         self.events: list[dict] = []
         self.responses: dict[str, dict] = {}
         self._next_id = 1
@@ -87,24 +89,43 @@ class CaptainClient:
 
 # ---------------- smoke ----------------
 
+SMOKE_FAST_TIMEOUT = 5.0
+SMOKE_MANIFEST_TIMEOUT = 15.0
+
+
+def _smoke_call(c: CaptainClient, request_type: str, response_type: str,
+                timeout: float = SMOKE_FAST_TIMEOUT, **kwargs) -> dict:
+    response = c.call_sync(request_type, timeout=timeout, **kwargs)
+    actual = response.get("type") if isinstance(response, dict) else None
+    if actual != response_type:
+        raise RuntimeError(
+            "%s returned %r instead of %s: %r" %
+            (request_type, actual, response_type, response)
+        )
+    return response
+
+
 def smoke(c: CaptainClient) -> None:
     print("# SMOKE")
-    print("PING ->", c.call_sync("PING", timeout=1))
-    info = c.call_sync("GET_DEVICE_INFO", timeout=1)
+    print("PING ->", _smoke_call(c, "PING", "ACK"))
+    info = _smoke_call(c, "GET_DEVICE_INFO", "DEVICE_INFO")
     print("DEVICE_INFO ->", info)
-    manifest = c.call_sync("GET_MANIFEST", timeout=3)
+    # Full plugin schemas are streamed cooperatively on the RP2040 so switch
+    # and MIDI polling stay responsive while the multi-KB response is built.
+    manifest = _smoke_call(
+        c, "GET_MANIFEST", "MANIFEST", timeout=SMOKE_MANIFEST_TIMEOUT)
     n_core = len(manifest.get("core_messages", {}))
     plugins = manifest.get("plugins", {})
     print(f"MANIFEST: {n_core} core message types, {len(plugins)} plugins")
     for name, plug in plugins.items():
         print(f"  plugin {name} v{plug['version']}: {len(plug['messages'])} message types")
-    patches = c.call_sync("LIST_PATCHES", timeout=3)["patches"]
+    patches = _smoke_call(c, "LIST_PATCHES", "PATCH_LIST")["patches"]
     print(f"LIST_PATCHES: {len(patches)} patches")
-    dirty = c.call_sync("GET_DIRTY", timeout=1)["patches"]
+    dirty = _smoke_call(c, "GET_DIRTY", "DIRTY")["patches"]
     print(f"GET_DIRTY: {len(dirty)} dirty")
-    learn = c.call_sync("GET_MIDI_LEARN", timeout=1).get("table", {})
+    learn = _smoke_call(c, "GET_MIDI_LEARN", "MIDI_LEARN").get("table", {})
     print(f"GET_MIDI_LEARN: {len(learn.get('pc_to_patch', []))} entries")
-    stats = c.call_sync("STATS", timeout=1)
+    stats = _smoke_call(c, "STATS", "STATS")
     print(f"STATS: uptime={stats['uptime_ms']/1000:.0f}s mem_free={stats['mem_free']} loop_iters={stats['loop_iters']}")
 
 

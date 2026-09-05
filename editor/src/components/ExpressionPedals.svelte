@@ -4,20 +4,24 @@
     cmd,
     continuousControlTypes,
     defaultMessageFromSchema,
+    flattenManifest,
     type Manifest,
     type ExpressionConfig,
     type MidiMessage,
   } from "../lib/protocol";
+  import { filterManifestForProfile } from "../lib/profile-message-types";
 
   type Props = {
     /** device.expression - the array this component edits in place. The parent
      * (Settings) owns persistence via its "Save settings" button. */
     expression: ExpressionConfig[];
     manifest: Manifest | null;
+    activeKind?: string;
+    device?: Record<string, unknown> | null;
     /** Whether a pedal is connected - gates the live-calibration polling. */
     connected?: boolean;
   };
-  let { expression = $bindable(), manifest = null, connected = true }: Props = $props();
+  let { expression = $bindable(), manifest = null, activeKind = "", device = null, connected = true }: Props = $props();
 
   // Curve options the firmware understands. "linear" is the default; log/exp
   // shape the response for volume-style pedals.
@@ -25,8 +29,14 @@
 
   // Message-type choices for a jack: "CC" plus any manifest continuous-control
   // message (a message whose params include a value int 0-127). Derived so a
-  // newly-loaded manifest immediately widens the dropdown.
-  let msgTypes = $derived(continuousControlTypes(manifest));
+  // newly-loaded profile/manifest immediately updates the dropdown.
+  let filteredManifest = $derived(manifest ? filterManifestForProfile(manifest, activeKind, device) : null);
+  let msgTypes = $derived(continuousControlTypes(filteredManifest));
+  let savedTypes = $derived(manifest ? flattenManifest(manifest) : []);
+  function savedTypeLabel(type: string): string {
+    const schema = savedTypes.find(t => t.type === type);
+    return schema ? `${schema.source} · ${schema.label} (saved)` : `${type} (saved)`;
+  }
 
   // ----- live calibration polling (STATS.expression) -----
   // Same pattern as Dashboard.svelte: poll STATS on an interval while the
@@ -93,16 +103,17 @@
   }
 
   function onTypeChange(exp: ExpressionConfig, newType: string) {
+    if (!msgTypes.some(t => t.type === newType)) return;
     if (newType === "cc") {
       // Preserve the classic CC template shape (default expression pedal is
       // CC 11 on channel 1) so switching back to CC is predictable.
       exp.message = { type: "cc", channel: 1, cc: 11, value: 0 };
       return;
     }
-    // Plugin continuous-control message: seed from its schema defaults so its
+    // Continuous-control message: seed from its schema defaults so its
     // required params (e.g. channel) are present, then it substitutes `value`.
-    const schema = manifest?.plugins
-      ? Object.values(manifest.plugins).flatMap(p => Object.entries(p.messages)).find(([t]) => t === newType)?.[1]
+    const schema = filteredManifest
+      ? flattenManifest(filteredManifest).find(t => t.type === newType)
       : undefined;
     exp.message = schema ? defaultMessageFromSchema(newType, schema) : { type: newType, value: 0 };
   }
@@ -175,6 +186,9 @@
       <div class="msgrow">
         <label>Sends
           <select value={msg.type} onchange={(e) => onTypeChange(exp, (e.target as HTMLSelectElement).value)}>
+            {#if !msgTypes.some(t => t.type === msg.type)}
+              <option value={msg.type} disabled>{savedTypeLabel(msg.type)}</option>
+            {/if}
             {#each msgTypes as t}<option value={t.type}>{t.label}</option>{/each}
           </select>
         </label>

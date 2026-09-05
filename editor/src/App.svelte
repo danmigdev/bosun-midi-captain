@@ -9,6 +9,11 @@
   import Dashboard from "./components/Dashboard.svelte";
   import PatchesGrid from "./components/PatchesGrid.svelte";
   import Onboarding from "./components/Onboarding.svelte";
+  import NetworkConnection from "./components/NetworkConnection.svelte";
+  import { readNetworkBootstrap } from "./lib/network-bootstrap";
+  import {
+    readConnectionSettings, saveConnectionSettings, networkAddress, type ConnectionMode,
+  } from "./lib/connection-settings";
   import { detectPedal } from "./lib/installer";
   import { readSavedTheme, saveTheme, type Theme } from "./lib/theme";
   import {
@@ -71,6 +76,14 @@
   let connected = $state(false);
   let connectedPortName = $state<string>("");
   let manualMode = $state(false);
+  const savedConnection = readConnectionSettings();
+  let connectionMode = $state<ConnectionMode>(savedConnection.mode);
+  let networkHost = $state(savedConnection.host);
+  let networkPort = $state(savedConnection.port);
+  let networkSession = $derived(connectedPortName.startsWith("tcp://"));
+  $effect(() => {
+    saveConnectionSettings({ mode: connectionMode, host: networkHost, port: networkPort });
+  });
   let busy = $state(false);
   let error = $state<string>("");
   // Surfaced firmware errors. Routed through the toast system: when the
@@ -283,8 +296,15 @@
   let unsubDisc: (() => void) | null = null;
   let unsubReconnecting: (() => void) | null = null;
   let unsubReconnected: (() => void) | null = null;
+  let offLifecycle: (() => void) | null = null;
+  let offBackButton: (() => void) | null = null;
+  let appEventAbort: AbortController | null = null;
+  let appDestroyed = false;
+  let networkRecoveryPending = false;
 
   onMount(async () => {
+    appEventAbort = new AbortController();
+    const appEventOptions = { signal: appEventAbort.signal };
     // Detect Android status bar height. On Android the WebView extends
     // behind the system status bar, so we measure the offset of a fixed
     // top:0 element to get the actual inset and set a CSS variable.
@@ -300,15 +320,7 @@
     } catch {}
 
     unsubMsg  = await onFirmwareMessage(handleMessage);
-    unsubDisc = await onDisconnected(async () => {
-      connected = false; learning = false; deviceInfo = null;
-      manifest = null; currentPatch = null;
-      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
-      // Clean up Rust state too - the reader thread exits on disconnect
-      // but the SerialHandle stays in state.serial. Explicit disconnect
-      // releases it so the next autoConnect goes through cleanly.
-      try { await disconnect(); } catch {}
-    });
+    unsubDisc = await onDisconnected(() => { void handleLinkLoss(); });
     // Android only: the backend I/O thread self-heals a stall by closing
     // and reopening the port, which reboots the pedal via DTR and
     // re-enumerates its USB device - including the Kemper<->Captain
@@ -335,20 +347,23 @@
     });
     connected = await isConnected();
     if (connected) {
+      if (connectionMode === "network" && networkHost.trim()) {
+        try { connectedPortName = `tcp://${networkAddress(networkHost, networkPort)}`; } catch {}
+      }
       // Re-fetch the world (after HMR, after a fresh window, after Tauri
       // restart that kept the serial handle alive somehow).
       await refetchAll();
     }
-    await refreshPorts();
+    if (connectionMode === "usb") await refreshPorts();
 
     // Auto-connect on startup: if nothing is connected yet, silently probe
     // for the pedal and attach if found. Stays quiet when no pedal is plugged
     // in (no error toast) - the user can still connect manually. The watchdog
     // starts automatically via the `connected` $effect below.
-    if (!connected && !manualMode) {
+    if (!connected && (connectionMode === "network" || !manualMode) && (connectionMode === "usb" || networkHost.trim())) {
       busy = true;
       try {
-        connectedPortName = await autoConnect();
+        connectedPortName = await connectSelected();
         connected = true;
         await refetchAll();
       } catch { /* no pedal or bridge - stay disconnected */ }
@@ -391,14 +406,14 @@
         busy = false;
         _switchingProfile = false;
       }
-    });
+    }, appEventOptions);
 
     // Generic toast notifications. Any component can dispatch this
     // event to surface a transient confirmation / error banner.
     window.addEventListener("bosun-toast", (e: Event) => {
       const detail = (e as CustomEvent<{ level: ToastLevel; message: string }>).detail;
       if (detail) showToast(detail.level, detail.message);
-    });
+    }, appEventOptions);
 
     // Track concurrent "connecting" operations from any source
     // (waitForReboot after a profile switch / reboot / firmware push,
@@ -412,7 +427,7 @@
       connectingDepth = Math.max(0, connectingDepth + (detail.active ? 1 : -1));
       busy = connectingDepth > 0 || busy;
       if (connectingDepth === 0 && !_switchingProfile) busy = false;
-    });
+    }, appEventOptions);
 
     // Fired by waitForReboot() after it has re-established the Rust
     // side connection following a self-issued reboot (export across
@@ -431,34 +446,27 @@
           await refetchAll();
         }
       } catch (e) { error = String(e); }
-    });
+    }, appEventOptions);
 
     // Maintenance page "Update firmware" buttons ask us to open the OTA
     // push overlay (kept in App so it can survive a page switch). A
     // `detail.source` string targets a user-picked firmware folder/zip;
     // absent → push the bundled firmware.
     window.addEventListener("bosun-open-firmware-push", (e: Event) => {
+      if (IS_ANDROID) return;
       const src = (e as CustomEvent<{ source?: string }>).detail?.source;
       showFirmwarePush = src || true;
-    });
+    }, appEventOptions);
 
     // Rust-level disconnect (firmware rebooted via OTA / manual reboot /
     // crash). USB CDC re-enumerates as the same COM port so the OS
     // doesn't fire a disconnect, but `send_command` fails with "not
-    // connected" once the reader thread has bailed. Sync UI state and
-    // surface a recoverable error message - user clicks Connect again.
-    window.addEventListener("rust-disconnected", async () => {
+    // connected" once the reader thread has bailed. Network sessions retry
+    // their saved endpoint; explicit disconnects stay disconnected.
+    window.addEventListener("rust-disconnected", (event: Event) => {
       if (!connected) return;
-      connected = false;
-      deviceInfo = null; manifest = null; currentPatch = null;
-      patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
-      globalDevice = null; activeKind = "";
-      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
-      // Defensively release the Rust-side handle so a future Connect
-      // doesn't bounce against a stale "already connected" state.
-      try { await disconnect(); } catch {}
-      error = "Lost connection to firmware - click Connect to re-attach.";
-    });
+      void handleLinkLoss((event as CustomEvent).detail === "manual");
+    }, appEventOptions);
 
     // ---- Android lifecycle (Phase 3) ----
     // On Android, the app can be backgrounded or killed at any time.
@@ -471,17 +479,17 @@
     }
 
     // Save session state when the app goes to background.
-    onLifecycleChange((state) => {
+    offLifecycle = onLifecycleChange((state) => {
       if (state === "background") {
         saveSessionState({ _page: page });
       }
-      if (state === "active" && !connected && !manualMode) {
+      if (state === "active" && !connected && !busy && (connectionMode === "network" || !manualMode)) {
         // Came back to foreground - try to reconnect silently.
         // Don't show errors if the pedal isn't plugged in.
         busy = true;
         void (async () => {
           try {
-            connectedPortName = await autoConnect();
+            connectedPortName = await connectSelected();
             connected = true;
             await refetchAll();
           } catch { /* pedal may not be present */ }
@@ -492,7 +500,7 @@
 
     // Android back button: navigate through page history instead of
     // closing the app. The stack is: home -> patches -> editor -> settings etc.
-    onBackButton(() => {
+    offBackButton = onBackButton(() => {
       if (page === "home") return false; // let the app close from home
       // Go back one logical step
       if (page === "editor" || page === "settings" || page === "tft" ||
@@ -516,20 +524,31 @@
       firmware reboot when we don't know exactly when the data port is
       back. Each autoConnect attempt does its own probe-PING so a
       premature attempt fails fast - no harm in retrying. */
-  async function tryReconnect(budgetMs: number): Promise<boolean> {
+  async function tryReconnect(budgetMs: number, signal?: AbortSignal): Promise<boolean> {
     const deadline = Date.now() + budgetMs;
     let waitMs = 1000;
     // First wait - give the firmware a head start so the very first
     // attempt has a chance instead of burning through immediate retries.
     await new Promise(r => setTimeout(r, 2000));
-    while (Date.now() < deadline) {
+    while (Date.now() < deadline && !signal?.aborted) {
       // Defensive: stale Rust handle could refuse autoConnect with
       // "already connected". Force-disconnect before each attempt.
       try { await disconnect(); } catch {}
+      if (signal?.aborted) return false;
       try {
-        connectedPortName = await autoConnect();
-        connected = true;
+        connectedPortName = await connectSelected();
+        if (signal?.aborted) {
+          // IPC cannot be cancelled while TCP's handshake is pending. Release
+          // the connection that completed after its owning App was destroyed.
+          try { await disconnect(); } catch {}
+          return false;
+        }
+        connected = !networkSession;
         await new Promise(r => setTimeout(r, 300));
+        if (signal?.aborted) {
+          try { await disconnect(); } catch {}
+          return false;
+        }
         return true;
       } catch {}
       await new Promise(r => setTimeout(r, waitMs));
@@ -538,7 +557,67 @@
     return false;
   }
 
+  async function handleLinkLoss(manual = false) {
+    if (appDestroyed || (networkRecoveryPending && !connected)) return;
+    // Capture ownership before clearing connected. Duplicate notifications and
+    // firmware/profile operations must not start competing reconnect loops.
+    const recover = connected && networkSession && !busy && !manual;
+    const signal = appEventAbort?.signal;
+    if (recover) {
+      networkRecoveryPending = true;
+      busy = true;
+    }
+    connected = false; learning = false;
+    deviceInfo = null; manifest = null; currentPatch = null;
+    patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+    globalDevice = null; activeKind = "";
+    manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
+    try { await disconnect(); } catch {}
+    if (!recover) {
+      if (!busy && !manual) error = "Lost connection to firmware - click Connect to re-attach.";
+      return;
+    }
+    try {
+      error = "";
+      const reopened = await tryReconnect(20_000, signal);
+      if (signal?.aborted) return;
+      if (reopened) await refetchAll();
+      if (signal?.aborted) return;
+      if (connected) showToast("ok", "Raspberry Pi reconnected");
+      else if (!error) error = "Lost connection to the Raspberry Pi - click Connect to retry.";
+    } finally {
+      networkRecoveryPending = false;
+      if (!signal?.aborted) busy = false;
+    }
+  }
+
+  let networkBootstrapPending: Promise<void> | null = null;
   async function refetchAll() {
+    if (networkSession) {
+      if (networkBootstrapPending) return networkBootstrapPending;
+      // Keep pages and their own polling unmounted until the initial reads
+      // finish. Captain can stream only one large response at a time.
+      const wasBusy = busy;
+      busy = true;
+      connected = false;
+      networkBootstrapPending = (async () => {
+        try {
+          const result = await readNetworkBootstrap();
+          activeProfile = result.profiles.find(profile => profile.active) ?? null;
+          activeKind = activeProfile?.kind ?? "";
+          connected = await isConnected();
+          error = connected ? "" : "Lost connection to the Raspberry Pi - click Connect to retry.";
+        } catch (e) {
+          error = "Could not load the Captain over the network: " + String(e);
+          try { await disconnect(); } catch {}
+          connected = false;
+        } finally {
+          busy = wasBusy;
+          networkBootstrapPending = null;
+        }
+      })();
+      return networkBootstrapPending;
+    }
     try {
       await cmd.getDeviceInfo();
       // The plugin manifest is GLOBAL (not per-profile): it lists the available
@@ -671,7 +750,11 @@
   });
 
   onDestroy(() => {
+    appDestroyed = true;
     unsubMsg?.(); unsubDisc?.(); unsubReconnecting?.(); unsubReconnected?.(); stopWatchdog();
+    appEventAbort?.abort(); appEventAbort = null;
+    offLifecycle?.(); offLifecycle = null;
+    offBackButton?.(); offBackButton = null;
     if (_manifestTimer !== undefined) clearTimeout(_manifestTimer);
     if (_toastTimer !== undefined) clearTimeout(_toastTimer);
     if (unflashedPollHandle) clearInterval(unflashedPollHandle);
@@ -682,6 +765,8 @@
   // pedal once it has rebooted (the self-heal hard reset brings the data port
   // up a few seconds later).
   async function handleInstalled() {
+    connectionMode = "usb";
+    manualMode = false;
     showInstaller = false;
     installerAutoPrompt = false;
     installDismissed = false;
@@ -711,7 +796,7 @@
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
   // pedal doesn't (prompt).
   async function pollForUnflashedPedal() {
-    if (connected || showInstaller || busy || manualMode) return;
+    if (connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
     // Don't let a new probe start while the previous one is still running:
     // auto_connect can take several seconds, longer than the poll interval,
     // and overlapping opens contend for the same serial port (spurious fails).
@@ -720,6 +805,7 @@
     try {
       let dev;
       try { dev = await detectPedal(); } catch { return; }
+      if (connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
 
       const inBootloader = !!dev.bootloader_drive;
       const cpNeedsFirmware = !!dev.circuitpy_drive && !dev.has_captain_firmware;
@@ -772,30 +858,34 @@
   async function refreshPorts() {
     error = "";
     try {
-      ports = await listPorts();
+      ports = (await listPorts()).filter(port => !port.name.startsWith("tcp://"));
       if (ports.length && !selectedPort) selectedPort = ports[0].name;
     } catch (e) { error = String(e); }
   }
 
+  async function connectSelected(): Promise<string> {
+    if (connectionMode === "network") {
+      const addr = networkAddress(networkHost, networkPort);
+      await tcpConnect(addr);
+      return `tcp://${addr}`;
+    }
+    if (manualMode) {
+      if (!selectedPort) throw new Error("Pick a USB port first.");
+      await connect(selectedPort);
+      return selectedPort;
+    }
+    return autoConnect();
+  }
+
   async function doConnect() {
+    if (busy) return;
     busy = true; error = "";
     try {
       // Defensive: if a prior stale handle is somehow still around (e.g.
       // closed the window mid-operation and reopened), clear it first so
       // the connect attempt isn't refused with "already connected".
       try { await disconnect(); } catch {}
-      if (manualMode) {
-        if (!selectedPort) throw new Error("pick a port first");
-        if (selectedPort.startsWith("tcp://")) {
-          await tcpConnect(selectedPort.replace("tcp://", ""));
-          connectedPortName = selectedPort;
-        } else {
-          await connect(selectedPort);
-          connectedPortName = selectedPort;
-        }
-      } else {
-        connectedPortName = await autoConnect();
-      }
+      connectedPortName = await connectSelected();
       connected = true;
       await refetchAll();
     } catch (e) { error = String(e); }
@@ -807,7 +897,7 @@
     try {
       await disconnect();
       // Drop the MIDI relay too - the pedal is going away.
-      await stopBridge();
+      if (!networkSession) await stopBridge();
       connected = false; deviceInfo = null; manifest = null;
       currentPatch = null; learning = false; captures = [];
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
@@ -838,6 +928,9 @@
     try { bridge = await midiBridgeStatus(); } catch { /* leave as-is */ }
   }
   async function startBridge(auto = false) {
+    // The Raspberry owns the remote MIDI relay; USB ports here belong to
+    // this computer and must not be probed for a network session.
+    if (networkSession) return;
     _bridgeManuallyStopped = false;
     try {
       bridge = await midiBridgeStart();
@@ -861,7 +954,7 @@
     await refreshBridge();
   }
   // Reflect the real backend state whenever the Learn page opens.
-  $effect(() => { if (page === "learn" && connected) void refreshBridge(); });
+  $effect(() => { if (page === "learn" && connected && !networkSession) void refreshBridge(); });
 
   // Stage setups need the Kemper <-> pedal relay whenever both devices
   // are on the USB bus, so auto-start the bridge on every connect
@@ -873,7 +966,7 @@
     // whether a previous connection's session ended with the bridge
     // manually stopped.
     if (!connected) { _bridgeAutoDone = false; _bridgeManuallyStopped = false; return; }
-    if (_bridgeAutoDone) return;
+    if (networkSession || _bridgeAutoDone) return;
     _bridgeAutoDone = true;
     // Give refetchAll a moment to finish before probing MIDI devices.
     const t = setTimeout(() => { void startBridge(true); }, 2500);
@@ -893,7 +986,7 @@
   // Poll the real backend status independently and self-heal - unless the
   // user explicitly turned it off, which this must not fight.
   $effect(() => {
-    if (!connected) return;
+    if (!connected || networkSession) return;
     const iv = setInterval(async () => {
       if (_bridgeManuallyStopped) return;
       try {
@@ -1357,6 +1450,7 @@
       <!-- MIDI bridge (Kemper <-> pedal relay). Independent from MIDI Learn:
            Learn auto-starts it for capture, but the stage setup needs it
            running whenever both devices are on the bus. -->
+      {#if !networkSession}
       <button class="topbtn"
               class:primary={bridge.active}
               class:ghost={!bridge.active}
@@ -1366,6 +1460,7 @@
                 : "Start the MIDI bridge (Kemper <-> pedal)"}>
         {bridge.active ? "Bridge ON" : "Bridge OFF"}
       </button>
+      {/if}
       <ProfilePicker {manifest} />
 
       <!-- Firmware update: desktop-only (needs the bundled UF2 + firmware
@@ -1426,20 +1521,22 @@
     <main class="welcome">
       <div class="card">
         <h1>Connect your pedal</h1>
-        <p class="hint">Plug the MIDI Captain via USB, then click below.</p>
-        <button class="big" onclick={doConnect} disabled={busy}>
+        <form onsubmit={(event) => { event.preventDefault(); void doConnect(); }}>
+        <NetworkConnection bind:mode={connectionMode} bind:host={networkHost} bind:port={networkPort} {busy} />
+        <button class="big" type="submit" disabled={busy}>
           {busy ? "Connecting…" : "Connect"}
         </button>
+        {#if connectionMode === "usb"}
         <details class="advanced" inert={busy}>
           <summary>Advanced</summary>
           <label class="adv">
-            <input type="checkbox" bind:checked={manualMode} disabled={busy} />
+            <input type="checkbox" bind:checked={manualMode} onchange={() => { void refreshPorts(); }} disabled={busy} />
             manual port pick
           </label>
           {#if manualMode}
             <div class="manual">
-              <button onclick={refreshPorts} disabled={busy}>Refresh</button>
-              <select bind:value={selectedPort} disabled={busy}>
+              <button type="button" onclick={refreshPorts} disabled={busy}>Refresh</button>
+              <select bind:value={selectedPort} disabled={busy} aria-label="USB port">
                 {#each ports as p}<option value={p.name}>{p.name} - {p.kind}</option>{/each}
               </select>
             </div>
@@ -1449,13 +1546,15 @@
             (e.g. when other CDC devices are plugged in).
           </p>
         </details>
-        {#if error}<p class="err">{error}</p>{/if}
+        {/if}
+        </form>
+        {#if error}<p class="err" role="alert">{error}</p>{/if}
 
         <!-- Fresh pedal with no firmware? The installer walks you through
              putting the Pico in bootloader mode and flashing CircuitPython +
              the bosun firmware. Desktop-only: firmware installation via USB
              mass storage / UF2 bootloader is not available on Android. -->
-        {#if !IS_ANDROID}
+        {#if !IS_ANDROID && connectionMode === "usb"}
           <hr class="divider" />
           <p class="install-link">
             New pedal - never flashed before?
@@ -1621,6 +1720,7 @@
               {/if}
               <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
                            patch={currentPatch.patch} {manifest} {activeKind}
+                           device={globalDevice}
                            allPatches={patches} {linkConfig}
                            onToggleLock={(s) => { void toggleSlotLock(s); }} />
             {:else if editorTab === "quicksetup"}
@@ -1664,8 +1764,10 @@
               </p>
               <div class="row toolbar">
                 <button class="primary" onclick={retryManifest}>Retry</button>
-                <button onclick={() => showFirmwarePush = true}>Re-flash firmware</button>
-                <button onclick={async () => { try { await disconnect(); } catch {} window.dispatchEvent(new CustomEvent("rust-disconnected", { detail: "manual" })); }}>Disconnect</button>
+                {#if !IS_ANDROID}
+                  <button onclick={() => showFirmwarePush = true}>Re-flash firmware</button>
+                {/if}
+                <button onclick={doDisconnect}>Disconnect</button>
               </div>
             </div>
           {:else if !manifest}
@@ -1707,6 +1809,7 @@
               currentBank={deviceInfo.bank}
               currentSlot={deviceInfo.slot}
               {bridge}
+              {networkSession}
               onStartBridge={() => startBridge(false)}
               onStopBridge={stopBridge}
               onUpdate={updateMidiLearn}
@@ -1798,7 +1901,7 @@
         installerAutoPrompt = false;
       }} />
   {/if}
-  {#if showFirmwarePush}
+  {#if showFirmwarePush && !IS_ANDROID}
     <FirmwarePushOverlay
       source={typeof showFirmwarePush === "string" ? showFirmwarePush : undefined}
       onClose={() => showFirmwarePush = false} />
@@ -2071,12 +2174,13 @@
 
   /* ---------- welcome ---------- */
   .welcome {
-    flex: 1; display: flex; align-items: center; justify-content: center;
+    flex: 1; display: flex; align-items: flex-start; justify-content: center;
     padding: 2rem;
     background: var(--welcome-gradient), var(--bg);
     overflow-y: auto;
   }
   .card {
+    box-sizing: border-box; min-width: 0; margin-block: auto;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
     padding: 2.25rem 2.5rem 1.75rem; max-width: 480px; width: 100%;
     text-align: center;
@@ -2091,7 +2195,7 @@
   .big {
     background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border);
     font-weight: 600; font-size: 1rem; padding: 0.85rem 2.5rem;
-    border-radius: 7px; cursor: pointer; min-width: 240px;
+    border-radius: 7px; cursor: pointer; min-width: min(240px, 100%); max-width: 100%; box-sizing: border-box;
     transition: all 0.15s ease;
   }
   .big:hover:not(:disabled) { background: var(--accent-hover-bg); border-color: var(--accent-hover-border); }
@@ -2385,7 +2489,8 @@
   .app.mobile .navitem .lbl { font-size: 0.82rem; }
   .app.mobile .content { flex: 1; padding: 0.4rem; overflow-y: auto; }
   .app.mobile .toast { top: 3rem; right: 0.4rem; left: 0.4rem; min-width: 0; max-width: none; }
-  .app.mobile .welcome .card { margin: 1rem 0.5rem; padding: 1.2rem; }
+  .app.mobile .welcome { padding: 0.75rem; }
+  .app.mobile .welcome .card { margin: auto 0; padding: 1.2rem; }
   .app.mobile .pageHead { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
   .app.mobile .toolbar { gap: 0.35rem; }
   .app.mobile .connpill { font-size: 0.72rem; padding: 0.15rem 0.5rem; }

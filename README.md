@@ -259,7 +259,8 @@ At minimum a plugin must expose:
 | Symbol | Purpose |
 |---|---|
 | `NAME` (str) | Unique identifier, also the profile/device "kind". |
-| `MESSAGE_TYPES` (dict) | The message types this plugin adds, with their parameter schemas. |
+| `MESSAGE_TYPE_NAMES` (tuple) | The message names registered for MIDI dispatch at boot. |
+| `manifest_message_types()` | Return their parameter schemas when building the editor manifest. |
 | `dispatch(msg, midi)` | Expand one plugin message into raw MIDI using the engine. |
 
 Strongly recommended:
@@ -278,16 +279,19 @@ NAME = "mydevice"
 VERSION = "1.0"
 LABEL = "My Cool Device"
 
-MESSAGE_TYPES = {
-    "mydevice_preset": {
-        "label": "Select Preset",
-        "params": {
-            "preset":  {"type": "int", "min": 1, "max": 99, "default": 1, "label": "Preset"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+MESSAGE_TYPE_NAMES = ("mydevice_preset",)
+
+def manifest_message_types():
+    return {
+        "mydevice_preset": {
+            "label": "Select Preset",
+            "params": {
+                "preset":  {"type": "int", "min": 1, "max": 99, "default": 1, "label": "Preset"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Preset {preset}",
         },
-        "summary": "Preset {preset}",
-    },
-}
+    }
 
 def dispatch(msg, midi):
     if msg["type"] == "mydevice_preset":
@@ -295,7 +299,7 @@ def dispatch(msg, midi):
         midi.send_pc(ch, int(msg["preset"]) - 1)
 ```
 
-That is enough to make "My Cool Device - Select Preset" appear in the editor's message dropdown, with a Preset and Channel field, and to have a switch press send the right Program Change.
+After regenerating and deploying the manifest, "My Cool Device - Select Preset" appears in the message dropdown for this device's profile, with a Preset and Channel field, and a switch press sends the right Program Change. Keep the factory's keys identical to `MESSAGE_TYPE_NAMES`. Legacy plugins with a `MESSAGE_TYPES` dict still work, but retain their entire editor schema in RAM; the bundled plugins use the factory to avoid that cost during normal operation.
 
 Parameter `type`s the editor understands include `int` (with `min`/`max`), `string` (with optional `pattern`), `enum` (with `values`), and `bool`. A param may carry an `if` clause (for example `"if": {"action": "set"}`) so it only shows when another field has a given value. `summary` is a template the editor uses to render a one-line description of a configured message.
 
@@ -327,29 +331,29 @@ Declare any of these functions to opt in; absence is a safe no-op, and a throwin
 
 ### Self-description (manifest)
 
-The editor builds its UI entirely from what the plugin declares. Beyond `MESSAGE_TYPES`, you can ship:
+The editor builds its UI entirely from what the plugin declares. Beyond the message schemas, you can ship:
 
 - **`TFT_FIELDS`** (dict): named live values your plugin produces, each with a `label` and a `sample` value. These show up as selectable fields in the Screen layout editor. Fill them from `update_context` / `on_midi_in` by writing into the display context.
 - **`DEFAULT_LAYOUT`** (list): the screen layout the editor offers via "Reset to plugin default" for this device. Each entry is a label dict (`field`, `x`, `y`, `size`, `color`, `font`, optional `prefix` / `suffix`, alignment).
 - **`CONFIG_SCHEMA`** (dict): device-wide options (a `key`, a `label`, and typed `fields`). The editor renders these as a settings block; values are stored under `device[key]` and readable in your hooks via `app.device`.
 - **`RECIPE_SCHEMA`** (dict): a declarative "setup" page. It drives a guided walkthrough in the editor (for example, configuring each preset on the device to broadcast its PC for auto-follow) without any device-specific editor code. See the heavily commented block at the bottom of `plugins/ampero.py`.
 
-The registry assembles all of this per plugin and the firmware **streams it field by field** to the editor. This matters: the full manifest is large (around 12 KB) and calling `json.dumps` on it whole will `MemoryError` on the RP2040. If you add to a plugin, keep individual fields modest and let the existing streaming path (`PluginManager.iter_manifest`) do its job; do not introduce code that serialises the whole manifest at once.
+The normal firmware path streams the generated `firmware/lib/captain/manifest-tail.json` from storage. Regenerate it with `python tools/build_manifest_tail.py --write` whenever schemas or plugin metadata change, and deploy it together with the plugin. The build tool calls the schema factories on the computer, so those dictionaries never need to occupy the Captain's heap during normal MIDI operation. A dynamic fallback streams one plugin at a time when the artifact is unavailable; keep individual schemas modest and avoid serializing the full manifest into memory.
 
 ### How discovery works
 
-At boot the registry scans `/lib/plugins`, skips anything starting with `_` or `.`, imports each module, and registers it if it has a `NAME`, a `MESSAGE_TYPES`, and a callable `dispatch`. Each message type maps to the plugin that declared it, so the binding runner can route any non-core message to the right plugin. Add a file, reboot (or push firmware from Maintenance), and the new device shows up.
+At boot the registry scans `/lib/plugins`, skips anything starting with `_` or `.`, imports each module, and registers it if it has a `NAME`, `MESSAGE_TYPE_NAMES` (or legacy `MESSAGE_TYPES`), and a callable `dispatch`. Each message type maps to the plugin that declared it, so the binding runner can route any non-core message to the right plugin. Registration does not call the schema factory.
 
 ### Checklist for a new plugin
 
-1. Create `firmware/lib/plugins/<name>.py` with `NAME`, `MESSAGE_TYPES`, `dispatch`.
+1. Create `firmware/lib/plugins/<name>.py` with `NAME`, `MESSAGE_TYPE_NAMES`, `manifest_message_types`, and `dispatch`.
 2. Add `VERSION` and `LABEL`.
 3. Implement `dispatch` using the engine methods above.
 4. Add `update_context` + `TFT_FIELDS` if you want the screen to show device state.
 5. Add `on_midi_in` / `on_patch_loaded` if you want LEDs to mirror the device.
 6. Ship a `DEFAULT_LAYOUT` so the device has a sensible screen out of the box.
 7. Add `CONFIG_SCHEMA` / `RECIPE_SCHEMA` for device-wide options or a guided setup.
-8. Push the firmware, reconnect, and confirm your device appears in the editor's dropdowns.
+8. Regenerate the manifest tail and any checked-in `.mpy` bytecode, push the firmware, reconnect, and confirm the commands appear for your device's profile.
 
 Keep all code, comments and documentation in English, and do not let device-specific logic leak into `captain`.
 
@@ -365,6 +369,17 @@ npm run package:portable    # build the distributable extract-and-run ZIP
 ```
 
 You need Node 20+ and the Rust toolchain (install via `rustup`). The editor is a Tauri app: a Svelte + TypeScript frontend over a Rust core that owns the serial connection.
+
+Both distribution scripts synchronize `firmware/` into the Tauri resources
+and verify content hashes before packaging, so a stale gitignored resource
+tree cannot leak into Android or portable builds. A read-only audit is
+available with `python tools/sync_firmware_resources.py --check`.
+
+The Captain's memory-heavy `.mpy` modules must be built with the pinned
+CircuitPython compiler, not the similarly named MicroPython package from PyPI.
+See [Reproducible Captain `.mpy` builds](docs/firmware-mpy-build.md) for the
+identity checks, normalized source paths, read-only verification and explicit
+write workflow.
 
 The firmware and editor are always released at the same version. When bumping, change all four in lockstep: `firmware/lib/captain/__init__.py`, `editor/src-tauri/tauri.conf.json`, `editor/src-tauri/Cargo.toml`, and `editor/package.json`.
 

@@ -6,8 +6,8 @@
   Bosun keeps firmware and editor on the same semver (see
   feedback_editor_firmware_version_aligned). Bumping "by hand" across a
   session is error-prone in a specific way: firmware/lib/captain/__init__.py
-  is the source of truth, but editor/src-tauri/resources/{firmware,lib} are
-  GITIGNORED, HAND-SYNCED COPIES of firmware/lib the desktop app actually
+  is the source of truth, while editor/src-tauri/resources/{firmware,lib} are
+  gitignored derived copies of firmware/lib that the desktop app actually
   bundles and pushes to the pedal (see project_resources_firmware_bundle).
   Forgetting to re-sync __init__.py after a version-only edit ships a
   portable build whose OWN "update available" check reads the OLD version
@@ -17,11 +17,8 @@
   This script:
     1. Writes the given version into the 4 canonical files + Cargo.lock's
        bosun-editor package entry.
-    2. Fully re-syncs firmware/ -> editor/src-tauri/resources/firmware/ and
-       firmware/lib/ -> editor/src-tauri/resources/lib/ (whole-tree copy,
-       not a hand-picked file list, so nothing can be forgotten - this is
-       the actual fix for the bug above, the version string is just the
-       part that made it visible).
+    2. Runs the same verified firmware-resource sync used by every package
+       build (exact firmware mirror plus additive vendored-library tree).
     3. Prints a diff-style summary so you can eyeball what moved.
 
   Does NOT build or push anything - run package:portable / build-android.ps1
@@ -45,6 +42,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-NativeTool {
+    param([scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Command } finally { $ErrorActionPreference = $previous }
+}
+
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version must be plain X.Y.Z (got '$Version'). No leading 'v', no -rc/-scaffold suffix."
 }
@@ -54,6 +58,8 @@ $firmware   = Join-Path $repoRoot "firmware"
 $editor     = Join-Path $repoRoot "editor"
 $tauriDir   = Join-Path $editor "src-tauri"
 $resources  = Join-Path $tauriDir "resources"
+$syncScript = Join-Path $PSScriptRoot "sync_firmware_resources.py"
+$pythonExe  = (Get-Command python -ErrorAction Stop).Source
 
 # ---------- 1. Write the version into the 4 canonical files + Cargo.lock ----------
 
@@ -168,45 +174,17 @@ if (Test-Path $tauriPropsPath) {
     Write-Host "      -> local $tauriPropsPath not found yet (Android project not generated) - fine, CI/build-android.ps1 will pick up the tracked file" -ForegroundColor DarkYellow
 }
 
-# ---------- 2. Full-tree re-sync: firmware/ -> both bundled resource copies ----------
+# ---------- 2. Verified resource sync ----------
 
 Write-Host "`n[2/3] Re-syncing firmware/ into the bundled resource trees" -ForegroundColor Yellow
-
-function Sync-Tree {
-    param([string] $Source, [string] $Dest, [switch] $Mirror)
-    # /E copies the whole tree (incl. empty dirs) and updates changed files,
-    # but LEAVES anything extra in Dest alone. /MIR additionally deletes
-    # anything in Dest not present in Source - only safe when Dest is a
-    # pure mirror of Source. resources/lib is NOT: alongside captain/ and
-    # plugins/ (synced from firmware/lib) it also holds vendored
-    # third-party CircuitPython libraries (adafruit_*, neopixel.mpy) that
-    # download-assets.ps1 plants there and firmware/lib never contains -
-    # /MIR silently deleted all four the first time this ran (2026-08-15).
-    # resources/firmware IS a pure 1:1 mirror of firmware/ (boot.py,
-    # code.py, fonts/, lib/ - nothing else lives there), so /MIR is correct
-    # there: a file removed from firmware/ should disappear from the bundle
-    # too, not linger as stale cruft.
-    $mode = if ($Mirror) { "/MIR" } else { "/E" }
-    $null = robocopy $Source $Dest $mode /XD __pycache__ /XF "*.pyc" /NFL /NDL /NJH /NJS /NC /NS
-    # robocopy's exit codes 0-7 are all success (bit flags for what
-    # changed); only >= 8 is a real error.
-    if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed ($LASTEXITCODE) syncing $Source -> $Dest"
-    }
+Invoke-NativeTool { & $pythonExe $syncScript --repo-root $repoRoot }
+if ($LASTEXITCODE -ne 0) {
+    throw "Firmware resource sync failed"
 }
 
-Sync-Tree -Source $firmware -Dest (Join-Path $resources "firmware") -Mirror
-Write-Host "[ok  ] firmware/ -> resources/firmware/ (mirrored)" -ForegroundColor Green
+# ---------- 3. Completion ----------
 
-Sync-Tree -Source (Join-Path $firmware "lib") -Dest (Join-Path $resources "lib")
-Write-Host "[ok  ] firmware/lib/ -> resources/lib/ (additive - vendored CircuitPython libs left alone)" -ForegroundColor Green
-
-# ---------- 3. Verify: both trees must now match firmware/ exactly ----------
-
-Write-Host "`n[3/3] Verifying the sync" -ForegroundColor Yellow
-
-$diff1 = & fc.exe /A "$firmware\lib\captain\__init__.py" "$resources\firmware\lib\captain\__init__.py" 2>&1
-$diff2 = & fc.exe /A "$firmware\lib\captain\__init__.py" "$resources\lib\captain\__init__.py" 2>&1
+Write-Host "`n[3/3] Resource hashes verified by the shared sync helper" -ForegroundColor Yellow
 
 Write-Host "`nVersion bump complete: $Version" -ForegroundColor Green
 Write-Host "Next: run the build(s) that actually need it -" -ForegroundColor Cyan

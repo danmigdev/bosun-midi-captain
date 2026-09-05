@@ -1,0 +1,10 @@
+[Unit]
+Description=Re-assert the Captain <-> Kemper MIDI wiring (backstop for the udev trigger)
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=10
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

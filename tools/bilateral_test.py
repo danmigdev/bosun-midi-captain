@@ -16,6 +16,7 @@ Usage
     python tools/bilateral_test.py
 """
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -105,13 +106,10 @@ class FakeApp:
         # Fake MIDI out: records every SYSEX the plugin emits (e.g. the block
         # state re-query the rig-name handler fires).
         self.midi = _FakeMidiOut()
-        # Current loaded patch, read by on_midi_in's echo branch. The echo
-        # window is "now - last_local_switch_ms < 1200"; default the last local
-        # switch far in the past so an inbound PC with no recent local switch
-        # takes the EXTERNAL (genuine rig-change) branch, not the echo branch.
+        # Current loaded patch, read by the inbound rig-follow path.
         self.current_bank = 1
         self.current_slot = 1
-        self.last_local_switch_ms = -10_000
+        self.display_context = {"bank": 1, "slot": 1}
         # Recorded calls
         self.latched_calls = []
         self.context_updates = []
@@ -126,6 +124,7 @@ class FakeApp:
 
     def update_context(self, updates):
         self.context_updates.append(dict(updates))
+        self.display_context.update(updates)
 
     def get_last_bank_lsb(self, port, channel):
         return self._last_lsb.get((port, channel), 0)
@@ -133,9 +132,11 @@ class FakeApp:
     def get_last_bank_msb(self, port, channel):
         return self._last_msb.get((port, channel), 0)
 
-    def switch_patch(self, bank, slot, source="editor", fire_on_enter=True):
+    def switch_patch(self, bank, slot, source="editor", fire_on_enter=True,
+                     force_reload=False):
         self.switch_patch_calls.append((bank, slot, source))
         self.last_fire_on_enter = fire_on_enter
+        self.last_force_reload = force_reload
         return True
 
     # Controllable clock for the kemper settle-window logic. Tests set
@@ -161,13 +162,24 @@ def _patch_with_block(switch_name, block):
 # =================== Kemper bilateral tests ===================
 
 def _reset_published():
-    """Clear the per-field publish-dedup cache so each test starts fresh.
-    Also clears the settle window: on_midi_in now opens it on a bare PC
-    (kemper.py) too, not just the rig-name SysEx - a leftover open window
-    from an earlier test's PC would silently swallow this test's
-    set_switch_latched calls (_BIDIR_STATE is module-global, not per-test)."""
-    kemper._BIDIR_STATE["published"] = {}
-    kemper._BIDIR_STATE["settle_until_ms"] = 0
+    """Reset every module-global Kemper state field between tests."""
+    kemper._BIDIR_STATE.update({
+        "last_beacon_ms": 0, "init_sent": False, "confirmed": False,
+        "last_sensed_ms": 0, "published": {}, "settle_until_ms": 0,
+        "generation": 0,
+        "target_rig": None, "reconcile_generation": 0,
+        "reconcile_pending": (), "reconcile_fallback_ms": 0,
+        "reconcile_attempt": 0, "reconcile_queried": (),
+        "query_retire_ms": 0, "orphan_blocks": (), "orphan_until_ms": 0,
+        "pending_name": "", "pending_name_ms": 0,
+        "pending_name_generation": 0, "query_guard_expire_ms": 0,
+        "tuner_active": False, "awaiting_local_pc": None,
+        "orphan_local_pcs": (),
+    })
+    kemper._QUERY_GUARDS.clear()
+    kemper._BLOCK_STATE.clear()
+    kemper._BLOCK_GENERATION.clear()
+    kemper._RIG_INFO.update({"name": "", "rig": None})
 
 
 @test("kemper: CC 19 (block C) at 127 -> set_switch_latched('4', True)")
@@ -190,6 +202,17 @@ def _():
     )
     kemper.on_midi_in("usb", 1, 0xB0, [19, 0], app)
     assert app.latched_calls == [("4", False)], app.latched_calls
+
+
+@test("kemper: one block update repaints every duplicate switch binding")
+def _():
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "C"),
+                  "4": _patch_with_block("4", "C")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True})
+    kemper.on_midi_in("usb", 1, 0xB0, [19, 127], app)
+    assert app.latched_calls == [("3", True), ("4", True)], app.latched_calls
 
 
 @test("kemper: CC for unbound block -> no latched call")
@@ -444,6 +467,99 @@ def _():
     assert app.latched_calls == []
 
 
+# --- Stage Mode: effect-block state must reach display_context on the
+#     ACTUAL change, not only the 5 s beacon tick. Regression for the Pi
+#     kiosk / desktop Stage view showing stale effect squares (the pedal
+#     LED was always right; the published context lagged or, for
+#     footswitch toggles, never updated at all). ---
+
+def _block_ctx(app):
+    """Every kemper_block_* value published to display_context, merged."""
+    out = {}
+    for u in app.context_updates:
+        for k, v in u.items():
+            if k.startswith("kemper_block_"):
+                out[k] = v
+    return out
+
+
+@test("kemper: CC echo of a footswitch toggle publishes kemper_block_* to context")
+def _():
+    # THE bug: CC 22 = block X ("FLANG"). A footswitch toggle comes back
+    # as this CC echo, and it used to update the LED but never the Stage
+    # view's context.
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)
+    assert app.latched_calls == [("3", True)], app.latched_calls
+    assert _block_ctx(app) == {"kemper_block_X": "on"}, app.context_updates
+
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 0], app)
+    assert _block_ctx(app) == {"kemper_block_X": "off"}, app.context_updates
+
+
+@test("kemper: SYSEX param response for a block publishes kemper_block_* to context")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"4": _patch_with_block("4", "C")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x34, 0x03, 1), app)
+    assert _block_ctx(app) == {"kemper_block_C": "on"}, app.context_updates
+
+
+@test("kemper: block toggle DURING a rig-change settle window is NOT published live")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    app.now_ms = 1000
+    kemper._BIDIR_STATE["settle_until_ms"] = 1500  # still settling
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)  # block X on, mid-burst
+    assert app.latched_calls == [], "no live LED paint during settle"
+    assert _block_ctx(app) == {}, "no live context publish during settle"
+    # cache is still updated so _apply_cache can settle it
+    assert kemper._BLOCK_STATE.get("X") is True
+
+
+@test("kemper: _apply_cache publishes the settled block state to context")
+def _():
+    _reset_published()
+    kemper._BLOCK_STATE.clear()
+    kemper._BLOCK_STATE.update({"X": True, "C": False})
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X"), "4": _patch_with_block("4", "C")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper._apply_cache(app)
+    assert _block_ctx(app) == {"kemper_block_X": "on", "kemper_block_C": "off"}, \
+        app.context_updates
+
+
+@test("kemper: repeated identical block state is published only once (dedup)")
+def _():
+    _reset_published()
+    app = FakeApp(
+        bindings={"3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1,
+                    "auto_follow_effects": True, "auto_follow_rig": True},
+    )
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 127], app)
+    kemper.on_midi_in("usb", 1, 0xB0, [22, 100], app)  # still "on"
+    block_pubs = [u for u in app.context_updates if any(k.startswith("kemper_block_") for k in u)]
+    assert len(block_pubs) == 1, block_pubs
+
+
 @test("kemper: bidirectional sensing message ($7E) marks confirmed + publishes kemper_connected")
 def _():
     app = FakeApp(
@@ -593,6 +709,7 @@ def _():
     _reset_published(); kemper._BLOCK_STATE.clear()
     kemper._BLOCK_STATE["X"] = True
     kemper._BLOCK_STATE["Reverb"] = False
+    kemper._BLOCK_GENERATION.update({"X": 0, "Reverb": 0})
     app = FakeApp(
         bindings={"3": _patch_with_block("3", "X"),
                   "up": _patch_with_block("up", "Reverb")},
@@ -624,6 +741,7 @@ def _():
     # past the first couple of rigs - the factory PySwitch sends none.
     _reset_published(); kemper._BLOCK_STATE.clear()
     kemper._BLOCK_STATE["X"] = True
+    kemper._BLOCK_GENERATION["X"] = 0
     app = FakeApp(
         bindings={"3": _patch_with_block("3", "X")},
         kemper_cfg={"enabled": True, "midi_channel": 1,
@@ -668,7 +786,8 @@ def _():
 def _():
     # The flash fix: while a rig-change broadcast is still streaming, deltas
     # update the cache but must NOT paint LEDs (mid-burst paints = the flash).
-    # tick() repaints once from the settled cache after the window closes.
+    # tick() issues one targeted query after the window closes; only that
+    # fresh response paints, so cached pre-rig state never flashes.
     _reset_published(); kemper._BLOCK_STATE.clear()
     app = FakeApp(
         bindings={"3": _patch_with_block("3", "X")},
@@ -683,9 +802,43 @@ def _():
     assert kemper._BLOCK_STATE.get("X") is True
     assert app.latched_calls == [], "no live LED paint during settle"
     app.now_ms = 1000 + kemper._SETTLE_MS + 10
-    kemper.tick(app, app.now_ms)                              # window closed -> repaint
+    kemper.tick(app, app.now_ms)                              # window closed -> query X
+    assert app.latched_calls == [], "stale cache must not paint before reply"
+    queries = [m for m in app.midi.sysex if len(m) > 7 and m[5] == 0x41]
+    assert len(queries) == 1, queries
+    assert tuple(queries[0][-2:]) == kemper._BLOCK_ONOFF["X"], queries[0]
+    app.now_ms = 1580
+    kemper.on_midi_in("usb", 0, 0xF0,
+                      _kemper_sysex_param_response(0x38, 0x03, 1), app)
     assert ("3", True) in app.latched_calls, app.latched_calls
+    assert app.now_ms - 1000 < 900, "reconciled later than target"
     kemper._BIDIR_STATE["settle_until_ms"] = 0
+
+
+@test("kemper: post-rig reconcile queries each bound block once, never all eight")
+def _():
+    _reset_published(); kemper._BLOCK_STATE.clear()
+    app = FakeApp(
+        bindings={"1": _patch_with_block("1", "C"),
+                  "2": _patch_with_block("2", "C"),
+                  "3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1})
+    kemper._BIDIR_STATE["settle_until_ms"] = 1500
+    kemper._BIDIR_STATE["reconcile_pending"] = ()
+    app.now_ms = 1499
+    kemper.tick(app, app.now_ms)
+    assert not [m for m in app.midi.sysex
+                if len(m) > 7 and m[5] == 0x41], \
+        "must not query before exact settle deadline"
+    app.now_ms = 1500
+    kemper.tick(app, app.now_ms)
+    queries = [m for m in app.midi.sysex if len(m) > 7 and m[5] == 0x41]
+    assert len(queries) == 2, queries
+    assert {tuple(m[-2:]) for m in queries} == {
+        kemper._BLOCK_ONOFF["C"], kemper._BLOCK_ONOFF["X"]}
+    app.now_ms = 1600
+    kemper.tick(app, app.now_ms)
+    assert len([m for m in app.midi.sysex if len(m) > 7 and m[5] == 0x41]) == 2
 
 
 @test("kemper: outside any settle window, a block delta paints the LED live (toggle)")
@@ -721,6 +874,9 @@ def _():
         kemper_cfg={"enabled": True, "midi_channel": 1,
                     "auto_follow_effects": True, "auto_follow_rig": True},
     )
+    kemper.on_midi_in("usb", 0, 0xF0,
+                      _kemper_sysex_param_response(0x7F, 0x7E, 1), app)
+    app.context_updates = []
     # value 60 % 12 = 0 -> 'C'; 69 % 12 = 9 -> 'A'
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7D, 0x54, 60), app)
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7D, 0x54, 69), app)
@@ -735,6 +891,9 @@ def _():
         kemper_cfg={"enabled": True, "midi_channel": 1,
                     "auto_follow_effects": True, "auto_follow_rig": True},
     )
+    kemper.on_midi_in("usb", 0, 0xF0,
+                      _kemper_sysex_param_response(0x7F, 0x7E, 1), app)
+    app.context_updates = []
     kemper.on_midi_in("usb", 0, 0xF0, _kemper_sysex_param_response(0x7C, 0x0F, 8192), app)
     assert app.context_updates == [{"kemper_tuner_deviance": 8192, "tuner_deviance": 8192}], app.context_updates
 
@@ -903,6 +1062,161 @@ def _():
     reg.register(NoHook)
     # No assertion needed - just must not raise.
     reg.dispatch_midi_in("usb", 1, 0xB0, [19, 127], app=None)
+
+
+@test("registry: patch-start hook is ordered and isolates plugin failures")
+def _():
+    reg = PluginRegistry()
+    seen = []
+
+    class Bad:
+        NAME = "bad-start"
+        VERSION = "1"
+        MESSAGE_TYPES = {}
+        @staticmethod
+        def dispatch(msg, midi): pass
+        @staticmethod
+        def on_patch_switch_started(app, source, fire_on_enter):
+            seen.append("bad")
+            raise RuntimeError("boom")
+
+    class Good:
+        NAME = "good-start"
+        VERSION = "1"
+        MESSAGE_TYPES = {}
+        @staticmethod
+        def dispatch(msg, midi): pass
+        @staticmethod
+        def on_patch_switch_started(app, source, fire_on_enter):
+            seen.append((source, fire_on_enter))
+
+    reg.register(Bad)
+    reg.register(Good)
+    reg.on_patch_switch_started(object(), "binding", True)
+    assert seen == ["bad", ("binding", True)], seen
+
+
+@test("bindings/registry: successful Kemper dispatch arms the semantic PC token")
+def _():
+    _reset_published()
+    app = FakeApp(kemper_cfg={"enabled": True, "midi_channel": 1})
+    app.now_ms = 1000
+    kemper._arm(app)
+    sent = []
+    class Midi:
+        def send_cc(self, ch, cc, value): sent.append(("cc", cc, value))
+        def send_pc(self, ch, pc): sent.append(("pc", pc))
+        def send_sysex(self, data): sent.append(("sysex", tuple(data)))
+    reg = PluginRegistry()
+    reg.register(kemper)
+    runner = BindingRunner(Midi(), plugins=reg, app=app)
+    before = time.monotonic_ns() // 1_000_000
+    runner.run_message({"type": "kemper_rig", "bank": 1, "rig": 1,
+                        "channel": 1})
+    after = time.monotonic_ns() // 1_000_000
+    assert sent[-1] == ("pc", 0), sent
+    token = kemper._BIDIR_STATE["awaiting_local_pc"]
+    assert token[:2] == (kemper._BIDIR_STATE["generation"], 1), token
+    assert (before + kemper._PC_TOKEN_MS <= token[2]
+             <= after + kemper._PC_TOKEN_MS), token
+
+
+@test("integration: captured query -> PC -> Reverb/X replies converges immediately")
+def _():
+    """Replay the 2026-09-05 real Player ordering through runner + registry."""
+    _reset_published()
+    app = FakeApp(
+        bindings={"UP": _patch_with_block("UP", "Reverb"),
+                  "3": _patch_with_block("3", "X")},
+        kemper_cfg={"enabled": True, "midi_channel": 1},
+    )
+    app.current_slot = 2
+    app.display_context["slot"] = 2
+
+    sent = []
+    class Midi:
+        def send_cc(self, ch, cc, value): sent.append(("cc", cc, value))
+        def send_pc(self, ch, pc): sent.append(("pc", pc))
+        def send_sysex(self, data): sent.append(("sysex", tuple(data)))
+    app.midi = Midi()
+    reg = PluginRegistry()
+    reg.register(kemper)
+    runner = BindingRunner(app.midi, plugins=reg, app=app)
+
+    app.now_ms = 1000
+    kemper.on_patch_switch_started(app, "editor", True)
+    # The real patch-load path took 129 ms between generation arm and PC send.
+    app.now_ms = 1129
+    runner.run_message({"type": "kemper_rig", "bank": 1, "rig": 2,
+                        "channel": 1})
+    app.now_ms = 1466                         # PC+337: Reverb rig delta
+    reg.dispatch_midi_in(
+        "usb", 0, 0xF0,
+        _kemper_sysex_param_response(0x4B, 0x02, 0), app)
+    app.now_ms = 1500                         # PC+371: targeted queries
+    kemper.tick(app, app.now_ms)
+    app.now_ms = 1589                         # PC+460: semantic PC echo
+    reg.dispatch_midi_in("usb", 1, 0xC0, [1], app)
+    app.now_ms = 1592                         # PC+463: Reverb off
+    reg.dispatch_midi_in(
+        "usb", 0, 0xF0,
+        _kemper_sysex_param_response(0x4B, 0x02, 0), app)
+    app.now_ms = 1596                         # PC+467: X on
+    reg.dispatch_midi_in(
+        "usb", 0, 0xF0,
+        _kemper_sysex_param_response(0x38, 0x03, 1), app)
+
+    assert kemper._BIDIR_STATE["reconcile_pending"] == ()
+    assert kemper._BIDIR_STATE["orphan_blocks"] == ()
+    assert ("UP", False) in app.latched_calls, app.latched_calls
+    assert ("3", True) in app.latched_calls, app.latched_calls
+    assert {key: value for update in app.context_updates
+            for key, value in update.items()
+            if key in ("kemper_block_Reverb", "kemper_block_X")} == {
+                "kemper_block_Reverb": "off", "kemper_block_X": "on"}
+
+
+@test("bindings/registry: context hook runs after dispatch and is isolated")
+def _():
+    seen = []
+    class Plugin:
+        NAME = "out-hook"
+        VERSION = "1"
+        MESSAGE_TYPES = {"hook_message": {}}
+        @staticmethod
+        def dispatch(msg, midi): seen.append("dispatch")
+        @staticmethod
+        def update_context(msg, context):
+            seen.append("hook")
+            raise RuntimeError("hook failure")
+    reg = PluginRegistry()
+    reg.register(Plugin)
+    app = types.SimpleNamespace(display_context={})
+    BindingRunner(object(), plugins=reg, app=app).run_message(
+        {"type": "hook_message"})
+    assert seen == ["dispatch", "hook"], seen
+
+
+@test("bindings/registry: failed or unhandled dispatch cannot arm PC token")
+def _():
+    _reset_published()
+    app = FakeApp(kemper_cfg={"enabled": True, "midi_channel": 1})
+    app.now_ms = 1000
+    kemper._arm(app)
+    class BrokenMidi:
+        def send_cc(self, ch, cc, value): pass
+        def send_pc(self, ch, pc):
+            raise RuntimeError("send failed")
+    reg = PluginRegistry()
+    reg.register(kemper)
+    runner = BindingRunner(BrokenMidi(), plugins=reg, app=app)
+    try:
+        runner.run_message({"type": "kemper_rig", "bank": 1, "rig": 1,
+                            "channel": 1})
+    except RuntimeError:
+        pass
+    runner.run_message({"type": "unhandled_message"})
+    assert kemper._BIDIR_STATE["awaiting_local_pc"] is None, kemper._BIDIR_STATE
 
 
 # =================== preset-row navigation on a sparse bank ===================
@@ -1102,6 +1416,30 @@ def _():
     # accidentally be interpreted as the PC value.
     out = p.feed(bytes([0xB0, 0x10, 0xC0, 0x07]))
     assert out == [(1, 0xC0, [0x07])], out
+
+
+@test("parser: oversized unterminated SYSEX is bounded, discarded, and recovers")
+def _():
+    p = MidiParser()
+    payload = bytes([0xF0]) + bytes([1]) * (p.MAX_SYSEX_BYTES + 200)
+    assert p.feed(payload) == []
+    assert len(p._sysex_buf) <= p.MAX_SYSEX_BYTES
+    assert p.feed(bytes([0xF7])) == []
+    assert p.feed(bytes([0xB0, 19, 127])) == [(1, 0xB0, [19, 127])]
+    assert p.feed(bytes([0xF0, 1, 2, 0xF7])) == [(0, 0xF0, [1, 2])]
+
+
+@test("kemper: on-demand schemas share repeated leaves to conserve RP2040 heap")
+def _():
+    schemas = kemper.manifest_message_types()
+    channels = [spec["params"]["channel"] for spec in schemas.values()]
+    # query_state deliberately has a distinct explanatory label.
+    assert all(ch is channels[0] for ch in channels[:-1]), channels
+    toggles = (schemas["kemper_effect_toggle"]["params"]["value"],
+               schemas["kemper_fixed_toggle"]["params"]["value"])
+    assert toggles[0] is toggles[1]
+    assert not hasattr(kemper, "_CC_TO_BLOCK")
+    assert not hasattr(kemper, "_ONOFF_TO_BLOCK")
 
 
 # ---------------- runner ----------------

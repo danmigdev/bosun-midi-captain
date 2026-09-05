@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { cmd, waitForReboot, type DeviceStats, type FirmwareFile } from "../lib/protocol";
+  import { humanBytes, pushFirmwareFile } from "../lib/firmware-push";
+  import { IS_ANDROID } from "../lib/platform";
 
   type Props = { connected: boolean; onClose: () => void };
   let { connected, onClose }: Props = $props();
@@ -13,8 +15,6 @@
   let progress = $state<{ done: number; total: number; current: string }>({ done: 0, total: 0, current: "" });
   let pushLog = $state<string[]>([]);
 
-  /** base64 chunk size in characters. 512 ≈ 384 binary bytes, fits CDC buffer. */
-  const CHUNK_B64 = 512;
   const STATS_POLL_MS = 3000;
 
   let statsTimer: ReturnType<typeof setInterval> | null = null;
@@ -70,13 +70,9 @@
       for (const file of files) {
         progress.current = file.dst;
         const b64 = await invoke<string>("read_firmware_file_b64", { rel: file.rel });
-        await cmd.putFileBegin(file.dst);
-        for (let i = 0; i < b64.length; i += CHUNK_B64) {
-          await cmd.putFileChunk(file.dst, b64.slice(i, i + CHUNK_B64));
-        }
-        await cmd.putFileEnd(file.dst);
+        const uploaded = await pushFirmwareFile(file.dst, b64, { onWarning: log });
         progress.done += 1;
-        log(`✓ ${file.dst}  (${humanBytes(file.size)})`);
+        log(`✓ ${file.dst}  (${humanBytes(uploaded.size)})`);
       }
       log("All files pushed.");
     } catch (e) {
@@ -102,11 +98,6 @@
     startStatsPoll();
   }
 
-  function humanBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / 1024 / 1024).toFixed(2)} MB`;
-  }
   function humanMs(ms: number): string {
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -148,30 +139,32 @@
         {/if}
       </section>
 
-      <section>
-        <h3>Update firmware (OTA)</h3>
-        <p class="muted small">
-          Pushes the bundled <code>firmware/</code> tree to the pedal over USB
-          CDC. No drive needed - works in performance mode.
-        </p>
-        <div class="row">
-          <button class="primary" onclick={doPush} disabled={pushing || rebooting}>
-            {pushing ? `Pushing… ${progress.done}/${progress.total}` : "Push firmware"}
-          </button>
-          <button onclick={doReboot} disabled={pushing || rebooting}>
-            {rebooting ? "Rebooting…" : "Reboot"}
-          </button>
-        </div>
-        {#if pushing && progress.current}
-          <div class="progress">
-            <div class="bar" style:width="{progress.total > 0 ? (progress.done / progress.total * 100) : 0}%"></div>
+      {#if !IS_ANDROID}
+        <section>
+          <h3>Update firmware (OTA)</h3>
+          <p class="muted small">
+            Pushes the bundled <code>firmware/</code> tree to the pedal over USB
+            CDC. No drive needed - works in performance mode.
+          </p>
+          <div class="row">
+            <button class="primary" onclick={doPush} disabled={pushing || rebooting}>
+              {pushing ? `Pushing… ${progress.done}/${progress.total}` : "Push firmware"}
+            </button>
+            <button onclick={doReboot} disabled={pushing || rebooting}>
+              {rebooting ? "Rebooting…" : "Reboot"}
+            </button>
           </div>
-          <p class="curr">{progress.current}</p>
-        {/if}
-        {#if pushLog.length > 0}
-          <pre>{pushLog.join("\n")}</pre>
-        {/if}
-      </section>
+          {#if pushing && progress.current}
+            <div class="progress">
+              <div class="bar" style:width="{progress.total > 0 ? (progress.done / progress.total * 100) : 0}%"></div>
+            </div>
+            <p class="curr">{progress.current}</p>
+          {/if}
+          {#if pushLog.length > 0}
+            <pre>{pushLog.join("\n")}</pre>
+          {/if}
+        </section>
+      {/if}
     {/if}
   </div>
 </div>

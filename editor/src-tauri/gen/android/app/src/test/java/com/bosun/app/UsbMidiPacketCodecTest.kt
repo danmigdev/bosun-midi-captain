@@ -235,10 +235,44 @@ class UsbMidiPacketCodecTest {
     }
 
     @Test
-    fun `a transfer whose length is not a multiple of 4 drops the trailing partial packet, does not throw`() {
+    fun `a packet split across transfer boundaries is retained and decoded once complete`() {
         val noteOn = UsbMidiPacketCodec.encode(b(0x90, 0x40, 0x7F))[0]
-        val truncated = noteOn + b(0x09, 0x90)  // 2 stray trailing bytes
-        val decoded = UsbMidiPacketCodec.Decoder().feed(truncated)
+        val noteOff = UsbMidiPacketCodec.encode(b(0x80, 0x40, 0x00))[0]
+        val decoder = UsbMidiPacketCodec.Decoder()
+
+        val first = decoder.feed(noteOn + noteOff.copyOfRange(0, 2))
+        assertEquals(1, first.size)
+        assertArrayEquals(b(0x90, 0x40, 0x7F), first[0])
+
+        val second = decoder.feed(noteOff.copyOfRange(2, 4))
+        assertEquals(1, second.size)
+        assertArrayEquals(b(0x80, 0x40, 0x00), second[0])
+    }
+
+    @Test
+    fun `all one two and three byte packet splits are lossless`() {
+        val packet = UsbMidiPacketCodec.encode(b(0xB0, 0x07, 0x64))[0]
+        for (split in 1..3) {
+            val decoder = UsbMidiPacketCodec.Decoder()
+            assertTrue(decoder.feed(packet.copyOfRange(0, split)).isEmpty())
+            val decoded = decoder.feed(packet.copyOfRange(split, 4))
+            assertEquals("split=$split", 1, decoded.size)
+            assertArrayEquals("split=$split", b(0xB0, 0x07, 0x64), decoded[0])
+        }
+    }
+
+    @Test
+    fun `unterminated sysex is bounded and discarded until its terminator`() {
+        val decoder = UsbMidiPacketCodec.Decoder(maxSysexBytes = 12)
+        val continuation = b(0x04, 0xF0, 0x01, 0x02)
+        repeat(1000) { assertTrue(decoder.feed(continuation).isEmpty()) }
+
+        // Completing an overflowed frame must not expose a truncated suffix.
+        assertTrue(decoder.feed(b(0x05, 0xF7, 0x00, 0x00)).isEmpty())
+
+        // The decoder recovers at the next independent, valid message.
+        val noteOn = UsbMidiPacketCodec.encode(b(0x90, 0x40, 0x7F))[0]
+        val decoded = decoder.feed(noteOn)
         assertEquals(1, decoded.size)
         assertArrayEquals(b(0x90, 0x40, 0x7F), decoded[0])
     }

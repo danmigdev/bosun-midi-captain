@@ -27,7 +27,8 @@ FILES = [
     (REPO + r"\firmware\lib\plugins\kemper.py",    "/lib/plugins/kemper.py"),
 ]
 EXPECT_VERSION = "0.3.26"
-CHUNK = 1024          # raw bytes per PUT_FILE_CHUNK
+# Keep OTA decode allocations below 100 bytes on the fragmented RP2040 heap.
+CHUNK = 96            # raw bytes per PUT_FILE_CHUNK
 VID_ADAFRUIT = 0x239A
 
 

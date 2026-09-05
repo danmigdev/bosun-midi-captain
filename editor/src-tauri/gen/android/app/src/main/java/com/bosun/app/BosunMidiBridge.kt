@@ -147,6 +147,9 @@ object BosunMidiBridge {
     @Volatile private var captainDeviceId = -1
 
     private var detachReceiver: BroadcastReceiver? = null
+    @Volatile private var lastKemperHint: String? = null
+    @Volatile private var lastCaptainHint: String? = null
+    @Volatile private var healthRestartPending = false
 
     private fun makeDetachReceiver() = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -214,9 +217,6 @@ object BosunMidiBridge {
             return BridgeStatus(false, null, null)
         }
 
-        ensureBridgeThread()
-        val handler = bridgeHandler ?: return BridgeStatus(false, null, null)
-
         val (kemperInfo, captainInfo) = findDevices(manager, kemperHint, captainHint)
         if (kemperInfo == null || captainInfo == null) {
             Log.e(
@@ -239,6 +239,13 @@ object BosunMidiBridge {
             captain?.close()
             return BridgeStatus(false, kemperLbl, captainLbl)
         }
+        ensureBridgeThread()
+        val handler = bridgeHandler
+        if (handler == null) {
+            kemper.close()
+            captain.close()
+            return BridgeStatus(false, kemperLbl, captainLbl)
+        }
         kemperDevice = kemper
         captainDevice = captain
 
@@ -246,12 +253,20 @@ object BosunMidiBridge {
         // both stamps the liveness timestamp the health check watches AND
         // forwards (minus clock/active-sensing noise) into the other device.
         kemper.startReading { msg ->
-            lastK2cMs = SystemClock.elapsedRealtime()
-            if (!isNoise(msg)) captain.send(msg)
+            if (isNoise(msg) || captain.send(msg)) {
+                lastK2cMs = SystemClock.elapsedRealtime()
+            } else {
+                // A reader that is alive but can no longer write is still a
+                // broken direction; let the health policy recover it.
+                lastK2cMs = 0
+            }
         }
         captain.startReading { msg ->
-            lastC2kMs = SystemClock.elapsedRealtime()
-            if (!isNoise(msg)) kemper.send(msg)
+            if (isNoise(msg) || kemper.send(msg)) {
+                lastC2kMs = SystemClock.elapsedRealtime()
+            } else {
+                lastC2kMs = 0
+            }
         }
         Log.i(TAG, "Bridge links: kemper->captain and captain->kemper both wired")
 
@@ -265,6 +280,8 @@ object BosunMidiBridge {
         detachReceiver = receiver
 
         active = true
+        lastKemperHint = kemperHint
+        lastCaptainHint = captainHint
         kemperLabel = kemperLbl
         captainLabel = captainLbl
         bridgeStartedAtMs = SystemClock.elapsedRealtime()
@@ -297,18 +314,9 @@ object BosunMidiBridge {
      * midi_bridge_status()) cannot see this split-brain state, only a
      * from-inside check that knows about both directions can.
      *
-     * The actual grace/staleness/cooldown judgment lives in
-     * BridgeHealthPolicy (unit-tested, see BridgeHealthPolicyTest) - this
-     * function only supplies the live clock readings and acts on the
-     * verdict. Detection only, matching the original android.media.midi
-     * version's own hard-learned lesson (see the 2026-08-15 comment history
-     * in BridgeHealthPolicy.kt): auto-restarting from here needs a real
-     * design for "device permission may be needed again" and "don't
-     * contend with the main thread for the object lock" - not attempted
-     * here either. UsbMidiDevice's read loop is the actual fix for the
-     * specific failure this was built to catch (a silently-dead reader);
-     * this stays wired in as a second line of defense and a visible log
-     * line if something else ever produces the same symptom.
+     * BridgeHealthPolicy owns the tested grace/staleness/cooldown judgment.
+     * A permitted pair is reopened on a dedicated thread; the generation
+     * token prevents the old handler from rearming after teardown.
      */
     private fun scheduleHealthCheck(handler: Handler, generation: Int) {
         handler.postDelayed(object : Runnable {
@@ -322,16 +330,40 @@ object BosunMidiBridge {
                     lastC2kMs = lastC2kMs,
                     lastRestartAtMs = lastHealthRestartAtMs,
                 )
-                if (verdict.k2cStale || verdict.c2kStale) {
+                if (verdict.shouldRestart) {
                     Log.w(
                         TAG,
                         "MIDI bridge looks half-dead (kemper->captain stale=${verdict.k2cStale}, " +
-                            "captain->kemper stale=${verdict.c2kStale}) - NOT auto-restarting (see comment)"
+                            "captain->kemper stale=${verdict.c2kStale}); restarting"
                     )
+                    requestHealthRestart(now)
+                    return
                 }
                 handler.postDelayed(this, HEALTH_CHECK_POLL_MS)
             }
         }, HEALTH_CHECK_POLL_MS)
+    }
+
+    @Synchronized
+    private fun requestHealthRestart(now: Long) {
+        if (!active || healthRestartPending) return
+        healthRestartPending = true
+        lastHealthRestartAtMs = now
+        val ctx = appContext
+        val kemperHint = lastKemperHint
+        val captainHint = lastCaptainHint
+        Thread({
+            try {
+                if (ctx != null) {
+                    stop(ctx)
+                    start(ctx, kemperHint, captainHint)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "MIDI bridge health restart failed", e)
+            } finally {
+                healthRestartPending = false
+            }
+        }, "BosunMidiBridge-health-restart").start()
     }
 
     /** Closes every open device and marks the bridge inactive.
@@ -356,7 +388,7 @@ object BosunMidiBridge {
 
     /** Current bridge state; safe to call at any time from Rust. */
     @JvmStatic
-    fun status(context: Context): BridgeStatus =
+    fun status(@Suppress("UNUSED_PARAMETER") context: Context): BridgeStatus =
         BridgeStatus(active, kemperLabel, captainLabel)
 
     // ---- internals ----

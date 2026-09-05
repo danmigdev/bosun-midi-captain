@@ -1,9 +1,11 @@
 package com.bosun.app
 
 import android.content.Context
+import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 
 /**
  * JNI-facing singleton owning the raw-USB data-CDC connection to the
@@ -18,10 +20,10 @@ import android.util.Log
  * ```kotlin
  * object BosunSerialBridge {
  *   @JvmStatic fun listPorts(context: Context): Array<String>
- *   @JvmStatic fun open(context: Context, port: String): String   // throws on failure
- *   @JvmStatic fun close(context: Context)
- *   @JvmStatic fun read(maxLen: Int, timeoutMs: Int): ByteArray   // empty = timeout, never null
- *   @JvmStatic fun write(data: ByteArray, timeoutMs: Int): Int    // bytes written, or -1
+ *   @JvmStatic fun open(context: Context, port: String, generation: Long): String
+ *   @JvmStatic fun close(context: Context, generation: Long)
+ *   @JvmStatic fun read(generation: Long, maxLen: Int, timeoutMs: Int): ByteArray
+ *   @JvmStatic fun write(generation: Long, data: ByteArray, timeoutMs: Int): Int
  * }
  * ```
  */
@@ -36,6 +38,7 @@ object BosunSerialBridge {
     private val CAPTAIN_VENDOR_IDS = setOf(0x239A, 0x2E8A)
 
     @Volatile private var device: BosunSerialDevice? = null
+    private val generations = SessionGenerationFence()
 
     @JvmStatic
     @Synchronized
@@ -52,24 +55,44 @@ object BosunSerialBridge {
      * String> did. */
     @JvmStatic
     @Synchronized
-    fun open(context: Context, @Suppress("UNUSED_PARAMETER") port: String): String {
-        close(context)
+    fun open(context: Context, @Suppress("UNUSED_PARAMETER") port: String, generation: Long): String {
+        require(generation > 0) { "invalid session generation" }
+        if (!generations.begin(generation)) throw IllegalStateException("stale session")
+        closeCurrent(context)
         val manager = usbManager(context)
             ?: throw IllegalStateException("UsbManager service not available")
         val target = manager.deviceList.values.firstOrNull { matchesCaptain(it) }
             ?: throw IllegalStateException("Captain USB device not found")
         val opened = BosunSerialDevice.open(manager, target)
             ?: throw IllegalStateException("failed to open/claim the Captain's data CDC interface (see logcat)")
-        device = opened
+        try {
+            ContextCompat.startForegroundService(
+                context.applicationContext,
+                Intent(context.applicationContext, BosunSerialService::class.java),
+            )
+            device = opened
+            check(generations.activate(generation)) { "session superseded while opening" }
+        } catch (e: Exception) {
+            opened.close()
+            throw IllegalStateException("failed to start serial foreground service", e)
+        }
         Log.i(TAG, "opened $PORT_NAME")
         return PORT_NAME
     }
 
     @JvmStatic
     @Synchronized
-    fun close(@Suppress("UNUSED_PARAMETER") context: Context) {
+    fun close(context: Context, generation: Long) {
+        if (!generations.release(generation)) return
+        closeCurrent(context)
+    }
+
+    private fun closeCurrent(context: Context) {
         device?.close()
         device = null
+        context.applicationContext.stopService(
+            Intent(context.applicationContext, BosunSerialService::class.java),
+        )
     }
 
     /** Reads up to maxLen bytes, blocking at most timeoutMs. Returns an
@@ -79,10 +102,14 @@ object BosunSerialBridge {
      * to a plain 0 (see its doc comment for why). Only "not connected"
      * throws here. */
     @JvmStatic
-    fun read(maxLen: Int, timeoutMs: Int): ByteArray {
-        val dev = device ?: throw IllegalStateException("not connected")
+    fun read(generation: Long, maxLen: Int, timeoutMs: Int): ByteArray {
+        val dev = device?.takeIf { generations.owns(generation) }
+            ?: throw IllegalStateException("stale or disconnected session")
         val buf = ByteArray(maxLen)
         val n = dev.read(buf, timeoutMs)
+        if (!generations.owns(generation) || device !== dev) {
+            throw IllegalStateException("stale session completed after reconnect")
+        }
         return if (n == 0) ByteArray(0) else buf.copyOf(n)
     }
 
@@ -92,9 +119,13 @@ object BosunSerialBridge {
      * and re-queues the command for retry, rather than treating a partial
      * send as either silent success or a fatal, connection-killing error). */
     @JvmStatic
-    fun write(data: ByteArray, timeoutMs: Int): Int {
-        val dev = device ?: throw IllegalStateException("not connected")
+    fun write(generation: Long, data: ByteArray, timeoutMs: Int): Int {
+        val dev = device?.takeIf { generations.owns(generation) }
+            ?: throw IllegalStateException("stale or disconnected session")
         val n = dev.write(data, timeoutMs)
+        if (!generations.owns(generation) || device !== dev) {
+            throw IllegalStateException("stale session completed after reconnect")
+        }
         if (n < data.size) throw java.io.IOException("write timeout: sent $n/${data.size} bytes")
         return n
     }

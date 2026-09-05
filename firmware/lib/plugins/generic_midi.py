@@ -14,29 +14,37 @@ VERSION = "1.0"
 LABEL = "Generic MIDI"
 
 
-MESSAGE_TYPES = {
-    "program_change_bank": {
-        "label": "Program Change with Bank",
-        "params": {
-            "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
-            "msb":     {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Bank MSB (CC0)"},
-            "lsb":     {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Bank LSB (CC32)"},
-            "program": {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Program"},
+MESSAGE_TYPE_NAMES = (
+    'program_change_bank',
+    'cc_toggle',
+)
+
+
+def manifest_message_types():
+    """Allocate editor schemas only on demand, never for MIDI registration."""
+    return {
+        "program_change_bank": {
+            "label": "Program Change with Bank",
+            "params": {
+                "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+                "msb":     {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Bank MSB (CC0)"},
+                "lsb":     {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Bank LSB (CC32)"},
+                "program": {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Program"},
+            },
+            "summary": "PC {program} bank {msb}/{lsb} ch {channel}",
         },
-        "summary": "PC {program} bank {msb}/{lsb} ch {channel}",
-    },
-    "cc_toggle": {
-        "label": "CC Toggle (latched)",
-        "params": {
-            "channel":   {"type": "int",  "min": 1, "max": 16,  "default": 1,   "label": "Channel"},
-            "cc":        {"type": "int",  "min": 0, "max": 127, "default": 0,   "label": "CC #"},
-            "on_value":  {"type": "int",  "min": 0, "max": 127, "default": 127, "label": "On value"},
-            "off_value": {"type": "int",  "min": 0, "max": 127, "default": 0,   "label": "Off value"},
-            "state":     {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+        "cc_toggle": {
+            "label": "CC Toggle (latched)",
+            "params": {
+                "channel":   {"type": "int",  "min": 1, "max": 16,  "default": 1,   "label": "Channel"},
+                "cc":        {"type": "int",  "min": 0, "max": 127, "default": 0,   "label": "CC #"},
+                "on_value":  {"type": "int",  "min": 0, "max": 127, "default": 127, "label": "On value"},
+                "off_value": {"type": "int",  "min": 0, "max": 127, "default": 0,   "label": "Off value"},
+                "state":     {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+            },
+            "summary": "CC {cc} {state} ch {channel}",
         },
-        "summary": "CC {cc} {state} ch {channel}",
-    },
-}
+    }
 
 
 def dispatch(msg, midi):

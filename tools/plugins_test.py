@@ -464,11 +464,46 @@ def _placeholders(summary):
     return set(_PLACEHOLDER_RE.findall(summary or ""))
 
 
+@test("cross: runtime registration never allocates editor schemas")
+def _():
+    from unittest.mock import patch
+    from captain.plugin import PluginRegistry
+
+    registry = PluginRegistry()
+    for mod in ALL_PLUGINS:
+        names = set(mod.manifest_message_types())
+        assert set(mod.MESSAGE_TYPE_NAMES) == names
+        with patch.object(mod, "manifest_message_types", side_effect=AssertionError("eager schema")):
+            assert registry.register(mod)
+            assert all(registry.handles(name) for name in names)
+        assert not hasattr(mod, "MESSAGE_TYPES"), "editor graph remains resident"
+
+
+@test("cross: on-demand schemas are independent and released after the caller drops them")
+def _():
+    import gc
+    import weakref
+
+    class Marker:
+        pass
+
+    for mod in ALL_PLUGINS:
+        first, second = mod.manifest_message_types(), mod.manifest_message_types()
+        assert first == second and first is not second
+        marker = Marker()
+        alive = weakref.ref(marker)
+        first["lifetime-test"] = marker
+        assert "lifetime-test" not in second
+        del marker, first, second
+        gc.collect()
+        assert alive() is None, "plugin retained its transient schema graph"
+
+
 @test("cross: every summary {placeholder} is a declared param of its message type")
 def _():
     bad = []
     for mod in ALL_PLUGINS:
-        for mtype, spec in mod.MESSAGE_TYPES.items():
+        for mtype, spec in mod.manifest_message_types().items():
             params = spec.get("params", {})
             for ph in _placeholders(spec.get("summary", "")):
                 if ph not in params:
@@ -481,7 +516,7 @@ def _():
 def _():
     bad = []
     for mod in ALL_PLUGINS:
-        for mtype, spec in mod.MESSAGE_TYPES.items():
+        for mtype, spec in mod.manifest_message_types().items():
             for pname, pspec in spec.get("params", {}).items():
                 if pspec.get("type") != "enum":
                     continue
@@ -504,7 +539,7 @@ def _():
     # time.sleep(0.005) - harmless under CPython, just a 5 ms pause.)
     errors = []
     for mod in ALL_PLUGINS:
-        for mtype, spec in mod.MESSAGE_TYPES.items():
+        for mtype, spec in mod.manifest_message_types().items():
             payload = {"type": mtype, "channel": 1}
             for pname, pspec in spec.get("params", {}).items():
                 if "default" in pspec:

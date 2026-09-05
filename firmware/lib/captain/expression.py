@@ -273,3 +273,7 @@ class ExpressionArray:
                  "present": j.present,
                  "value": j.value if j.value >= 0 else 0}
                 for j in self._jacks]
+
+    def stats_jacks(self):
+        # Unlike stats(), this creates no list or per-jack dictionaries.
+        return self._jacks

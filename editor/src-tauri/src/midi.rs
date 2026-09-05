@@ -22,7 +22,9 @@
 use serde::Serialize;
 
 #[cfg(not(target_os = "android"))]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+#[cfg(not(target_os = "android"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(target_os = "android"))]
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput};
@@ -57,6 +59,7 @@ pub struct BridgeHandle {
     _pedal_in: MidiInputConnection<()>,
     kemper_port: String,
     pedal_port: String,
+    healthy: Arc<AtomicBool>,
 }
 
 /// First port name that contains any of `needles` (case-insensitive).
@@ -95,7 +98,7 @@ pub fn midi_bridge_status(state: State<MidiState>) -> BridgeStatus {
     match state.bridge.lock() {
         Ok(g) => match g.as_ref() {
             Some(h) => BridgeStatus {
-                active: true,
+                active: h.healthy.load(Ordering::Acquire),
                 kemper_port: Some(h.kemper_port.clone()),
                 pedal_port: Some(h.pedal_port.clone()),
             },
@@ -174,6 +177,7 @@ pub fn midi_bridge_start(
         .ok_or("Kemper output port disappeared")?;
     let mut kemper_out_conn =
         kemper_out.connect(&kemper_out_port, "bosun-bridge").map_err(|e| e.to_string())?;
+    let healthy = Arc::new(AtomicBool::new(true));
 
     // Kemper in -> pedal out. ignore(None) is required so SYSEX is delivered to
     // the callback (midir suppresses it by default); we drop clock/AS ourselves.
@@ -184,13 +188,16 @@ pub fn midi_bridge_start(
         .into_iter()
         .find(|p| kin.port_name(p).map(|n| n == kemper_in_name).unwrap_or(false))
         .ok_or("Kemper input port disappeared")?;
+    let kemper_to_pedal_healthy = healthy.clone();
     let kemper_in_conn = kin
         .connect(
             &kin_port,
             "bosun-bridge",
             move |_ts, msg, _| {
                 if should_forward(msg) {
-                    let _ = pedal_out_conn.send(msg);
+                    if pedal_out_conn.send(msg).is_err() {
+                        kemper_to_pedal_healthy.store(false, Ordering::Release);
+                    }
                 }
             },
             (),
@@ -205,13 +212,16 @@ pub fn midi_bridge_start(
         .into_iter()
         .find(|p| pin.port_name(p).map(|n| n == pedal_in_name).unwrap_or(false))
         .ok_or("pedal input port disappeared")?;
+    let pedal_to_kemper_healthy = healthy.clone();
     let pedal_in_conn = pin
         .connect(
             &pin_port,
             "bosun-bridge",
             move |_ts, msg, _| {
                 if should_forward(msg) {
-                    let _ = kemper_out_conn.send(msg);
+                    if kemper_out_conn.send(msg).is_err() {
+                        pedal_to_kemper_healthy.store(false, Ordering::Release);
+                    }
                 }
             },
             (),
@@ -224,6 +234,7 @@ pub fn midi_bridge_start(
         _pedal_in: pedal_in_conn,
         kemper_port: kemper_in_name.clone(),
         pedal_port: pedal_in_name.clone(),
+        healthy,
     });
 
     Ok(BridgeStatus {
@@ -231,4 +242,17 @@ pub fn midi_bridge_start(
         kemper_port: Some(kemper_in_name),
         pedal_port: Some(pedal_in_name),
     })
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_only_clock_and_active_sensing() {
+        assert!(!should_forward(&[0xf8]));
+        assert!(!should_forward(&[0xfe]));
+        assert!(should_forward(&[0xf0, 1, 2, 0xf7]));
+        assert!(should_forward(&[0x90, 60, 127]));
+    }
 }
