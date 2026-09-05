@@ -1,0 +1,2 @@
+# Shell launchers execute under Linux on Raspberry Pi and must keep LF endings.
+tools/rpi-hub/kiosk/*.sh text eol=lf
