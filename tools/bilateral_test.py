@@ -1429,13 +1429,14 @@ def _():
     assert p.feed(bytes([0xF0, 1, 2, 0xF7])) == [(0, 0xF0, [1, 2])]
 
 
-@test("kemper: import-time schemas share repeated leaves to conserve RP2040 heap")
+@test("kemper: on-demand schemas share repeated leaves to conserve RP2040 heap")
 def _():
-    channels = [spec["params"]["channel"] for spec in kemper.MESSAGE_TYPES.values()]
+    schemas = kemper.manifest_message_types()
+    channels = [spec["params"]["channel"] for spec in schemas.values()]
     # query_state deliberately has a distinct explanatory label.
     assert all(ch is channels[0] for ch in channels[:-1]), channels
-    toggles = (kemper.MESSAGE_TYPES["kemper_effect_toggle"]["params"]["value"],
-               kemper.MESSAGE_TYPES["kemper_fixed_toggle"]["params"]["value"])
+    toggles = (schemas["kemper_effect_toggle"]["params"]["value"],
+               schemas["kemper_fixed_toggle"]["params"]["value"])
     assert toggles[0] is toggles[1]
     assert not hasattr(kemper, "_CC_TO_BLOCK")
     assert not hasattr(kemper, "_ONOFF_TO_BLOCK")

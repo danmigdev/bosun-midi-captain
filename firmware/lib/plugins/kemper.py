@@ -41,121 +41,141 @@ _CHANNEL_PARAM = {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Ch
 _ON_OFF_PARAM = {"type": "enum", "values": ("on", "off"), "default": "on", "label": "Value"}
 
 
-MESSAGE_TYPES = {
-    "kemper_rig": {
-        "label": "Select Rig",
-        "params": {
-            "bank":    {"type": "int", "min": 1, "max": 25, "default": 1, "label": "Bank (1-25)"},
-            "rig":     {"type": "int", "min": 1, "max": 5,  "default": 1, "label": "Rig in bank (1-5)"},
-            "channel": _CHANNEL_PARAM,
+MESSAGE_TYPE_NAMES = (
+    'kemper_rig',
+    'kemper_step_rig',
+    'kemper_effect_toggle',
+    'kemper_fixed_toggle',
+    'kemper_tuner',
+    'kemper_tap_tempo',
+    'kemper_set_tempo',
+    'kemper_morph',
+    'kemper_morph_trigger',
+    'kemper_wah',
+    'kemper_volume',
+    'kemper_looper',
+    'kemper_rotary',
+    'kemper_query_state',
+)
+
+
+def manifest_message_types():
+    """Allocate editor schemas only on demand, never for MIDI registration."""
+    return {
+        "kemper_rig": {
+            "label": "Select Rig",
+            "params": {
+                "bank":    {"type": "int", "min": 1, "max": 25, "default": 1, "label": "Bank (1-25)"},
+                "rig":     {"type": "int", "min": 1, "max": 5,  "default": 1, "label": "Rig in bank (1-5)"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Rig {bank}-{rig}",
         },
-        "summary": "Rig {bank}-{rig}",
-    },
-    "kemper_step_rig": {
-        "label": "Step Rig",
-        "params": {
-            "direction": {"type": "enum", "values": ["next", "prev"], "default": "next", "label": "Direction"},
-            "channel":   _CHANNEL_PARAM,
+        "kemper_step_rig": {
+            "label": "Step Rig",
+            "params": {
+                "direction": {"type": "enum", "values": ["next", "prev"], "default": "next", "label": "Direction"},
+                "channel":   _CHANNEL_PARAM,
+            },
+            "summary": "Step rig {direction}",
         },
-        "summary": "Step rig {direction}",
-    },
-    "kemper_effect_toggle": {
-        "label": "Effect Slot On/Off",
-        "params": {
-            "slot":    {"type": "enum", "values": _EFFECT_VALUES, "default": "A",  "label": "Slot"},
-            "value":   _ON_OFF_PARAM,
-            "channel": _CHANNEL_PARAM,
+        "kemper_effect_toggle": {
+            "label": "Effect Slot On/Off",
+            "params": {
+                "slot":    {"type": "enum", "values": _EFFECT_VALUES, "default": "A",  "label": "Slot"},
+                "value":   _ON_OFF_PARAM,
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Slot {slot} {value}",
         },
-        "summary": "Slot {slot} {value}",
-    },
-    "kemper_fixed_toggle": {
-        "label": "Fixed Block On/Off",
-        "params": {
-            "effect":  {"type": "enum", "values": _FIXED_FX_VALUES, "default": "Compressor", "label": "Fixed effect"},
-            "value":   _ON_OFF_PARAM,
-            "channel": _CHANNEL_PARAM,
+        "kemper_fixed_toggle": {
+            "label": "Fixed Block On/Off",
+            "params": {
+                "effect":  {"type": "enum", "values": _FIXED_FX_VALUES, "default": "Compressor", "label": "Fixed effect"},
+                "value":   _ON_OFF_PARAM,
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Fixed {effect} {value}",
         },
-        "summary": "Fixed {effect} {value}",
-    },
-    "kemper_tuner": {
-        "label": "Tuner",
-        "params": {
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_tuner": {
+            "label": "Tuner",
+            "params": {
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Tuner {state}",
         },
-        "summary": "Tuner {state}",
-    },
-    "kemper_tap_tempo": {
-        "label": "Tap Tempo",
-        "params": {
-            "channel": _CHANNEL_PARAM,
+        "kemper_tap_tempo": {
+            "label": "Tap Tempo",
+            "params": {
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Tap",
         },
-        "summary": "Tap",
-    },
-    "kemper_set_tempo": {
-        "label": "Set BPM",
-        "params": {
-            "bpm":     {"type": "int", "min": 40, "max": 250, "default": 120, "label": "BPM"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_set_tempo": {
+            "label": "Set BPM",
+            "params": {
+                "bpm":     {"type": "int", "min": 40, "max": 250, "default": 120, "label": "BPM"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "BPM {bpm}",
         },
-        "summary": "BPM {bpm}",
-    },
-    "kemper_morph": {
-        "label": "Morph Pedal",
-        "params": {
-            "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_morph": {
+            "label": "Morph Pedal",
+            "params": {
+                "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Morph {value}",
         },
-        "summary": "Morph {value}",
-    },
-    "kemper_morph_trigger": {
-        "label": "Morph Trigger",
-        "params": {
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_morph_trigger": {
+            "label": "Morph Trigger",
+            "params": {
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Morph {state}",
         },
-        "summary": "Morph {state}",
-    },
-    "kemper_wah": {
-        "label": "Wah Pedal",
-        "params": {
-            "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_wah": {
+            "label": "Wah Pedal",
+            "params": {
+                "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Wah {value}",
         },
-        "summary": "Wah {value}",
-    },
-    "kemper_volume": {
-        "label": "Volume Pedal",
-        "params": {
-            "value":   {"type": "int", "min": 0, "max": 127, "default": 100, "label": "Value"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_volume": {
+            "label": "Volume Pedal",
+            "params": {
+                "value":   {"type": "int", "min": 0, "max": 127, "default": 100, "label": "Value"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Volume {value}",
         },
-        "summary": "Volume {value}",
-    },
-    "kemper_looper": {
-        "label": "Looper",
-        "params": {
-            "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "rec_play", "label": "Action"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_looper": {
+            "label": "Looper",
+            "params": {
+                "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "rec_play", "label": "Action"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Looper {action}",
         },
-        "summary": "Looper {action}",
-    },
-    "kemper_rotary": {
-        "label": "Rotary Speed",
-        "params": {
-            "value":   {"type": "enum", "values": ["slow", "fast"], "default": "slow", "label": "Speed"},
-            "channel": _CHANNEL_PARAM,
+        "kemper_rotary": {
+            "label": "Rotary Speed",
+            "params": {
+                "value":   {"type": "enum", "values": ["slow", "fast"], "default": "slow", "label": "Speed"},
+                "channel": _CHANNEL_PARAM,
+            },
+            "summary": "Rotary {value}",
         },
-        "summary": "Rotary {value}",
-    },
-    "kemper_query_state": {
-        "label": "Query block on/off state",
-        "params": {
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel (ignored - SYSEX is global)"},
+        "kemper_query_state": {
+            "label": "Query block on/off state",
+            "params": {
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel (ignored - SYSEX is global)"},
+            },
+            "summary": "Query block states",
         },
-        "summary": "Query block states",
-    },
-}
+    }
 
 
 def _block_for_cc(cc):

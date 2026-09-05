@@ -58,57 +58,69 @@ _LOOPER_VALUES = list(_LOOPER_CC.keys())
 _TUNER_VALUE = {"on": 64, "off": 0}
 
 
-MESSAGE_TYPES = {
-    "helix_preset": {
-        "label": "Select Preset",
-        "params": {
-            "setlist": {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Setlist (Bank LSB)"},
-            "preset":  {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Preset (PC)"},
-            "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+MESSAGE_TYPE_NAMES = (
+    'helix_preset',
+    'helix_snapshot',
+    'helix_fs',
+    'helix_tap_tempo',
+    'helix_tuner',
+    'helix_looper',
+)
+
+
+def manifest_message_types():
+    """Allocate editor schemas only on demand, never for MIDI registration."""
+    return {
+        "helix_preset": {
+            "label": "Select Preset",
+            "params": {
+                "setlist": {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Setlist (Bank LSB)"},
+                "preset":  {"type": "int", "min": 0, "max": 127, "default": 0, "label": "Preset (PC)"},
+                "channel": {"type": "int", "min": 1, "max": 16,  "default": 1, "label": "Channel"},
+            },
+            "summary": "Preset {preset} setlist {setlist}",
         },
-        "summary": "Preset {preset} setlist {setlist}",
-    },
-    "helix_snapshot": {
-        "label": "Snapshot",
-        "params": {
-            "snapshot": {"type": "int", "min": 1, "max": 8,  "default": 1, "label": "Snapshot (1-8)"},
-            "channel":  {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "helix_snapshot": {
+            "label": "Snapshot",
+            "params": {
+                "snapshot": {"type": "int", "min": 1, "max": 8,  "default": 1, "label": "Snapshot (1-8)"},
+                "channel":  {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Snapshot {snapshot}",
         },
-        "summary": "Snapshot {snapshot}",
-    },
-    "helix_fs": {
-        "label": "Footswitch / Stomp Toggle",
-        "params": {
-            "switch":  {"type": "enum", "values": _FS_VALUES, "default": "1", "label": "Footswitch (FS6 has no CC)"},
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "helix_fs": {
+            "label": "Footswitch / Stomp Toggle",
+            "params": {
+                "switch":  {"type": "enum", "values": _FS_VALUES, "default": "1", "label": "Footswitch (FS6 has no CC)"},
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": {"type": "int",  "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "FS{switch} {state}",
         },
-        "summary": "FS{switch} {state}",
-    },
-    "helix_tap_tempo": {
-        "label": "Tap Tempo",
-        "params": {
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "helix_tap_tempo": {
+            "label": "Tap Tempo",
+            "params": {
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Tap",
         },
-        "summary": "Tap",
-    },
-    "helix_tuner": {
-        "label": "Tuner",
-        "params": {
-            "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "helix_tuner": {
+            "label": "Tuner",
+            "params": {
+                "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Tuner {state}",
         },
-        "summary": "Tuner {state}",
-    },
-    "helix_looper": {
-        "label": "Looper",
-        "params": {
-            "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "record", "label": "Action"},
-            "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+        "helix_looper": {
+            "label": "Looper",
+            "params": {
+                "action":  {"type": "enum", "values": _LOOPER_VALUES, "default": "record", "label": "Action"},
+                "channel": {"type": "int", "min": 1, "max": 16, "default": 1, "label": "Channel"},
+            },
+            "summary": "Looper {action}",
         },
-        "summary": "Looper {action}",
-    },
-}
+    }
 
 
 def dispatch(msg, midi):
