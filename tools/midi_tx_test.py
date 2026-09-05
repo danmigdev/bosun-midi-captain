@@ -121,14 +121,18 @@ def test(name):
 
 
 class _ControlledTime:
-    """Monotonic clock advanced only by the real TX loop's sleep calls."""
+    """Clock advanced by retry sleeps or a pause after its next sample."""
 
     def __init__(self):
         self.now_ns = 0
         self.sleep_calls = []
+        self.pause_after_next_sample_ns = 0
 
     def monotonic_ns(self):
-        return self.now_ns
+        sampled = self.now_ns
+        self.now_ns += self.pause_after_next_sample_ns
+        self.pause_after_next_sample_ns = 0
+        return sampled
 
     def sleep(self, seconds):
         self.sleep_calls.append(seconds)
@@ -158,6 +162,21 @@ def fresh_engine(stall_ms=0, clock=None):
     return engine
 
 
+class _ScriptedUsbOut:
+    """Records the real retry loop's chunks and accepts specified byte counts."""
+
+    def __init__(self, counts=()):
+        self.counts = list(counts)
+        self.calls = []
+        self.accepted = bytearray()
+
+    def write(self, data):
+        self.calls.append(bytes(data))
+        count = self.counts.pop(0) if self.counts else len(data)
+        self.accepted.extend(data[:len(data) if count is None else count])
+        return count
+
+
 # ---------------- tests ----------------
 
 @test("baseline: an immediately-writable port never calls poll_hook")
@@ -169,6 +188,70 @@ def _():
         engine.send_cc(1, 10, 127)
     assert calls == [], f"expected no poll_hook calls, got {len(calls)}"
     assert clock.sleep_calls == [], clock.sleep_calls
+
+
+@test("a pre-write pause cannot discard a beacon without trying a writable endpoint")
+def _():
+    payload = bytes((0, 0x20, 0x33, 2, 127, 0x7E, 0, 0x40, 2, 0x22, 5))
+    framed = b"\xf0" + payload + b"\xf7"
+    for pause_ns in (10_000_000, 12_000_000, 40_000_000):
+        with controlled_tx_time() as clock:
+            engine = fresh_engine(clock=clock)
+            engine.usb_out = _ScriptedUsbOut()
+            hooks = []
+            engine.poll_hook = lambda: hooks.append(1)
+            # Models a pause after the timestamp used to build the deadline,
+            # before USB has been given even one opportunity to accept data.
+            clock.pause_after_next_sample_ns = pause_ns
+            engine.send_sysex(payload)
+        assert engine.usb_out.calls == [framed], (pause_ns, engine.usb_out.calls)
+        assert engine.usb_out.accepted == framed, engine.usb_out.accepted
+        assert getattr(engine, "usb_tx_dropped", 0) == 0
+        assert hooks == [] and clock.sleep_calls == []
+
+
+@test("an endpoint that stays full retains a bounded retry budget after a pre-write pause")
+def _():
+    for pause_ns, attempts in ((0, 20), (40_000_000, 1)):
+        with controlled_tx_time() as clock:
+            engine = fresh_engine(stall_ms=100, clock=clock)
+            hooks = []
+            engine.poll_hook = lambda: hooks.append(1)
+            clock.pause_after_next_sample_ns = pause_ns
+            engine.send_cc(1, 10, 127)
+        assert engine.usb_out.write_calls == attempts, engine.usb_out.write_calls
+        assert len(hooks) == attempts and len(clock.sleep_calls) == attempts
+        assert clock.now_ns == pause_ns + attempts * 500_000, clock.now_ns
+        assert engine.usb_tx_dropped == 3, engine.usb_tx_dropped
+
+
+@test("short writes retry only the remainder and accept a final None as success")
+def _():
+    payload = bytes((0, 0x20, 0x33, 2, 127, 0x7E, 0, 0x40, 2, 0x22, 5))
+    framed = b"\xf0" + payload + b"\xf7"
+    with controlled_tx_time() as clock:
+        engine = fresh_engine(clock=clock)
+        engine.usb_out = _ScriptedUsbOut((4, 0, 3, None))
+        hooks = []
+        engine.poll_hook = lambda: hooks.append(1)
+        engine.send_sysex(payload)
+    assert engine.usb_out.calls == [framed, framed[4:], framed[4:], framed[7:]]
+    assert engine.usb_out.accepted == framed, engine.usb_out.accepted
+    assert getattr(engine, "usb_tx_dropped", 0) == 0
+    assert hooks == [1] and clock.sleep_calls == [0.0005]
+
+
+@test("a partial first write after a pre-write pause counts only its unsent remainder")
+def _():
+    with controlled_tx_time() as clock:
+        engine = fresh_engine(clock=clock)
+        engine.usb_out = _ScriptedUsbOut((1,))
+        clock.pause_after_next_sample_ns = 12_000_000
+        engine.send_cc(1, 10, 127)
+    assert engine.usb_out.calls == [b"\xb0\x0a\x7f"], engine.usb_out.calls
+    assert engine.usb_out.accepted == b"\xb0", engine.usb_out.accepted
+    assert engine.usb_tx_dropped == 2, engine.usb_tx_dropped
+    assert clock.sleep_calls == []
 
 
 @test("a stalled write spins the retry loop with no poll_hook set -> no error")

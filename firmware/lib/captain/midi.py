@@ -192,8 +192,12 @@ class MidiEngine:
         n = len(data)
         sent = 0
         deadline = time.monotonic_ns() + 10_000_000  # 10 ms
+        # A pause while sampling/allocating the deadline must not skip a
+        # writable endpoint entirely. The deadline bounds subsequent retries.
+        first_attempt = True
         try:
-            while sent < n and time.monotonic_ns() < deadline:
+            while sent < n and (first_attempt or time.monotonic_ns() < deadline):
+                first_attempt = False
                 chunk = data if sent == 0 else data[sent:]
                 w = self.usb_out.write(chunk)
                 if w is None:
