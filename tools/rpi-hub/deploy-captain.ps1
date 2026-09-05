@@ -609,6 +609,30 @@ def call(message, expected_type):
     raise TimeoutError("no response to %s#%s" %
                        (message["type"], message["id"]))
 
+def read_when_idle(message, expected_type):
+    # Stage bootstrap can briefly own the firmware's background response.
+    # Retry only its explicit admission refusal, only for these four reads,
+    # and keep the same verification-wide deadline. Each attempt gets a new
+    # correlation id so an older reply cannot satisfy the retry.
+    if message["type"] not in (
+            "GET_DEVICE_INFO", "GET_CONTEXT", "GET_PATCH", "LIST_PATCHES"):
+        raise ValueError("not a runtime bootstrap read: " + message["type"])
+    base_id = message["id"]
+    attempt = 0
+    while True:
+        try:
+            return call(message, expected_type)
+        except ProtocolError as error:
+            if error.reply.get("error") != "background_busy":
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.1, remaining))
+            if time.monotonic() >= deadline:
+                raise TimeoutError("background_busy persisted for " + message["type"])
+            attempt += 1
+            message = dict(message, id="%s-retry-%d" % (base_id, attempt))
+
 try:
     # Fence any partial input inherited by the bridge, then test every read
     # used by Stage's cold bootstrap. GET_PATCH deliberately targets the
@@ -630,7 +654,7 @@ try:
             if time.monotonic() >= deadline:
                 raise
             time.sleep(0.1)
-    device = call({"type": "GET_DEVICE_INFO",
+    device = read_when_idle({"type": "GET_DEVICE_INFO",
                    "id": "deploy-runtime-device"}, "DEVICE_INFO")
     current = device.get("current")
     if not isinstance(current, dict):
@@ -642,19 +666,19 @@ try:
     if "preset_navigation" not in device:
         raise RuntimeError("DEVICE_INFO is from stale firmware")
 
-    context = call({"type": "GET_CONTEXT",
+    context = read_when_idle({"type": "GET_CONTEXT",
                     "id": "deploy-runtime-context"}, "CONTEXT")
     if not isinstance(context.get("context"), dict):
         raise RuntimeError("GET_CONTEXT has no context object")
 
-    patch = call({"type": "GET_PATCH", "id": "deploy-runtime-patch",
+    patch = read_when_idle({"type": "GET_PATCH", "id": "deploy-runtime-patch",
                   "bank": bank, "slot": slot}, "PATCH")
     if (patch.get("bank"), patch.get("slot")) != (bank, slot):
         raise RuntimeError("GET_PATCH returned the wrong coordinates")
     if not isinstance(patch.get("patch"), dict):
         raise RuntimeError("GET_PATCH has no patch object")
 
-    patch_list = call({"type": "LIST_PATCHES",
+    patch_list = read_when_idle({"type": "LIST_PATCHES",
                        "id": "deploy-runtime-patches"}, "PATCH_LIST")
     patches = patch_list.get("patches")
     if not isinstance(patches, list):

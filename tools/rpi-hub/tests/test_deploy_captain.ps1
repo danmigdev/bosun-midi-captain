@@ -71,7 +71,9 @@ function Assert-RuntimeVerifierCase {
         [Parameter(Mandatory)][string]$Mode,
         [Parameter(Mandatory)][bool]$ShouldPass,
         [Parameter(Mandatory)][string]$ExpectedText,
-        [Parameter(Mandatory)][string[]]$ExpectedRequests
+        [Parameter(Mandatory)][string[]]$ExpectedRequests,
+        [string]$RepeatedFinalRequest = '',
+        [double]$MaximumSeconds = 4.0
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -125,7 +127,7 @@ function Assert-RuntimeVerifierCase {
         if ($renderedOutput.IndexOf($ExpectedText, [StringComparison]::Ordinal) -lt 0) {
             throw "Runtime verifier mode $Mode did not report '$ExpectedText': $renderedOutput"
         }
-        if ($stopwatch.Elapsed.TotalSeconds -gt 4.0) {
+        if ($stopwatch.Elapsed.TotalSeconds -gt $MaximumSeconds) {
             throw "Runtime verifier exceeded its bounded deadline in mode ${Mode}: $($stopwatch.Elapsed)"
         }
 
@@ -135,6 +137,18 @@ function Assert-RuntimeVerifierCase {
             throw "Fake runtime server did not report requests for mode ${Mode}: $serverTail"
         }
         $actualRequests = $requestLine[0].Substring('REQUESTS='.Length).Split(',')
+        if ($RepeatedFinalRequest) {
+            if ($actualRequests.Count -le $ExpectedRequests.Count -or
+                $actualRequests.Count -gt 17) {
+                throw "Unbounded or missing busy retries for mode ${Mode}: $($actualRequests.Count)"
+            }
+            foreach ($request in $actualRequests[$ExpectedRequests.Count..($actualRequests.Count - 1)]) {
+                if ($request -ne $RepeatedFinalRequest) {
+                    throw "Busy retry sent another request in mode ${Mode}: $request"
+                }
+            }
+            $actualRequests = $actualRequests[0..($ExpectedRequests.Count - 1)]
+        }
         if (($actualRequests -join ',') -ne ($ExpectedRequests -join ',')) {
             throw "Unexpected runtime requests for mode ${Mode}: $($actualRequests -join ',')"
         }
@@ -458,6 +472,8 @@ server.bind(("127.0.0.1", 0))
 server.listen(1)
 print("PORT=%d" % server.getsockname()[1], flush=True)
 requests = []
+request_ids = set()
+first_ids = {}
 connection, _ = server.accept()
 connection.settimeout(3.0)
 buffer = bytearray()
@@ -489,6 +505,24 @@ try:
             kind = message["type"]
             requests.append(kind)
             ident = message["id"]
+            if ident in request_ids:
+                raise AssertionError("runtime retry reused a request id: " + ident)
+            request_ids.add(ident)
+            if kind != "PING" and mode in ("busy_reads", "busy_forever", "busy_then_error"):
+                first_ids.setdefault(kind, ident)
+                if requests.count(kind) == 1 or mode == "busy_forever":
+                    send({"type": "ERROR", "id": ident,
+                          "error": "background_busy", "of": kind})
+                    continue
+                if mode == "busy_then_error":
+                    send({"type": "ERROR", "id": ident,
+                          "error": "exception", "detail": "MemoryError"})
+                    continue
+                # A late malformed reply for the refused attempt must not be
+                # accepted as the successful retry, especially for PATCH's
+                # coordinates and the DEVICE_INFO navigation metadata.
+                send({"type": "ERROR", "id": first_ids[kind],
+                      "error": "exception", "detail": "stale response"})
             if kind == "PING":
                 if mode == "transient_link" and requests.count("PING") == 1:
                     send({"type": "ERROR", "id": ident,
@@ -591,6 +625,20 @@ class Serial:
         -ServerPath $fakeServer -Mode 'transient_link' -ShouldPass $true `
         -ExpectedText 'BOSUN_CAPTAIN_RUNTIME=OK bank=2 slot=3 patches=1' `
         -ExpectedRequests @('PING', 'PING', 'GET_DEVICE_INFO', 'GET_CONTEXT', 'GET_PATCH', 'LIST_PATCHES')
+    Assert-RuntimeVerifierCase -Python $python -ValidatorPath $runtimeValidator `
+        -ServerPath $fakeServer -Mode 'busy_reads' -ShouldPass $true `
+        -ExpectedText 'BOSUN_CAPTAIN_RUNTIME=OK bank=2 slot=3 patches=1' `
+        -ExpectedRequests @('PING', 'GET_DEVICE_INFO', 'GET_DEVICE_INFO', `
+            'GET_CONTEXT', 'GET_CONTEXT', 'GET_PATCH', 'GET_PATCH', 'LIST_PATCHES', 'LIST_PATCHES')
+    Assert-RuntimeVerifierCase -Python $python -ValidatorPath $runtimeValidator `
+        -ServerPath $fakeServer -Mode 'busy_forever' -ShouldPass $false `
+        -ExpectedText 'background_busy persisted for GET_DEVICE_INFO' `
+        -ExpectedRequests @('PING', 'GET_DEVICE_INFO') `
+        -RepeatedFinalRequest 'GET_DEVICE_INFO' -MaximumSeconds 2.5
+    Assert-RuntimeVerifierCase -Python $python -ValidatorPath $runtimeValidator `
+        -ServerPath $fakeServer -Mode 'busy_then_error' -ShouldPass $false `
+        -ExpectedText 'MemoryError' `
+        -ExpectedRequests @('PING', 'GET_DEVICE_INFO', 'GET_DEVICE_INFO')
     Assert-RuntimeVerifierCase -Python $python -ValidatorPath $runtimeValidator `
         -ServerPath $fakeServer -Mode 'ping_only' -ShouldPass $false `
         -ExpectedText 'no response to GET_DEVICE_INFO#deploy-runtime-device' `
