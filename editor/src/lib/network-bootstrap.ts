@@ -5,22 +5,38 @@ import {
   type ProfileInfo,
 } from "./protocol";
 
-function transientReadError(error: unknown): boolean {
-  if (error instanceof FirmwareCommandTimeoutError) return true;
+function transientReadError(error: unknown): "busy" | "timeout" | null {
+  if (error instanceof FirmwareCommandTimeoutError) return "timeout";
   const message = error instanceof Error ? error.message : String(error);
-  return /^(?:error:\s*)?(?:background_busy|request_timeout)$/.test(message.trim());
+  const match = /^(?:error:\s*)?(background_busy|request_timeout)$/.exec(message.trim());
+  return match ? (match[1] === "background_busy" ? "busy" : "timeout") : null;
 }
 
 async function read<T extends FirmwareMessage = FirmwareMessage>(type: string, timeout: number): Promise<T> {
-  try {
-    return await sendAndAwait<T>({ type }, timeout);
-  } catch (error) {
-    if (!transientReadError(error)) throw error;
-    // These requests only read state. Allow one retry after the current
-    // firmware response has had an opportunity to finish draining.
-    await new Promise<void>(resolve => setTimeout(resolve, 250));
+  const deadline = Date.now() + 2 * timeout;
+  let timeoutRetries = 0;
+  let busyWait = 250;
+  while (true) {
+    try {
+      return await sendAndAwait<T>({ type }, Math.min(timeout, deadline - Date.now()));
+    } catch (error) {
+      const transient = transientReadError(error);
+      if (!transient) throw error;
+      if (transient === "timeout") {
+        if (timeoutRetries >= 1) throw error;
+        timeoutRetries += 1;
+      }
+      // Other Stage/editor clients can own Captain's response stream for
+      // several seconds. A busy response rejects this read before it starts;
+      // wait for that stream to drain, keeping the original two-read budget.
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw error;
+      const delay = transient === "busy" ? busyWait : 250;
+      if (transient === "busy") busyWait = Math.min(busyWait * 2, 1000);
+      await new Promise<void>(resolve => setTimeout(resolve, Math.min(delay, remaining)));
+      if (Date.now() >= deadline) throw error;
+    }
   }
-  return sendAndAwait<T>({ type }, timeout);
 }
 
 /** Load one network session without overlapping large firmware responses.

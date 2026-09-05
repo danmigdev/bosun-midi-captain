@@ -74,6 +74,7 @@ _BACKGROUND_CLASS_BY_TYPE = {
     "STATS": "bulk",
     "LED_DUMP": "bulk",
     "LIST_FONTS": "bulk",
+    "LIST_PROFILES": "bulk",
     "GET_PATCH": "patch",
     "GET_CONTEXT": "context",
     "GET_DEVICE_INFO": "device_info",

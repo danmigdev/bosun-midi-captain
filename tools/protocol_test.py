@@ -735,6 +735,230 @@ def _():
     assert [line["id"] for line in lines] == ["first", "second"], lines
 
 
+@test("TX pending progress survives suffix-copy OOM without copying or replacing the original frame")
+def _():
+    class NoSuffixCopy(bytes):
+        def __getitem__(self, index):
+            if isinstance(index, slice):
+                raise MemoryError("no allocation for a pending suffix copy")
+            return super().__getitem__(index)
+
+    class BudgetPort(FakePort):
+        budget = 5
+
+        def write(self, data):
+            accepted = min(self.budget, len(data))
+            self.written.extend(bytes(data)[:accepted])
+            self.budget -= accepted
+            return accepted
+
+    p, port = build_protocol(BudgetPort())
+    frame = NoSuffixCopy(b'{"type":"ACK","id":"first"}\n')
+    p._pending_out = [frame]
+    p._pending_bytes = len(frame)
+    assert p._flush_pending() is False
+    assert p._pending_out[0] is frame
+    assert p._pending_offset == 5
+    assert p._pending_bytes == len(frame) - 5
+    assert p._flush_pending() is False
+    assert p._pending_offset == 5 and p._pending_bytes == len(frame) - 5
+    port.budget = 1000
+    assert p._flush_pending() is True
+    assert bytes(port.written) == frame
+    assert not p._pending_out and p._pending_offset == 0 and p._pending_bytes == 0
+
+
+@test("TX commits positive USB writes before a failing memoryview allocation and resumes exactly once")
+def _():
+    from unittest.mock import patch
+
+    for failure in ("constructor", "slice"):
+        p, port = build_protocol(FakePort(max_per_write=5))
+        attempts = []
+
+        class FailedView:
+            def __getitem__(self, index):
+                attempts.append(("slice", index.start))
+                raise MemoryError("suffix view cannot allocate")
+
+        def no_view(value):
+            attempts.append(("constructor", len(value)))
+            if failure == "constructor":
+                raise MemoryError("memoryview cannot allocate")
+            return FailedView()
+
+        first = {"type": "ACK", "id": "view-failure"}
+        expected = json.dumps(first).encode() + b"\n"
+        with patch.object(protocol, "memoryview", no_view, create=True):
+            assert p._send(first) is False
+            assert bytes(port.written) == expected[:5]
+            assert p._pending_offset == 5 and p._pending_bytes == len(expected) - 5
+            for _ in range(3):
+                p.pump_background()
+                assert bytes(port.written) == expected[:5]
+                assert p._pending_offset == 5 and p._pending_bytes == len(expected) - 5
+                assert not p._tx_active
+        assert attempts
+        assert p._send({"type": "ACK", "id": "after-view"}) is True
+        assert [json.loads(line) for line in port.written.splitlines()] == [
+            first, {"type": "ACK", "id": "after-view"},
+        ]
+        assert not p._pending_out and p._pending_offset == 0 and p._pending_bytes == 0
+
+
+@test("TX freezes a stalled mutable chunk before its streamer reuses the buffer")
+def _():
+    class BudgetPort(FakePort):
+        budget = 5
+
+        def write(self, data):
+            accepted = min(self.budget, len(data))
+            self.written.extend(bytes(data)[:accepted])
+            self.budget -= accepted
+            return accepted
+
+    for as_view in (False, True):
+        p, port = build_protocol(BudgetPort())
+        frame = b'{"type":"ACK","id":"mutable"}\n'
+        backing = bytearray(frame)
+        chunk = memoryview(backing) if as_view else backing
+        assert p._write_bytes(chunk) == len(frame) - 5
+        assert type(p._pending_out[0]) is bytes
+        assert p._pending_offset == 5 and p._pending_bytes == len(frame) - 5
+        backing[:] = b"!" * len(backing)
+        next_frame = b'{"type":"ACK","id":"following"}\n'
+        assert p._write_bytes(next_frame) == len(next_frame)
+        assert p._pending_bytes == len(frame) - 5 + len(next_frame)
+        port.budget = 1000
+        p.pump_background()
+        assert bytes(port.written) == frame + next_frame
+        assert not p._pending_out and p._pending_offset == 0 and p._pending_bytes == 0
+
+
+@test("TX mutable snapshot OOM drops the unsafe alias and seals the failed stream before later replies")
+def _():
+    from unittest.mock import patch
+
+    class BudgetPort(FakePort):
+        budget = 5
+
+        def write(self, data):
+            accepted = min(self.budget, len(data))
+            self.written.extend(bytes(data)[:accepted])
+            self.budget -= accepted
+            return accepted
+
+    p, port = build_protocol(BudgetPort())
+    frame = bytearray(b'{"type":"PATCH","id":"bad-snapshot","patch":{}}\n')
+    original = bytes(frame)
+    snapshots = []
+
+    def no_mutable_copy(value):
+        if isinstance(value, (bytearray, memoryview)):
+            snapshots.append(value)
+            raise MemoryError("cannot freeze reusable stream buffer")
+        return bytes(value)
+
+    def response():
+        p._write_bytes(frame)
+        yield
+
+    with patch.object(protocol, "bytes", no_mutable_copy, create=True):
+        p._start_background(response(), "bad-snapshot", "GET_PATCH")
+        p._send({"type": "ACK", "id": "after-snapshot"})
+    assert snapshots and p._bg_line_seal
+    assert not any(chunk is frame for chunk in p._pending_out)
+    assert p._pending_offset == 0
+    frame[:] = b"!" * len(frame)
+    port.budget = 10000
+    drain_background(p)
+    lines = bytes(port.written).splitlines()
+    assert lines[0] == original[:5]
+    replies = [json.loads(line) for line in lines[1:]]
+    assert replies[0]["type"] == "ERROR" and replies[0]["id"] == "bad-snapshot"
+    assert replies[1] == {"type": "ACK", "id": "after-snapshot"}
+    assert not p._pending_out and p._pending_offset == 0 and p._pending_bytes == 0
+
+
+@test("TX switch events cannot recursively flush the partially written queue head")
+def _():
+    class BudgetPort(FakePort):
+        budget = 5
+
+        def write(self, data):
+            accepted = min(self.budget, len(data))
+            self.written.extend(bytes(data)[:accepted])
+            self.budget -= accepted
+            return accepted
+
+    p, port = build_protocol(BudgetPort())
+    polls = []
+
+    def poll_switch():
+        polls.append(True)
+        if len(polls) == 1:
+            p.emit_event("switch_pressed", switch="A")
+
+    p.app._poll_switches_mid_op = poll_switch
+    assert p._send({"type": "ACK", "id": "before-event"}) is False
+    assert len(polls) == 1, "a switch event reentered the active USB flush"
+    assert p._pending_offset == 5
+    assert p._pending_bytes == sum(len(chunk) for chunk in p._pending_out) - 5
+    port.budget = 1000
+    p.pump_background()
+    assert [json.loads(line) for line in port.written.splitlines()] == [
+        {"type": "ACK", "id": "before-event"},
+        {"type": "EVENT", "event": "switch_pressed", "switch": "A"},
+    ]
+    assert not p._tx_active and p._pending_offset == 0 and p._pending_bytes == 0
+
+
+@test("TX disconnect clears a committed partial offset before the next session")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol(FakePort(max_per_write=5))
+    with patch.object(protocol, "memoryview", side_effect=MemoryError("suffix"), create=True):
+        assert p._send({"type": "ACK", "id": "old-session"}) is False
+    assert p._pending_offset == 5
+    port.connected = False
+    p.poll()
+    assert not p._pending_out and p._pending_offset == 0 and p._pending_bytes == 0
+    assert not p._tx_active
+    port.written.clear()
+    port.connected = True
+    assert p._send({"type": "ACK", "id": "new-session"}) is True
+    assert json.loads(port.written) == {"type": "ACK", "id": "new-session"}
+
+
+@test("TX view OOM retains the background owner and keeps a deferred ACK behind its exact frame")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol(FakePort(max_per_write=5))
+    frame = b'{"type":"PATCH","id":"streamed","patch":{"name":"CRUNCH"}}\n'
+
+    def response():
+        p._write_bytes(frame)
+        yield
+
+    with patch.object(protocol, "memoryview", side_effect=MemoryError("suffix"), create=True):
+        p._start_background(response(), "streamed", "GET_PATCH")
+        p.handle({"type": "PING", "id": "after-stream"})
+        for _ in range(3):
+            p.pump_background()
+            assert p._bg_gen is not None and p._bg_mid == "streamed"
+            assert p._pending_offset == 5 and p._pending_bytes == len(frame) - 5
+            assert bytes(port.written) == frame[:5]
+            assert len(p._deferred_out) == 1 and not p._bg_line_seal
+    drain_background(p)
+    assert [json.loads(line) for line in port.written.splitlines()] == [
+        json.loads(frame), {"type": "ACK", "id": "after-stream", "fw": protocol.VERSION},
+    ]
+    assert not p._pending_out and not p._deferred_out
+    assert p._pending_offset == 0 and p._pending_bytes == 0 and p._deferred_bytes == 0
+
+
 @test("protocol: disconnect drops unfinished output and queued background work")
 def _():
     port = FakePort(max_per_write=0)
@@ -4336,6 +4560,111 @@ def _():
 
 # ---------------- runner ----------------
 
+@test("LIST_PROFILES streams a large exact catalog through small writes and keeps PING after its newline")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol(FakePort(max_per_write=3))
+    profiles = [
+        {"id": "profile-%02d" % index, "name": "Caf\u00e9 stage profile %02d" % index,
+         "kind": "kemper_player", "color": "#ff7f00"}
+        for index in range(48)
+    ]
+    expected = {"type": "PROFILE_LIST", "id": "bootstrap-3", "profiles": profiles,
+                "active": "profile-07"}
+    assert len(json.dumps(expected)) > 4096
+    real_dumps, real_write = json.dumps, port.write
+    sizes = []
+    containers = []
+
+    def fragmented_dumps(value, *args, **kwargs):
+        if (isinstance(value, (dict, list)) and
+                not (isinstance(value, dict) and value.get("type") == "ACK")):
+            containers.append(type(value).__name__)
+            raise MemoryError("contiguous PROFILE_LIST encode attempted")
+        return real_dumps(value, *args, **kwargs)
+
+    def bounded_write(data):
+        sizes.append(len(data))
+        assert len(data) <= 128, "full catalog reached one CDC write"
+        return real_write(data)
+
+    with patch.object(protocol.config, "list_profiles", return_value=profiles) as listing, \
+            patch.object(protocol.config, "active_profile_id", return_value="profile-07"), \
+            patch.object(protocol.json, "dumps", fragmented_dumps), \
+            patch.object(port, "write", bounded_write):
+        p.handle({"type": "LIST_PROFILES", "id": "bootstrap-3"})
+        assert p._bg_gen is not None
+        p.handle({"type": "PING", "id": "after-profiles"})
+        assert p._deferred_out
+        drain_background(p)
+    listing.assert_called_once_with()
+    assert containers == [], containers
+    assert sizes and max(sizes) <= 128
+    assert [json.loads(line) for line in port.written.splitlines()] == [
+        expected, {"type": "ACK", "id": "after-profiles", "fw": protocol.VERSION},
+    ]
+
+
+@test("LIST_PROFILES keeps empty-catalog and active-profile response fields")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    with patch.object(protocol.config, "list_profiles", return_value=[]), \
+            patch.object(protocol.config, "active_profile_id", return_value=""):
+        p.handle({"type": "LIST_PROFILES", "id": "profileless"})
+        drain_background(p)
+    assert json.loads(port.written) == {
+        "type": "PROFILE_LIST", "id": "profileless", "profiles": [], "active": "",
+    }
+
+
+@test("LIST_PROFILES read failure is correlated and never mistaken for an empty catalog")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    with patch.object(protocol.config, "list_profiles", side_effect=OSError("catalog unreadable")):
+        p.handle({"type": "LIST_PROFILES", "id": "catalog-error"})
+    response = json.loads(port.written)
+    assert response["type"] == "ERROR" and response["id"] == "catalog-error"
+    assert response["of"] == "LIST_PROFILES" and "catalog unreadable" in response["detail"]
+    assert p._bg_gen is None
+
+
+@test("LIST_PROFILES stream failure seals its partial line before PING and its correlated error")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    real_dumps = json.dumps
+
+    def fail_name(value, *args, **kwargs):
+        if value == "bad profile name":
+            raise MemoryError("profile scalar allocation")
+        return real_dumps(value, *args, **kwargs)
+
+    with patch.object(protocol.config, "list_profiles", return_value=[{"name": "bad profile name"}]), \
+            patch.object(protocol.config, "active_profile_id", return_value=""), \
+            patch.object(protocol.json, "dumps", fail_name):
+        p.handle({"type": "LIST_PROFILES", "id": "broken-profiles"})
+        p.handle({"type": "PING", "id": "still-alive"})
+        drain_background(p)
+    lines = port.written.splitlines()
+    assert len(lines) == 3, lines
+    try:
+        json.loads(lines[0])
+        assert False, "damaged PROFILE_LIST was accepted"
+    except ValueError:
+        pass
+    assert [json.loads(line) for line in lines[1:]] == [
+        {"type": "ACK", "id": "still-alive", "fw": protocol.VERSION},
+        {"type": "ERROR", "id": "broken-profiles", "error": "exception",
+         "detail": "profile scalar allocation", "of": "LIST_PROFILES"},
+    ]
+
+
 @test("LIST_FONTS streams sorted supported font names without a contiguous container encode")
 def _():
     from unittest.mock import patch
@@ -4422,6 +4751,268 @@ def _():
         "type": "ERROR", "id": "broken-fonts", "error": "exception",
         "detail": "font scalar allocation", "of": "LIST_FONTS",
     }, lines
+
+class RXFrameBudget:
+    """Model cached TFT + open Editor patch + incoming config on a small heap."""
+
+    class Allocation:
+        def __init__(self, size):
+            self.data = bytearray(size)
+
+    def __init__(self, app, capacity=8192):
+        self.capacity = capacity
+        self.allocations = []
+        self._frame = self.allocate(3072)
+        self.editor_patch = self.allocate(2048)
+        self.parsed = None
+        self._suspended = False
+        self.suspends = 0
+        self.restores = 0
+        self.load_positions = []
+        self.real_load = json.load
+        app.display = self
+        app._mark_display_dirty = self.mark_dirty
+
+    def allocate(self, size):
+        import weakref
+        used = sum(len(ref().data) for ref in self.allocations if ref() is not None)
+        if used + size > self.capacity:
+            raise MemoryError("cached frame and replacement config exceed heap")
+        allocation = self.Allocation(size)
+        self.allocations.append(weakref.ref(allocation))
+        return allocation
+
+    def load(self, source):
+        self.load_positions.append(source.tell())
+        assert source.tell() == 0, "retry did not rewind the failed JSON parser"
+        try:
+            self.parsed = self.allocate(4096)
+        except MemoryError:
+            source.read(127)  # A real parser can fail after consuming a prefix.
+            raise
+        return self.real_load(source)
+
+    def suspend(self):
+        self.suspends += 1
+        self._suspended = True
+        self._frame = None
+
+    def resume(self):
+        previous = self._suspended
+        self._suspended = False
+        return previous
+
+    def mark_dirty(self):
+        assert not self._suspended
+        self.restores += 1
+
+
+def screen_save_request():
+    return {
+        "id": "screen-save", "type": "PUT_GLOBAL",
+        "device": {
+            "device_name": "Captain Caff\u00e8", "kemper": {"enabled": True},
+            "tft": {"layout": [
+                {"field": field, "color": color, "font": "system", "size": 5,
+                 "x": 0, "y": index * 60, "prefix": prefix, "suffix": "",
+                 "align": "left", "valign": "top"}
+                for index, (field, color, prefix) in enumerate([
+                    ("patch_name", "#ffffff", ""), ("bank", "#9aa1ad", "BANK "),
+                    ("kemper_rig_in_bank", "#6fd99a", "RIG "),
+                    ("hold_effect", "#ffffff", ""), ("expression_mode", "#ff7f00", ""),
+                ])]},
+            "bank_colors": ["#6fd99b"] * 25,
+            "preset_navigation": {"B1": list(range(1, 26))},
+        },
+    }
+
+
+@test("spooled Screen Save borrows real frame allocations through parse/save/apply only after OOM")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    frame = RXFrameBudget(p.app)
+    request = screen_save_request()
+    saves = []
+    applied = []
+
+    def save(device):
+        assert not frame._suspended and frame._frame is None
+        scratch = frame.allocate(1024)  # Persistence also needs temporary RAM.
+        assert len(scratch.data) == 1024
+        saves.append(device)
+
+    def apply(device):
+        assert not frame._suspended and frame._frame is None and frame.restores == 1
+        p.app.device = device
+        applied.append(device)
+
+    wire = json.dumps(request).encode() + b"\n"
+    port.push_rx(wire + b'{"type":"PING","id":"after-save"}\n')
+    with patch.object(protocol.json, "load", frame.load), \
+            patch.object(protocol.config, "save_device", save), \
+            patch.object(p.app, "apply_global", apply):
+        for _ in range(20):
+            p.handle(p.poll())
+            if not port.in_waiting and p._rx_pending is None:
+                break
+        else:
+            assert False, "Screen Save exceeded the bounded RX tick budget"
+    assert frame.load_positions == [0, 0]
+    assert frame.suspends == frame.restores == 1 and not frame._suspended
+    assert saves == applied == [request["device"]]
+    assert p.app.device == request["device"]
+    assert not Path(p._rx_path).exists()
+    assert [json.loads(line) for line in port.written.splitlines()] == [
+        {"type": "ACK", "id": "screen-save"},
+        {"type": "EVENT", "event": "global_changed"},
+        {"type": "ACK", "id": "after-save", "fw": protocol.VERSION},
+    ]
+
+
+@test("spooled config with sufficient heap keeps its cached TFT intact")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    frame = RXFrameBudget(p.app, capacity=16384)
+    cached = frame._frame
+    request = screen_save_request()
+    port.push_rx(json.dumps(request).encode() + b"\n")
+    with patch.object(protocol.json, "load", frame.load), \
+            patch.object(protocol.config, "save_device") as save:
+        messages = collect_rx(p, port)
+        assert messages == [request]
+        p.handle(messages[0])
+    save.assert_called_once_with(request["device"])
+    assert frame.load_positions == [0]
+    assert not frame.suspends and not frame.restores and frame._frame is cached
+
+
+@test("spooled config retry failure restores TFT, preserves config and allows next PING")
+def _():
+    from unittest.mock import patch
+
+    # Insufficient total RAM, malformed JSON and file IO each leave exactly
+    # one correlated error, with no persistence and no abandoned suspension.
+    for failure, error in [(MemoryError("still full"), "rx_oom"),
+                           (ValueError("broken JSON"), "bad_json"),
+                           (OSError("read failed"), "rx_io")]:
+        p, port = build_protocol()
+        frame = RXFrameBudget(p.app)
+        baseline = p.app.device
+        request = screen_save_request()
+        port.push_rx(json.dumps(request).encode() + b"\n"
+                     + b'{"type":"PING","id":"next"}\n')
+        attempts = []
+
+        def failed_parse(source):
+            attempts.append(source.tell())
+            if len(attempts) == 1:
+                source.read(73)
+                raise MemoryError("first parser allocation")
+            assert frame._suspended
+            raise failure
+
+        with patch.object(protocol.json, "load", failed_parse), \
+                patch.object(protocol.config, "save_device") as save:
+            messages = collect_rx(p, port, limit=20)
+            assert messages == [{"type": "PING", "id": "next"}]
+            p.handle(messages[0])
+        save.assert_not_called()
+        assert attempts == [0, 0]
+        assert frame.suspends == frame.restores == 1 and not frame._suspended
+        assert p.app.device is baseline
+        assert not Path(p._rx_path).exists()
+        assert [json.loads(line) for line in port.written.splitlines()] == [
+            {"type": "ERROR", "error": error, "id": "screen-save"},
+            {"type": "ACK", "id": "next", "fw": protocol.VERSION},
+        ]
+
+
+@test("recovered Screen Save restores TFT on handler error and validation rejection")
+def _():
+    from unittest.mock import patch
+
+    for failure in ("save", "apply", "missing_device", "no_such_profile"):
+        p, port = build_protocol()
+        frame = RXFrameBudget(p.app)
+        request = screen_save_request()
+        if failure == "missing_device":
+            request["unused"] = request.pop("device")
+        elif failure == "no_such_profile":
+            request["profile"] = "missing"
+        port.push_rx(json.dumps(request).encode() + b"\n")
+        with patch.object(protocol.json, "load", frame.load), \
+                patch.object(protocol.config, "save_device") as save, \
+                patch.object(p.app, "apply_global") as apply, \
+                patch.object(protocol.config, "profile_exists", return_value=False):
+            if failure == "save":
+                save.side_effect = OSError("disk full")
+            elif failure == "apply":
+                apply.side_effect = MemoryError("apply")
+            messages = collect_rx(p, port)
+            assert not frame._suspended and frame._frame is None and frame.restores == 1
+            p.handle(messages[0])
+        assert frame.suspends == frame.restores == 1 and not frame._suspended
+        replies = [json.loads(line) for line in port.written.splitlines()]
+        assert len(replies) == 1 and replies[0]["type"] == "ERROR", replies
+        assert replies[0]["id"] == "screen-save"
+
+
+@test("RX recovery cannot release a display suspension owned by an OTA upload")
+def _():
+    from unittest.mock import patch
+
+    p, port = build_protocol()
+    frame = RXFrameBudget(p.app)
+    frame.suspend()
+    port.push_rx(json.dumps(screen_save_request()).encode() + b"\n")
+    with patch.object(protocol.json, "load", side_effect=MemoryError("OTA uses free heap")) as load:
+        assert collect_rx(p, port) == []
+    assert load.call_count == 1
+    assert frame._suspended and frame.suspends == 1 and frame.restores == 0
+    assert json.loads(port.written) == {
+        "type": "ERROR", "error": "rx_oom", "id": "screen-save",
+    }
+
+
+@test("RX parse suspension is already released before disconnect or an undispatched next poll")
+def _():
+    from unittest.mock import patch
+
+    for disconnect in (False, True):
+        p, port = build_protocol()
+        frame = RXFrameBudget(p.app)
+        baseline = p.app.device
+        port.push_rx(json.dumps(screen_save_request()).encode() + b"\n")
+        with patch.object(protocol.json, "load", frame.load):
+            messages = collect_rx(p, port)
+        assert len(messages) == 1 and not frame._suspended and frame.restores == 1
+        if disconnect:
+            port.connected = False
+            p.pump_background()  # Session cleanup can run before handle().
+        else:
+            assert p.poll() is None  # A caller abandoned the returned command.
+        assert frame.suspends == frame.restores == 1 and not frame._suspended
+        assert not Path(p._rx_path).exists()
+        assert p.app.device is baseline
+
+
+@test("low-heap non-config and malformed spooled commands do not leave TFT suspended")
+def _():
+    from unittest.mock import patch
+
+    for payload in ({"type": "PING", "padding": "x" * 1600}, ["x" * 1600]):
+        p, port = build_protocol()
+        frame = RXFrameBudget(p.app)
+        port.push_rx(json.dumps(payload).encode() + b"\n")
+        with patch.object(protocol.json, "load", frame.load):
+            assert collect_rx(p, port) == [payload]
+        assert frame.load_positions == [0, 0]
+        assert frame.suspends == frame.restores == 1 and not frame._suspended
+
 
 def main():
     total = PASS_COUNT + FAIL_COUNT

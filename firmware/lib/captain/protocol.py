@@ -14,8 +14,7 @@ class Protocol:
     _MAX_PENDING_BYTES = 65536
     # usb_cdc is configured non-blocking below. Positive partial progress can
     # therefore be consumed inline without resetting a 200 ms timeout; the
-    # first zero queues the exact unsent tail for a later main-loop tick.
-    _MAX_DIRECT_WRITE_STALLS = 1
+    # first zero retains the head's committed offset for a later tick.
     # USB full-speed CDC has a 64-byte bulk-IN max packet. An exact 64-byte
     # write does not terminate the transfer with a short packet, so TinyUSB's
     # flush path waits before the host receives it. Raw-REPL measurement for
@@ -79,6 +78,8 @@ class Protocol:
         # See _send()'s _bg_gen check and _flush_pending.
         self._pending_out = []
         self._pending_bytes = 0
+        self._pending_offset = 0
+        self._tx_active = False
         # Complete protocol lines deferred while a streamed response owns the
         # wire.  Kept separate from _pending_out (which is the continuation of
         # that open line), otherwise an ACK could be inserted mid-JSON.
@@ -347,7 +348,27 @@ class Protocol:
                 consumed = True
                 gc.collect()
                 with open(self._rx_path, "r") as source:
-                    msg = json.load(source)
+                    try:
+                        msg = json.load(source)
+                    except MemoryError:
+                        # The old device graph and cached TFT may leave too
+                        # little RAM for a full replacement config. Retry only
+                        # parsing, borrowing the disposable frame's memory.
+                        # Never claim a suspension owned by an OTA upload.
+                        display = getattr(self.app, "display", None)
+                        if display is None or getattr(display, "_suspended", False):
+                            raise
+                        try:
+                            display.suspend()
+                            source.seek(0)
+                            gc.collect()
+                            msg = json.load(source)
+                        finally:
+                            # resume only schedules the frame: the app calls
+                            # handle() before rendering, so save/apply retain
+                            # this headroom without extra protocol state.
+                            if display.resume():
+                                self.app._mark_display_dirty()
             else:
                 rx_view = memoryview(self._rx_buf)[:nl]
                 try:
@@ -495,6 +516,7 @@ class Protocol:
             self._bg_queue = []
             self._pending_out = []
             self._pending_bytes = 0
+            self._pending_offset = 0
             self._deferred_out = []
             self._deferred_bytes = 0
             self._bg_line_seal = 0
@@ -514,11 +536,11 @@ class Protocol:
                 pass
         self._was_connected = connected
 
-    def _queue_output(self, data):
+    def _queue_output(self, data, freeze=True):
         if (len(self._pending_out) >= self._MAX_PENDING_CHUNKS or
                 self._pending_bytes + len(data) > self._MAX_PENDING_BYTES):
             return False
-        chunk = bytes(data)
+        chunk = bytes(data) if freeze and type(data) is not type(b"") else data
         self._pending_out.append(chunk)
         self._pending_bytes += len(chunk)
         return True
@@ -590,7 +612,6 @@ class Protocol:
             else:                          self._send({"type": "ERROR", "id": mid, "error": "unknown_type", "of": t})
         except Exception as e:
             self._send({"type": "ERROR", "id": mid, "error": "exception", "detail": str(e), "of": t})
-
     # ---------- handlers ----------
 
     def _device_info(self, mid):
@@ -961,19 +982,21 @@ class Protocol:
         background line was open (see _send()'s _bg_gen check), now that
         the line has closed (or been sealed off - see _start_background)
         and the wire is safe to write to again."""
+        if self._tx_active:
+            return False
         if not self._pending_out:
             return
-        while self._pending_out:
-            data = self._pending_out[0]
-            left = self._write_direct(data)
-            sent = len(data) - left
-            self._pending_bytes -= sent
-            if left:
-                self._pending_out[0] = data[sent:]
-                return False
-            self._pending_out.pop(0)
-        self._pending_bytes = 0
-        return True
+        self._tx_active = True
+        try:
+            while self._pending_out:
+                if self._write_direct(self._pending_out[0]):
+                    return False
+                self._pending_out.pop(0)
+                self._pending_offset = 0
+            self._pending_bytes = 0
+            return True
+        finally:
+            self._tx_active = False
 
     def _list_patches(self, mid, msg):
         pid, use_active = self._resolve_profile(mid, msg)
@@ -1162,36 +1185,56 @@ class Protocol:
         of bytes still unsent if the host stalled (0 == fully delivered)."""
         if self.port is None or not self.port.connected:
             return len(data)
-        if self._pending_out:
-            if not self._queue_output(data):
-                # Continuing would make the generator believe this chunk
-                # reached the wire; a later newline would then bless a
-                # silently truncated JSON record as complete.
-                raise RuntimeError("tx_queue_full")
+        pending = bool(self._pending_out)
+        # Reserve queue ownership before writing any prefix. A mutable chunk
+        # can be borrowed until this call returns, avoiding a mandatory copy
+        # on every fully accepted 63/64-byte streaming write.
+        if not self._queue_output(data, pending):
+            raise RuntimeError("tx_queue_full")
+        if pending:
             return len(data)
-        left = self._write_direct(data)
-        if left:
-            if not self._queue_output(
-                    bytes(memoryview(data)[len(data) - left:])):
-                raise RuntimeError("tx_queue_full")
+        try:
+            self._flush_pending()
+            left = (len(data) - self._pending_offset
+                    if self._pending_out and self._pending_out[0] is data else 0)
+        finally:
+            if (type(data) is not type(b"") and self._pending_out
+                    and self._pending_out[0] is data):
+                try:
+                    self._pending_out[0] = bytes(data)
+                except Exception:
+                    # The caller may reuse its buffer after unwinding. Never
+                    # retain that alias; the background owner seals the failed
+                    # line and reports its error before deferred ACKs/events.
+                    self._pending_out.pop(0)
+                    self._pending_bytes -= len(data) - self._pending_offset
+                    self._pending_offset = 0
+                    raise
         return left
 
     def _write_direct(self, data):
-        """Low-level non-blocking write; unlike _write_bytes it never queues."""
-        view = memoryview(data)
-        stalls = 0
-        while view and stalls < self._MAX_DIRECT_WRITE_STALLS:
-            n = self.port.write(view)
+        """Drain the owned queue head, committing progress before allocating."""
+        size = len(data)
+        while self._pending_offset < size:
+            try:
+                view = (memoryview(data)[self._pending_offset:]
+                        if self._pending_offset else data)
+                n = self.port.write(view)
+            except MemoryError:
+                gc.collect()
+                return size - self._pending_offset
             if not n:
-                stalls += 1
                 try:
                     self.app._poll_switches_mid_op()
                 except Exception:
                     pass
-                continue
-            view = view[n:]
-            stalls = 0
-        return len(view)
+                return size - self._pending_offset
+            # These small-int assignments cannot allocate. Never create a
+            # suffix view/copy before recording bytes already accepted by USB.
+            self._pending_offset += n
+            self._pending_bytes -= n
+            view = None
+        return 0
 
     def _write_json_scalar(self, w, value, bounded):
         if bounded and isinstance(value, str):
@@ -1620,12 +1663,14 @@ class Protocol:
     # ---------- profile management ----------
 
     def _list_profiles(self, mid):
-        self._send({
+        response = {
             "type": "PROFILE_LIST",
             "id": mid,
             "profiles": config.list_profiles(),
             "active": config.active_profile_id(),
-        })
+        }
+        self._start_background(
+            self._json_line_gen(response), mid, "LIST_PROFILES")
 
     def _create_profile(self, mid, msg):
         pid  = msg.get("profile_id") or msg.get("id")
