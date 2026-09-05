@@ -41,6 +41,7 @@ MAX_LINE = 256 * 1024
 STARTUP_DISCARD_MAX_FRAMES = 4
 STARTUP_DISCARD_MAX_BYTES = 16 * 1024
 STARTUP_PREFIX_BYTES = 256
+MALFORMED_FRAMES_RETAINED = 4
 
 
 class Client:
@@ -117,6 +118,24 @@ class Client:
                 try:
                     reply = json.loads(line)
                 except (ValueError, UnicodeDecodeError) as exc:
+                    # Preserve wire evidence before any strict failure. These
+                    # artifacts already contain private configuration; never
+                    # commit them. MAX_LINE and the retained-frame cap bound
+                    # this diagnostic even across repeated new connections.
+                    self.observations["malformed_frame_count"] = self.observations.get("malformed_frame_count", 0) + 1
+                    frames = self.observations.setdefault("malformed_frames", [])
+                    if len(frames) < MALFORMED_FRAMES_RETAINED:
+                        frame = {"phase": "startup_sync" if startup is not None else "session",
+                                 "request_kind": kind, "request_id": ident,
+                                 "frame_bytes": len(line) + 1,
+                                 "exception_type": type(exc).__name__, "error": str(exc)}
+                        if isinstance(exc, json.JSONDecodeError):
+                            frame["json_error_position"] = exc.pos
+                        try:
+                            frame["raw_utf8"] = (line + b"\n").decode("utf-8", "strict")
+                        except UnicodeDecodeError:
+                            frame["raw_hex"] = (line + b"\n").hex()
+                        frames.append(frame)
                     # A broken reply to this PING is not a harmless fragment
                     # from before our connection and must fail acquisition.
                     if startup is None or ident.encode() in line:

@@ -179,6 +179,40 @@ class BenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "first request"):
             client.synchronize(.5)
 
+    def test_post_sync_malformed_json_retains_full_wire_frame_then_fails(self):
+        calls = []
+        malformed = b'{"type":"CONTEXT","context":{"bad":' + b'x' * 897 + b'}}\r\n'
+        def build(request):
+            calls.append(request)
+            return [line({"type": "ACK", "id": request["id"]})] if len(calls) == 1 else [malformed]
+        observations = {}
+        client = benchmark.Client(FakeSocket(build), observations=observations)
+        client.synchronize(.5)
+        with self.assertRaises(json.JSONDecodeError):
+            client.request("GET_CONTEXT", .5)
+        self.assertEqual(observations["malformed_frame_count"], 1)
+        frame = observations["malformed_frames"][0]
+        self.assertEqual(frame["phase"], "session")
+        self.assertEqual(frame["request_kind"], "GET_CONTEXT")
+        self.assertEqual(frame["request_id"], calls[-1]["id"])
+        self.assertEqual(frame["frame_bytes"], len(malformed))
+        self.assertEqual(frame["raw_utf8"].encode("utf-8"), malformed)
+        self.assertIn("json_error_position", frame)
+        self.assertTrue(observations["startup_sync"][0]["completed"])
+
+    def test_invalid_utf8_wire_evidence_uses_hex_and_remains_bounded(self):
+        malformed = b'{"type":"CONTEXT","bad":"\xff"}\n'
+        observations = {}
+        for _ in range(benchmark.MALFORMED_FRAMES_RETAINED + 2):
+            client = benchmark.Client(FakeSocket(lambda req: [malformed]), observations=observations)
+            with self.assertRaises(UnicodeDecodeError):
+                client.request("GET_CONTEXT", .5)
+        self.assertEqual(observations["malformed_frame_count"], benchmark.MALFORMED_FRAMES_RETAINED + 2)
+        self.assertEqual(len(observations["malformed_frames"]), benchmark.MALFORMED_FRAMES_RETAINED)
+        for frame in observations["malformed_frames"]:
+            self.assertEqual(bytes.fromhex(frame["raw_hex"]), malformed)
+            self.assertNotIn("raw_utf8", frame)
+
     def test_malformed_correlated_startup_ack_is_not_discarded(self):
         sock = FakeSocket(lambda req: [b'{"id":"' + req["id"].encode() + b'","type":ACK}\n'])
         client = benchmark.Client(sock)

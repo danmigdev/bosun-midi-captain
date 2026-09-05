@@ -10,14 +10,16 @@
 static uint8_t tx[2048], rx[2048], endpoint[64], wire[8192];
 static size_t tx_length, rx_length, endpoint_length, wire_length;
 static uint32_t rx_clears, tx_clears, write_limit;
-static bool mounted, dtr;
+static bool mounted, dtr, suspended;
 
 bool tud_mounted(void) { return mounted; }
-bool tud_cdc_n_connected(uint8_t itf) { assert(itf == 1); return mounted && dtr; }
+bool tud_suspended(void) { return suspended; }
+uint8_t tud_cdc_n_get_line_state(uint8_t itf) { assert(itf == 1); return dtr ? 1 : 0; }
+bool tud_cdc_n_connected(uint8_t itf) { assert(itf == 1); return mounted && !suspended && dtr; }
 uint32_t tud_cdc_n_write_available(uint8_t itf) { assert(itf == 1); return (uint32_t)(sizeof tx - tx_length); }
 uint32_t tud_cdc_n_write_flush(uint8_t itf) {
     assert(itf == 1);
-    if (!mounted || endpoint_length || !tx_length) return 0;
+    if (!mounted || suspended || endpoint_length || !tx_length) return 0;
     endpoint_length = tx_length < sizeof endpoint ? tx_length : sizeof endpoint;
     memcpy(endpoint, tx, endpoint_length);
     memmove(tx, tx + endpoint_length, tx_length - endpoint_length);
@@ -41,7 +43,7 @@ uint32_t tud_cdc_n_read(uint8_t itf, void *data, uint32_t capacity) {
     rx_length -= count; return (uint32_t)count;
 }
 static void complete_packet(void) {
-    assert(endpoint_length && wire_length + endpoint_length < sizeof wire);
+    assert(!suspended && endpoint_length && wire_length + endpoint_length < sizeof wire);
     memcpy(wire + wire_length, endpoint, endpoint_length); wire_length += endpoint_length;
     wire[wire_length] = 0; endpoint_length = 0;
     /* TinyUSB's IN completion chains the FIFO regardless of DTR. */
@@ -57,7 +59,7 @@ static void line_state(bool next_dtr) {
 static void fixture(void) {
     tx_length = rx_length = endpoint_length = wire_length = 0;
     rx_clears = tx_clears = 0; write_limit = UINT32_MAX;
-    mounted = true; dtr = false; tud_mount_cb();
+    mounted = true; dtr = suspended = false; tud_mount_cb();
     assert(!bosun_board_usb_connected());
 }
 static void normal_session_and_partial_writes(void) {
@@ -125,10 +127,58 @@ static void remount_and_disconnected_io(void) {
     assert(!bosun_board_data_read(NULL, 1) && !bosun_board_data_write(NULL, 1));
     tud_umount_cb(); assert(!bosun_board_usb_connected());
 }
+static void suspend_preserves_session_and_queued_bytes(void) {
+    fixture(); line_state(true); bosun_cdc_task(); drain(); wire_length = 0;
+    uint8_t payload[2112], input[64];
+    for (size_t i = 0; i < sizeof payload; ++i) payload[i] = (uint8_t)(i * 17u + i / 64u);
+    assert(bosun_board_data_write(payload, 2048) == 2048);
+    assert(bosun_board_data_write(payload + 2048, 64) == 64);
+    assert(endpoint_length == 64 && tx_length == sizeof tx);
+    const uint8_t request[] = "{\"type\":\"PING\",\"id\":\"kept\"}\n";
+    memcpy(rx, request, sizeof request - 1); rx_length = sizeof request - 1;
+    uint32_t generation = bosun_board_usb_session_generation();
+    uint32_t reads_cleared = rx_clears, writes_cleared = tx_clears;
+    suspended = true;
+    assert(!tud_cdc_n_connected(1) && bosun_board_usb_connected());
+    for (unsigned i = 0; i < 20; ++i) {
+        bosun_cdc_task(); tud_cdc_rx_cb(1);
+        assert(!bosun_board_data_read(input, sizeof input));
+        assert(!bosun_board_data_write(payload, 1));
+    }
+    assert(bosun_board_usb_session_generation() == generation);
+    assert(rx_clears == reads_cleared && tx_clears == writes_cleared);
+    assert(rx_length == sizeof request - 1 && tx_length == sizeof tx && endpoint_length == 64);
+    suspended = false; bosun_cdc_task(); drain();
+    assert(bosun_board_usb_session_generation() == generation);
+    assert(wire_length == sizeof payload && !memcmp(wire, payload, sizeof payload));
+    assert(bosun_board_data_read(input, sizeof input) == sizeof request - 1);
+    assert(!memcmp(input, request, sizeof request - 1));
+
+    /* A new DTR session can begin while suspended, but its boundary is not
+     * consumed until resume. Actual DTR edges still discard stale bytes. */
+    fixture(); suspended = true; line_state(true);
+    generation = bosun_board_usb_session_generation();
+    bosun_cdc_task();
+    assert(bosun_board_usb_connected() && !tx_length && !endpoint_length);
+    assert(!bosun_board_data_write(payload, 1));
+    suspended = false; bosun_cdc_task(); drain();
+    assert(wire_length == 1 && wire[0] == '\n');
+    assert(bosun_board_usb_session_generation() == generation);
+    memcpy(rx, request, sizeof request - 1); rx_length = sizeof request - 1;
+    assert(bosun_board_data_write(payload, sizeof payload) == sizeof tx);
+    suspended = true; line_state(false); bosun_cdc_task();
+    assert(!bosun_board_usb_connected() && !tx_length && !rx_length);
+    assert(bosun_board_usb_session_generation() == generation + 1);
+    line_state(true); bosun_cdc_task();
+    assert(bosun_board_usb_connected() && bosun_board_usb_session_generation() == generation + 2);
+    mounted = false; bosun_cdc_task();
+    assert(!bosun_board_usb_connected() && bosun_board_usb_session_generation() == generation + 3);
+}
 int main(void) {
     normal_session_and_partial_writes();
     stale_fifos_and_inflight_packet();
     remount_and_disconnected_io();
-    puts("CDC sessions: DTR generations, stale RX/TX, full FIFO, in-flight packet delimiter, partial writes and remount passed");
+    suspend_preserves_session_and_queued_bytes();
+    puts("CDC sessions: DTR generations, stale RX/TX, full FIFO, in-flight packet delimiter, partial writes, remount and lossless suspend passed");
     return 0;
 }

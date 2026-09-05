@@ -23,7 +23,9 @@ typedef struct {
 bool bosun_board_init(const bosun_board_config_t *config);
 void bosun_board_task(void);
 uint32_t bosun_board_millis(void);
-bool bosun_board_usb_connected(void); /* CDC data interface 1, DTR asserted. */
+/* CDC data interface 1, mounted with DTR asserted. Suspend preserves this
+ * logical session and queued bytes while data read/write return zero. */
+bool bosun_board_usb_connected(void);
 /* Advances on each data-session edge, including gaps missed by polling. */
 uint32_t bosun_board_usb_session_generation(void);
 /* MIDI USB availability follows enumeration, independently of CDC DTR. */

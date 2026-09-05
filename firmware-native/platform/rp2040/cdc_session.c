@@ -6,6 +6,12 @@ enum { DATA_CDC = 1 };
 static uint32_t generation;
 static bool connected, boundary_pending;
 
+static bool session_open(void) {
+    /* tud_cdc_n_connected() also includes !tud_suspended(). Suspension
+     * pauses transport progress; it does not end ownership of these FIFOs. */
+    return tud_mounted() && (tud_cdc_n_get_line_state(DATA_CDC) & 1u);
+}
+
 static void reset_session(bool next_connected) {
     connected = next_connected;
     ++generation;
@@ -36,7 +42,7 @@ void tud_cdc_rx_cb(uint8_t itf) {
 }
 
 bool bosun_board_usb_connected(void) {
-    return connected && tud_mounted() && tud_cdc_n_connected(DATA_CDC);
+    return connected && session_open();
 }
 
 uint32_t bosun_board_usb_session_generation(void) { return generation; }
@@ -54,16 +60,16 @@ static bool write_boundary(void) {
 }
 
 void bosun_cdc_task(void) {
-    bool ready = tud_mounted() && tud_cdc_n_connected(DATA_CDC);
-    if (ready != connected) reset_session(ready);
-    if (ready) {
+    bool open = session_open();
+    if (open != connected) reset_session(open);
+    if (open && !tud_suspended()) {
         (void)write_boundary();
         (void)tud_cdc_n_write_flush(DATA_CDC);
     }
 }
 
 size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
-    if (!data || !capacity || !bosun_board_usb_connected()) return 0;
+    if (!data || !capacity || !bosun_board_usb_connected() || tud_suspended()) return 0;
 #if SIZE_MAX > UINT32_MAX
     if (capacity > UINT32_MAX) capacity = UINT32_MAX;
 #endif
@@ -71,7 +77,7 @@ size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
 }
 
 size_t bosun_board_data_write(const uint8_t *data, size_t length) {
-    if (!data || !length || !bosun_board_usb_connected() || !write_boundary()) return 0;
+    if (!data || !length || !bosun_board_usb_connected() || tud_suspended() || !write_boundary()) return 0;
     uint32_t available = tud_cdc_n_write_available(DATA_CDC);
     if (length > available) length = available;
     size_t accepted = tud_cdc_n_write(DATA_CDC, data, (uint32_t)length);

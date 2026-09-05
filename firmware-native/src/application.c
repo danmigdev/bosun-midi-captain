@@ -227,12 +227,13 @@ static void console_status(bosun_application_t *app, uint32_t now) {
     if (!app->console_length && (uint32_t)(now - app->console_ms) >= 3000) {
         app->console_ms = now;
         int count = snprintf(app->console, sizeof app->console,
-            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u\r\n",
+            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u usb_session=%lu\r\n",
             bosun_store_ready() ? "ready" : "unavailable", (unsigned)app->boot_result,
             (unsigned long)app->ticks, (unsigned long)app->runtime.midi_rx_count,
             (unsigned long)app->runtime.midi_tx_count, (unsigned long)app->midi_rejected,
             (unsigned long)app->midi_abandoned, app->display.status,
-            (unsigned)app->midi[0].count, (unsigned)app->midi[1].count);
+            (unsigned)app->midi[0].count, (unsigned)app->midi[1].count,
+            (unsigned long)app->usb_session_generation);
         if (count > 0) app->console_length = bounded((size_t)count, sizeof app->console - 1);
         app->console_offset = 0;
     }
