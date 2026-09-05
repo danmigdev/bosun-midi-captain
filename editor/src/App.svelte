@@ -299,6 +299,8 @@
   let offLifecycle: (() => void) | null = null;
   let offBackButton: (() => void) | null = null;
   let appEventAbort: AbortController | null = null;
+  let appDestroyed = false;
+  let networkRecoveryPending = false;
 
   onMount(async () => {
     appEventAbort = new AbortController();
@@ -318,15 +320,7 @@
     } catch {}
 
     unsubMsg  = await onFirmwareMessage(handleMessage);
-    unsubDisc = await onDisconnected(async () => {
-      connected = false; learning = false; deviceInfo = null;
-      manifest = null; currentPatch = null;
-      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
-      // Clean up Rust state too - the reader thread exits on disconnect
-      // but the SerialHandle stays in state.serial. Explicit disconnect
-      // releases it so the next autoConnect goes through cleanly.
-      try { await disconnect(); } catch {}
-    });
+    unsubDisc = await onDisconnected(() => { void handleLinkLoss(); });
     // Android only: the backend I/O thread self-heals a stall by closing
     // and reopening the port, which reboots the pedal via DTR and
     // re-enumerates its USB device - including the Kemper<->Captain
@@ -467,19 +461,11 @@
     // Rust-level disconnect (firmware rebooted via OTA / manual reboot /
     // crash). USB CDC re-enumerates as the same COM port so the OS
     // doesn't fire a disconnect, but `send_command` fails with "not
-    // connected" once the reader thread has bailed. Sync UI state and
-    // surface a recoverable error message - user clicks Connect again.
-    window.addEventListener("rust-disconnected", async () => {
+    // connected" once the reader thread has bailed. Network sessions retry
+    // their saved endpoint; explicit disconnects stay disconnected.
+    window.addEventListener("rust-disconnected", (event: Event) => {
       if (!connected) return;
-      connected = false;
-      deviceInfo = null; manifest = null; currentPatch = null;
-      patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
-      globalDevice = null; activeKind = "";
-      manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
-      // Defensively release the Rust-side handle so a future Connect
-      // doesn't bounce against a stale "already connected" state.
-      try { await disconnect(); } catch {}
-      error = "Lost connection to firmware - click Connect to re-attach.";
+      void handleLinkLoss((event as CustomEvent).detail === "manual");
     }, appEventOptions);
 
     // ---- Android lifecycle (Phase 3) ----
@@ -538,26 +524,71 @@
       firmware reboot when we don't know exactly when the data port is
       back. Each autoConnect attempt does its own probe-PING so a
       premature attempt fails fast - no harm in retrying. */
-  async function tryReconnect(budgetMs: number): Promise<boolean> {
+  async function tryReconnect(budgetMs: number, signal?: AbortSignal): Promise<boolean> {
     const deadline = Date.now() + budgetMs;
     let waitMs = 1000;
     // First wait - give the firmware a head start so the very first
     // attempt has a chance instead of burning through immediate retries.
     await new Promise(r => setTimeout(r, 2000));
-    while (Date.now() < deadline) {
+    while (Date.now() < deadline && !signal?.aborted) {
       // Defensive: stale Rust handle could refuse autoConnect with
       // "already connected". Force-disconnect before each attempt.
       try { await disconnect(); } catch {}
+      if (signal?.aborted) return false;
       try {
         connectedPortName = await connectSelected();
+        if (signal?.aborted) {
+          // IPC cannot be cancelled while TCP's handshake is pending. Release
+          // the connection that completed after its owning App was destroyed.
+          try { await disconnect(); } catch {}
+          return false;
+        }
         connected = !networkSession;
         await new Promise(r => setTimeout(r, 300));
+        if (signal?.aborted) {
+          try { await disconnect(); } catch {}
+          return false;
+        }
         return true;
       } catch {}
       await new Promise(r => setTimeout(r, waitMs));
       waitMs = Math.min(waitMs + 500, 3000);
     }
     return false;
+  }
+
+  async function handleLinkLoss(manual = false) {
+    if (appDestroyed || (networkRecoveryPending && !connected)) return;
+    // Capture ownership before clearing connected. Duplicate notifications and
+    // firmware/profile operations must not start competing reconnect loops.
+    const recover = connected && networkSession && !busy && !manual;
+    const signal = appEventAbort?.signal;
+    if (recover) {
+      networkRecoveryPending = true;
+      busy = true;
+    }
+    connected = false; learning = false;
+    deviceInfo = null; manifest = null; currentPatch = null;
+    patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+    globalDevice = null; activeKind = "";
+    manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
+    try { await disconnect(); } catch {}
+    if (!recover) {
+      if (!busy && !manual) error = "Lost connection to firmware - click Connect to re-attach.";
+      return;
+    }
+    try {
+      error = "";
+      const reopened = await tryReconnect(20_000, signal);
+      if (signal?.aborted) return;
+      if (reopened) await refetchAll();
+      if (signal?.aborted) return;
+      if (connected) showToast("ok", "Raspberry Pi reconnected");
+      else if (!error) error = "Lost connection to the Raspberry Pi - click Connect to retry.";
+    } finally {
+      networkRecoveryPending = false;
+      if (!signal?.aborted) busy = false;
+    }
   }
 
   let networkBootstrapPending: Promise<void> | null = null;
@@ -719,6 +750,7 @@
   });
 
   onDestroy(() => {
+    appDestroyed = true;
     unsubMsg?.(); unsubDisc?.(); unsubReconnecting?.(); unsubReconnected?.(); stopWatchdog();
     appEventAbort?.abort(); appEventAbort = null;
     offLifecycle?.(); offLifecycle = null;
@@ -1735,7 +1767,7 @@
                 {#if !IS_ANDROID}
                   <button onclick={() => showFirmwarePush = true}>Re-flash firmware</button>
                 {/if}
-                <button onclick={async () => { try { await disconnect(); } catch {} window.dispatchEvent(new CustomEvent("rust-disconnected", { detail: "manual" })); }}>Disconnect</button>
+                <button onclick={doDisconnect}>Disconnect</button>
               </div>
             </div>
           {:else if !manifest}

@@ -154,14 +154,41 @@ jobs:
           java-version: "21"
           distribution: temurin
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/src-tauri
+          key: android-unit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-36 build-tools;36.0.0 ndk;25.2.9519653 cmdline-tools;latest"
-      - name: Generate machine-local Tauri Android bindings
+      - name: Initialize Tauri Android project
         working-directory: editor
         run: |
           npm install --no-audit --no-fund
           npx tauri android init --ci --skip-targets-install
+      - name: Generate machine-local Tauri Android bindings
+        working-directory: editor/src-tauri
+        # init only creates the project skeleton. Cargo's Android build scripts
+        # generate the ignored Gradle dependency paths and Wry/Tauri Kotlin
+        # sources that a clean checkout needs before Gradle can configure.
+        run: |
+          mkdir -p ../dist resources/lib
+          printf '<!doctype html>\n' > ../dist/index.html
+          : > resources/circuitpython.uf2
+          python ../../tools/sync_firmware_resources.py --repo-root ../..
+          export TAURI_ANDROID_PROJECT_PATH="$PWD/gen/android"
+          export TAURI_ANDROID_PACKAGE_UNESCAPED=com.bosun.app
+          export WRY_ANDROID_PACKAGE=com.bosun.app
+          export WRY_ANDROID_LIBRARY=bosun_editor_lib
+          export WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$PWD/gen/android/app/src/main/java/com/bosun/app"
+          cargo check --locked --target aarch64-linux-android --lib
+          test -s gen/android/tauri.settings.gradle
+          test -s gen/android/app/tauri.build.gradle.kts
       - name: Kotlin unit tests and Android lint
         working-directory: editor/src-tauri/gen/android
         # Bare testDebugUnitTest/lintDebug select the Android library modules,

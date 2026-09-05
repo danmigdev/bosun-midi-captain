@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   detectPedal: vi.fn(),
   lifecycle: vi.fn(),
   onFirmwareMessage: vi.fn(),
+  onDisconnected: vi.fn(),
   readNetworkBootstrap: vi.fn(),
   cmd: {
     getDeviceInfo: vi.fn(), getManifest: vi.fn(), getManifestAwait: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock("../src/lib/protocol", async (importOriginal) => ({
   cmd: mocks.cmd,
   onFirmwareMessage: mocks.onFirmwareMessage,
   onFirmwareRawLine: vi.fn(async () => () => {}),
-  onDisconnected: vi.fn(async () => () => {}),
+  onDisconnected: mocks.onDisconnected,
   onReconnecting: vi.fn(async () => () => {}),
   onReconnected: vi.fn(async () => () => {}),
 }));
@@ -64,6 +65,7 @@ beforeEach(() => {
   mocks.detectPedal.mockReset().mockResolvedValue({ kind: "none" });
   mocks.lifecycle.mockReset().mockImplementation(() => () => {});
   mocks.onFirmwareMessage.mockReset().mockImplementation(async () => () => {});
+  mocks.onDisconnected.mockReset().mockImplementation(async () => () => {});
   mocks.readNetworkBootstrap.mockReset().mockResolvedValue({ profiles: [], active: null });
   for (const command of Object.values(mocks.cmd)) command.mockReset().mockResolvedValue({});
   mocks.cmd.listProfiles.mockResolvedValue({ profiles: [] });
@@ -89,6 +91,142 @@ async function submitAddress(host: string, port: string) {
 }
 
 describe("App network connection", () => {
+  it("recovers one dropped TCP session and bootstraps again despite duplicate loss events", async () => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    backendConnected = false;
+    mocks.onDisconnected.mock.calls[0][0]();
+    mocks.onDisconnected.mock.calls[0][0]();
+    window.dispatchEvent(new CustomEvent("rust-disconnected"));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(screen.getByTitle("Connected on tcp://bosun-hub.local:9876")).toBeInTheDocument();
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(2);
+    expect(mocks.readNetworkBootstrap).toHaveBeenCalledTimes(2);
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "auto_connect")).toBe(false);
+  });
+
+  it("stops automatic network recovery after bounded failed attempts", async () => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    const implementation = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "tcp_connect") throw new Error("Hub offline");
+      return implementation(name, args);
+    });
+    backendConnected = false;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(screen.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Lost connection to the Raspberry Pi");
+    const attempts = mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect").length;
+    expect(attempts).toBeGreaterThan(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(attempts);
+  });
+
+  it("ignores a delayed duplicate loss event while the recovered session bootstraps", async () => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    let finishBootstrap!: () => void;
+    mocks.readNetworkBootstrap.mockImplementationOnce(() => new Promise(resolve => {
+      finishBootstrap = () => resolve({ profiles: [], active: null });
+    }));
+    backendConnected = false;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(backendConnected).toBe(true);
+    expect(mocks.readNetworkBootstrap).toHaveBeenCalledTimes(2);
+    const disconnects = mocks.invoke.mock.calls.filter(([name]) => name === "disconnect").length;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "disconnect")).toHaveLength(disconnects);
+    expect(backendConnected).toBe(true);
+    finishBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByTitle("Connected on tcp://bosun-hub.local:9876")).toBeInTheDocument();
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(2);
+  });
+
+  it.each(["handshake", "settling"])("releases an owned reconnect completed after unmount during %s", async (phase) => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    const view = render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    const implementation = mocks.invoke.getMockImplementation()!;
+    let finishConnect!: () => void;
+    mocks.invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "tcp_connect") {
+        await new Promise<void>(resolve => { finishConnect = resolve; });
+        backendConnected = true;
+        return;
+      }
+      return implementation(name, args);
+    });
+    backendConnected = false;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(2);
+    if (phase === "settling") {
+      finishConnect();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(backendConnected).toBe(true);
+    }
+    view.unmount();
+    if (phase === "handshake") finishConnect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(backendConnected).toBe(false);
+    expect(mocks.readNetworkBootstrap).toHaveBeenCalledOnce();
+    // A callback already queued by the old subscription must stay inert too.
+    const disconnects = mocks.invoke.mock.calls.filter(([name]) => name === "disconnect").length;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "disconnect")).toHaveLength(disconnects);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(2);
+  });
+
+  it("keeps the manual Disconnect button disconnected when the backend notifies link loss", async () => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    const implementation = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "disconnect" && backendConnected) {
+        backendConnected = false;
+        mocks.onDisconnected.mock.calls[0][0]();
+      }
+      return implementation(name, args);
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Menu", exact: true }));
+    await fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: /Disconnect$/ }));
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(screen.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(1);
+  });
+
+  it("does not reconnect after explicit Disconnect or after the app closes during backoff", async () => {
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "network", host: "bosun-hub.local", port: "9876" }));
+    vi.useFakeTimers();
+    const view = render(App);
+    await vi.waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    window.dispatchEvent(new CustomEvent("rust-disconnected", { detail: "manual" }));
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(1);
+    await submitAddress("bosun-hub.local", "9876");
+    await vi.waitFor(() => expect(mocks.readNetworkBootstrap).toHaveBeenCalledTimes(2));
+    backendConnected = false;
+    mocks.onDisconnected.mock.calls[0][0]();
+    view.unmount();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "tcp_connect")).toHaveLength(2);
+  });
+
   it("submits the editable address to tcp_connect and persists both fields", async () => {
     await ready();
     await submitAddress("  192.168.1.72  ", "9000");
