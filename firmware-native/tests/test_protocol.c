@@ -244,9 +244,9 @@ static void ui_events(void) {
     request("{\"type\":\"PUT_PATCH\",\"bank\":1,\"slot\":3,\"patch\":{\"name\":\"Cannot save\"}}", "ACK");
     bosun_protocol_tick(&protocol, 204); event_is("dirty_state_changed");
     assert(bosun_store_mkdir("/config/profiles/ui/patches/01/03.json") == BOSUN_STORE_OK);
-    request("{\"type\":\"SAVE_NOW\",\"bank\":1,\"slot\":3}", "ERROR"); is_error("storage_error");
+    request("{\"type\":\"SAVE_NOW\",\"bank\":1,\"slot\":3}", "ERROR"); is_error("invalid_request");
     assert(bosun_config_dirty(&config, 1, 3) && !(protocol.ui_pending & 8u));
-    request("{\"type\":\"SAVE_NOW\"}", "ERROR"); is_error("storage_error");
+    request("{\"type\":\"SAVE_NOW\"}", "ERROR"); is_error("invalid_request");
     assert(!bosun_config_dirty(&config, 1, 1) && bosun_config_dirty(&config, 1, 3));
     bosun_protocol_tick(&protocol, 205); event_is("saved"); one_patch_is(1, 1);
     bosun_protocol_tick(&protocol, 206); event_is("dirty_state_changed"); one_patch_is(1, 3);
