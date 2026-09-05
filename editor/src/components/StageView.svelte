@@ -62,11 +62,62 @@
   // --- live state ---
   let context = $state<Record<string, unknown>>({});
   let unsubFw: (() => void) | null = null;
+  type KemperReconcile = {
+    value: "on" | "off";
+    timer: ReturnType<typeof setTimeout>;
+  };
+  // Each block needs an independent confirmation fence. A single shared
+  // timer lets a second fast footswitch press cancel protection for the
+  // first, so an already-queued CONTEXT can visibly bounce that first LED.
+  const kemperReconciles = new Map<string, KemperReconcile>();
 
   // --- stage theme (per-section font/color/size, see stage-theme.ts) ---
   let stageTheme = $state<StageTheme>(readSavedStageTheme());
   let showThemeEditor = $state(false);
   let stageThemeVars = $derived(stageThemeToCssVars(stageTheme));
+
+  // Reuse Screen's field colors while retaining Stage's responsive layout.
+  // Kemper defaults call the title patch_name and the rig number kemper_rig;
+  // layouts may also use their live/core aliases.
+  let screenColors = $derived.by(() => {
+    const tft = device?.tft;
+    const layout = tft && typeof tft === "object"
+      ? (tft as Record<string, unknown>).layout : undefined;
+    const entries = Array.isArray(layout) ? layout : [];
+    const compact = device?.tft_colors;
+    const validColor = (color: unknown): string | undefined => {
+      if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)) return color;
+      if (typeof color === "number" && Number.isInteger(color)
+          && color >= 0 && color <= 0xffffff) {
+        return `#${color.toString(16).padStart(6, "0")}`;
+      }
+      return undefined;
+    };
+    const colorFor = (...fields: string[]): string | undefined => {
+      for (const field of fields) {
+        for (const entry of entries) {
+          if (!entry || typeof entry !== "object" || entry.field !== field) continue;
+          const color = validColor(entry.color);
+          if (color) return color;
+        }
+      }
+      // The kiosk receives only this tiny DEVICE_INFO projection, avoiding
+      // an expensive GET_GLOBAL just to paint the four header fields.
+      if (compact && typeof compact === "object" && !Array.isArray(compact)) {
+        for (const field of fields) {
+          const color = validColor((compact as Record<string, unknown>)[field]);
+          if (color) return color;
+        }
+      }
+      return undefined;
+    };
+    return {
+      title: colorFor("patch_name", "kemper_rig_name"),
+      bank: colorFor("bank", "kemper_bank"),
+      rig: colorFor("kemper_rig_in_bank", "kemper_rig", "slot"),
+      expression: colorFor("expression_mode"),
+    };
+  });
 
   function handleThemeChange(next: StageTheme) {
     stageTheme = next;
@@ -80,6 +131,10 @@
 
   // Live latched state per switch (from binding_fired toggle_on / toggle_off)
   let latched = $state<Record<string, boolean>>({});
+  // Rig identity carried by the most recent CONTEXT. It lets a patch change
+  // distinguish a same-message fresh block snapshot from stale values that
+  // belonged to the previous rig.
+  let contextLocation = "";
 
   // 2-row x 5-column pedal layout
   let rows = $derived(DEFAULT_LAYOUT);
@@ -94,6 +149,46 @@
   );
   let tunerNote = $derived(context.kemper_tuner_note as string | undefined);
   let tunerDeviance = $derived(context.kemper_tuner_deviance as number | undefined);
+  let expressionMode = $derived(connected
+    && (context.expression_mode === "VOL" || context.expression_mode === "WAH")
+    ? context.expression_mode : "---");
+  let screenLabels = $derived.by(() => {
+    const tft = device?.tft;
+    const layout = tft && typeof tft === "object"
+      ? (tft as Record<string, unknown>).layout : undefined;
+    const entries = Array.isArray(layout) ? layout : [];
+    const compact = device?.tft_labels;
+    const format = (fields: string[], fallbackField: string, fallbackPrefix: string): string => {
+      let spec: Record<string, unknown> | undefined;
+      for (const field of fields) {
+        spec = entries.find(entry => entry && typeof entry === "object" && entry.field === field);
+        if (spec) break;
+      }
+      if (!spec && compact && typeof compact === "object" && !Array.isArray(compact)) {
+        for (const field of fields) {
+          const saved = (compact as Record<string, unknown>)[field];
+          if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+            spec = { ...saved, field };
+            break;
+          }
+        }
+      }
+      const field = (spec?.field as string | undefined) ?? fallbackField;
+      const value = field in context ? context[field] : (field === "bank" ? deviceInfo?.bank
+        : field === "slot" ? deviceInfo?.slot : undefined);
+      // Match TFT's field formatting: unknown values do not display a
+      // misleading number, and an explicitly empty prefix stays empty.
+      if (value == null || value === "" || typeof value === "object") return "";
+      const prefix = spec ? (typeof spec.prefix === "string" ? spec.prefix : "") : fallbackPrefix;
+      const suffix = spec && typeof spec.suffix === "string" ? spec.suffix : "";
+      return `${prefix}${value}${suffix}`;
+    };
+    const fallbackRigField = context.kemper_rig_in_bank != null ? "kemper_rig_in_bank" : "slot";
+    return {
+      bank: format(["bank", "kemper_bank"], "bank", "BANK "),
+      rig: format(["kemper_rig_in_bank", "kemper_rig", "slot"], fallbackRigField, "RIG "),
+    };
+  });
 
   function displaySwitch(sw: string): string {
     if (sw === "up") return "UP";
@@ -177,11 +272,55 @@
   /** Extract the Kemper block name (A/B/C/D/X/MOD/DLY/REV) from a binding,
    *  or null if the binding doesn't target a Kemper effect block. */
   function kemperBlock(b: Binding): string | null {
-    const keys = Object.keys(b.actions ?? {});
-    const action = keys.length > 0 ? b.actions?.[keys[0]] : undefined;
-    const msg = action?.messages?.[0];
-    if (!msg || (msg as Record<string,unknown>).type !== "kemper_effect_toggle") return null;
-    return ((msg as Record<string,unknown>).slot as string) ?? null;
+    for (const action of Object.values(b.actions ?? {})) {
+      for (const msg of action.messages ?? []) {
+        if ((msg as Record<string,unknown>).type === "kemper_effect_toggle") {
+          return ((msg as Record<string,unknown>).slot as string) ?? null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Return the Kemper block update performed by one concrete action. This
+   *  drives immediate UI feedback from binding_fired while the Player's MIDI
+   *  echo is still in flight; the next full CONTEXT remains authoritative. */
+  function kemperUpdateForAction(b: Binding, actionName: string): { key: string; value: "on" | "off" } | null {
+    const action = b.actions?.[actionName];
+    for (const msg of action?.messages ?? []) {
+      const record = msg as Record<string, unknown>;
+      if (record.type === "kemper_effect_toggle" && typeof record.slot === "string") {
+        const value = record.value === "on" || record.value === "off"
+          ? record.value
+          : actionName === "toggle_on" ? "on"
+          : actionName === "toggle_off" ? "off"
+          : null;
+        if (value) return { key: `kemper_block_${record.slot}`, value };
+      }
+    }
+    return null;
+  }
+
+  function scheduleKemperReconcile(key: string, value: "on" | "off") {
+    const previous = kemperReconciles.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const pending = {
+      value,
+      timer: setTimeout(() => {
+        // A newer toggle for the same block supersedes this timeout.
+        if (kemperReconciles.get(key) !== pending) return;
+        kemperReconciles.delete(key);
+        pollContext();
+      }, 900),
+    };
+    kemperReconciles.set(key, pending);
+  }
+
+  function clearKemperReconciles() {
+    for (const pending of kemperReconciles.values()) {
+      clearTimeout(pending.timer);
+    }
+    kemperReconciles.clear();
   }
 
   /** Active state + LED colour for the ambient floor glow behind the grid
@@ -216,10 +355,9 @@
     try { await cmd.getContext(); } catch { /* ignore */ }
   }
 
-  async function fetchPatch() {
-    if (!deviceInfo) return;
+  async function fetchPatch(bank: number, slot: number) {
     try {
-      await cmd.getPatch(deviceInfo.bank, deviceInfo.slot);
+      await cmd.getPatch(bank, slot);
     } catch { /* ignore */ }
   }
 
@@ -241,28 +379,80 @@
       _linkUp = true;
       _subscribe();
       pollContext();
-      fetchPatch();
     } else if (!connected) {
       _linkUp = false;
+      clearKemperReconciles();
+      // A reconnect needs a fresh confirmation, not the last pedal mode.
+      if ("expression_mode" in context && context.expression_mode !== "") {
+        context = { ...context, expression_mode: "" };
+      }
     }
   });
 
   // Re-fetch the patch whenever it (bank-step nav) or the connection
   // changes. Reads both every run so Svelte tracks them as dependencies.
+  let _patchLocation = "";
+  let _announcedPatchLocation = "";
   $effect(() => {
-    if (connected && deviceInfo) fetchPatch();
+    const bank = deviceInfo?.bank;
+    const slot = deviceInfo?.slot;
+    const location = bank != null && slot != null ? `${bank}/${slot}` : "";
+    if (location !== _patchLocation) {
+      clearKemperReconciles();
+      if (_announcedPatchLocation && location !== _announcedPatchLocation) {
+        _announcedPatchLocation = "";
+      }
+      _patchLocation = location;
+      // Never render a new CONTEXT snapshot against the previous patch's
+      // bindings while GET_PATCH for the new location is in flight.
+      fullPatch = null;
+      if (contextLocation !== location) context = {};
+      latched = {};
+      if (connected && location) pollContext();
+    }
+    if (connected && bank != null && slot != null) fetchPatch(bank, slot);
   });
 
   let _subscribing = false;
+  let _stopped = false;
   async function _subscribe() {
     if (unsubFw || _subscribing) return;
     _subscribing = true;
     try {
       const unsub = await onFirmwareMessage((msg: FirmwareMessage) => {
         if (msg.type === "CONTEXT" && msg.context) {
-          context = msg.context as Record<string, unknown>;
-        } else if (msg.type === "PATCH" && deviceInfo
-            && msg.bank === deviceInfo.bank && msg.slot === deviceInfo.slot) {
+          const incoming = msg.context as Record<string, unknown>;
+          const incomingBank = Number(incoming.bank);
+          const incomingSlot = Number(incoming.slot);
+          if (Number.isFinite(incomingBank) && Number.isFinite(incomingSlot)) {
+            const incomingLocation = `${incomingBank}/${incomingSlot}`;
+            // A full snapshot requested on the previous rig can complete
+            // after patch_switched. Never apply its effects to newer bindings.
+            if (_announcedPatchLocation && incomingLocation !== _announcedPatchLocation) return;
+            contextLocation = incomingLocation;
+          }
+          const accepted = { ...incoming };
+          const preservedOptimistic: Record<string, unknown> = {};
+          for (const [key, pending] of kemperReconciles) {
+            if (key in incoming && incoming[key] === pending.value) {
+              clearTimeout(pending.timer);
+              kemperReconciles.delete(key);
+            } else {
+              // Periodic/full snapshots queued before the footswitch event are
+              // stale, and an unrelated full snapshot may omit this block.
+              // Let unrelated fields through, but preserve every optimistic
+              // effect independently until confirmation or its safety timeout.
+              delete accepted[key];
+              preservedOptimistic[key] = context[key] ?? pending.value;
+            }
+          }
+          const isPartial = (msg as Record<string, unknown>).partial === true;
+          context = isPartial
+            ? { ...context, ...accepted }
+            : { ...accepted, ...preservedOptimistic };
+        } else if (msg.type === "PATCH"
+            && `${msg.bank}/${msg.slot}` === (_patchLocation || (deviceInfo
+              ? `${deviceInfo.bank}/${deviceInfo.slot}` : ""))) {
           const p = (msg as unknown as { patch: { name?: string; bindings?: Binding[] } }).patch;
           fullPatch = p;
           // Reset latched state: all switches start OFF on patch load.
@@ -274,16 +464,49 @@
             }
           }
           latched = init;
+        } else if (msg.type === "EVENT" && (msg as Record<string,unknown>).event === "patch_switched") {
+          const ev = msg as Record<string, unknown>;
+          const bank = Number(ev.bank);
+          const slot = Number(ev.slot);
+          if (Number.isFinite(bank) && Number.isFinite(slot)) {
+            const location = `${bank}/${slot}`;
+            // Invalidate synchronously: waiting for the parent prop update can
+            // briefly map the old rig's Reverb onto BOOST, or erase a fast X
+            // confirmation received before the reactive effect runs.
+            _patchLocation = location;
+            _announcedPatchLocation = _patchLocation;
+            contextLocation = _patchLocation;
+            clearKemperReconciles();
+            context = {};
+            fullPatch = null;
+            latched = {};
+            // A rig change does not guarantee that the Kemper will emit every
+            // block state again. In particular, selecting the already-active
+            // rig (or moving between rigs that share an ON block) can produce
+            // no effect delta at all. We deliberately cleared the previous
+            // rig's context above, so request one authoritative snapshot now;
+            // otherwise that effect stays dark until an unrelated change.
+            // The announced-location guard above rejects a snapshot that was
+            // already in flight for the previous rig.
+            pollContext();
+          }
         } else if (msg.type === "EVENT" && (msg as Record<string,unknown>).event === "binding_fired") {
           const ev = msg as Record<string,unknown>;
           const sw = ev.switch as string;
           const action = ev.action as string;
-          if (sw && (action === "toggle_on" || action === "toggle_off" || action === "press")) {
-            latched = { ...latched, [sw]: action !== "toggle_off" };
+          if (sw && (action === "toggle_on" || action === "toggle_off" || action === "press" || action === "release")) {
+            latched = { ...latched, [sw]: action === "toggle_on" || action === "press" };
+            const binding = bindingForSwitch(sw);
+            const update = binding ? kemperUpdateForAction(binding, action) : null;
+            if (update) {
+              context = { ...context, [update.key]: update.value };
+              scheduleKemperReconcile(update.key, update.value);
+            }
           }
         }
       });
-      unsubFw = unsub;
+      if (_stopped) unsub();
+      else unsubFw = unsub;
     } catch {
       /* ignore - the link-transition effect will retry */
     } finally {
@@ -292,7 +515,9 @@
   }
 
   function _stop() {
+    _stopped = true;
     if (unsubFw) { unsubFw(); unsubFw = null; }
+    clearKemperReconciles();
   }
 </script>
 
@@ -309,10 +534,10 @@
 
   <!-- header: rig name + bank/rig + BPM + tuner -->
   <div class="stage__header">
-    <div class="stage__rig-name" use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
+    <div class="stage__rig-name" style:color={screenColors.title} use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
     <div class="stage__meta">
       {#if deviceInfo}
-        <span class="stage__bank" use:marquee={`${deviceInfo.bank}/${deviceInfo.slot}`}><span class="stage__marquee-track">BANK {deviceInfo.bank} · RIG {deviceInfo.slot}</span></span>
+        <span class="stage__bank" use:marquee={`${screenLabels.bank}/${screenLabels.rig}`}><span class="stage__marquee-track"><span class="stage__bank-number" style:color={screenColors.bank}>{#if screenLabels.bank}· {screenLabels.bank}{/if}</span> <span class="stage__rig-number" style:color={screenColors.rig}>{#if screenLabels.rig}· {screenLabels.rig}{/if}</span></span></span>
       {/if}
       {#if bpm}
         <span class="stage__bpm">{bpm} <small>BPM</small></span>
@@ -323,6 +548,19 @@
         </span>
       {/if}
     </div>
+    <span class="stage__expression" style:color={screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
+      <svg viewBox="0 0 16 12" aria-hidden="true" data-mode={expressionMode}
+           style:visibility={expressionMode === "---" ? "hidden" : "visible"}
+           fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
+        {#if expressionMode === "VOL"}
+          <path d="M1 10.5H14.5V1.5Z" fill="currentColor" stroke="none" />
+        {:else if expressionMode === "WAH"}
+          <path d="M1 6.5 14 2 14.5 3.5 1.5 8Z M7 6.5V9 M9 6V9 M1 9.5H14.5V11H1Z" />
+        {/if}
+      </svg>
+      <span>{expressionMode}</span>
+    </span>
+    <div class="stage__separator" aria-hidden="true"></div>
   </div>
 
   <!-- 2-row x 5-column footswitch grid -->
@@ -377,7 +615,11 @@
 <style>
   .stage {
     display: flex; flex-direction: column;
+    /* Kiosk/preview have no global sizing reset. Keep padding INSIDE 100dvh. */
+    box-sizing: border-box;
     height: 100%; height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     padding: clamp(0.3rem, 1vw, 1rem);
     gap: clamp(0.3rem, 1vw, 0.8rem);
     font-family: var(--stage-font, "Inter", -apple-system, sans-serif);
@@ -410,11 +652,23 @@
 
   /* ----- header ----- */
   .stage__header {
+    position: relative;
     flex: 0 0 auto;
     display: flex; align-items: baseline; justify-content: center;
     gap: clamp(0.6rem, 2vw, 1.5rem);
     flex-wrap: wrap;
-    padding: 0 clamp(3rem, 8vw, 5rem); /* avoid overlap with exit ✕ on both sides */
+    padding: 0 clamp(0.25rem, 1vw, 1rem) clamp(3px, 0.8vh, 8px);
+    /* Keep the grid's existing position while the brighter line extends
+       into the header's bottom padding. */
+    border-bottom: 1px solid transparent;
+  }
+  .stage__separator {
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #beff32 35%, #beff32 65%, transparent);
+    filter: drop-shadow(0 0 4px #beff3266);
+    pointer-events: none;
   }
   /* Clipping frames for the marquee effect: fixed-size, never move. The
      ".stage__marquee-track" child inside each one holds the actual text and
@@ -435,7 +689,6 @@
     font-size: calc(clamp(3.6rem, 14vw, 8rem) * var(--stage-bank-scale, 1));
     color: var(--stage-bank-color, #ffffff);
     font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
-    text-transform: uppercase;
     letter-spacing: 0.04em;
     line-height: 1.1;
   }
@@ -474,8 +727,21 @@
   }
 
   /* ----- 2x5 pedal grid ----- */
+  .stage__expression {
+    display: flex; align-items: center; gap: 0.25em;
+    flex: 0 0 auto;
+    margin-left: auto;
+    align-self: center;
+    font-size: clamp(1.1rem, 4vw, 2.5rem);
+    line-height: 1.1;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .stage__expression svg { width: 1.3em; height: 0.975em; }
+
   .stage__pedal {
     flex: 1 1 auto;
+    min-height: 0;
     display: flex; flex-direction: column;
     gap: clamp(3px, 0.8vw, 8px);
     position: relative; z-index: 0; /* stacking context: keeps .stage__glow's
@@ -507,6 +773,7 @@
   }
   .stage__pedal-row {
     flex: 1 1 0;
+    min-height: 0;
     display: flex;
     gap: clamp(3px, 0.8vw, 8px);
   }
@@ -522,6 +789,8 @@
        their LED colour via the inline style (see the grid markup). */
     border: 4px solid transparent;
     min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
     transition: border-color 0.2s, background 0.2s;
   }
   .stage__switch--bound {
@@ -534,8 +803,9 @@
     animation: stage-switch-pulse 2.6s ease-in-out infinite;
   }
   @keyframes stage-switch-pulse {
-    0%, 100% { transform: scale(1); filter: brightness(1); }
-    50%      { transform: scale(1.02); filter: brightness(1.12); }
+    /* Brightness alone keeps border geometry stable even at screen edges. */
+    0%, 100% { filter: brightness(1); }
+    50%      { filter: brightness(1.12); }
   }
   @media (prefers-reduced-motion: reduce) {
     .stage__switch--active { animation: none; }
@@ -595,10 +865,14 @@
       flex-direction: row;
       justify-content: space-between;
       align-items: baseline;
-      padding: 0 clamp(0.5rem, 2vh, 1rem);
+      flex-wrap: nowrap;
+      padding: 0 clamp(0.5rem, 2vh, 1rem) clamp(3px, 0.8vh, 8px);
     }
     .stage__rig-name {
-      font-size: calc(clamp(2.6rem, 12vh, 7rem) * var(--stage-rig-name-scale, 1));
+      /* A tall desktop window still has only one header row and five cards
+         across. Bound type by both axes so ordinary saved names fit even
+         when the editor's root font is enlarged; long names still scroll. */
+      font-size: calc(min(12vh, 5.5vw, 7rem) * var(--stage-rig-name-scale, 1));
       line-height: 1;
     }
     .stage__meta {
@@ -606,12 +880,13 @@
       gap: clamp(0.5rem, 2vh, 1.5rem);
     }
     .stage__bank {
-      font-size: calc(clamp(2.6rem, 12vh, 7rem) * var(--stage-bank-scale, 1));
+      font-size: calc(min(12vh, 5.5vw, 7rem) * var(--stage-bank-scale, 1));
       color: var(--stage-bank-color, #ffffff);
-      text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.1;
+      letter-spacing: 0.04em; line-height: 1.1;
     }
     .stage__bpm  { font-size: calc(clamp(1.2rem, 5vh, 3rem) * var(--stage-bpm-scale, 1)); }
     .stage__tuner { font-size: calc(clamp(1.2rem, 5vh, 3rem) * var(--stage-tuner-scale, 1)); }
+    .stage__expression { font-size: clamp(1.3rem, 7vh, 3rem); }
 
     .stage__pedal {
       flex: 1 1 0;
@@ -638,12 +913,12 @@
       border-color: rgba(255, 255, 255, 0.12);
     }
     .stage__switch-label {
-      font-size: calc(clamp(1.8rem, 9vh, 4.5rem) * var(--stage-switch-label-scale, 1));
+      font-size: calc(min(9vh, 3vw, 4.5rem) * var(--stage-switch-label-scale, 1));
       color: var(--stage-switch-label-color, #ffffff);
       line-height: 1.1;
     }
     .stage__switch-id {
-      font-size: calc(clamp(1.8rem, 9vh, 4.5rem) * var(--stage-switch-id-scale, 1));
+      font-size: calc(min(9vh, 3vw, 4.5rem) * var(--stage-switch-id-scale, 1));
     }
   }
 </style>

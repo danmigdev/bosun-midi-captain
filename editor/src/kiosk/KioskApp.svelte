@@ -32,18 +32,59 @@
   let patches = $state<PatchSummary[]>([]);
   let everBooted = $state(false);
 
-  let fullBootstrapDone = false;
+  let hasGlobal = false;
+  let hasPatchList = false;
+  let deviceInfoRetry: ReturnType<typeof setTimeout> | null = null;
+  let deviceInfoRefreshPending = false;
+  let globalRetry: ReturnType<typeof setTimeout> | null = null;
+  let patchListRetry: ReturnType<typeof setTimeout> | null = null;
+  const DEVICE_INFO_RETRY_MS = 1_500;
+  const PATCH_LIST_RETRY_MS = 2_500;
+  const GLOBAL_RETRY_MS = 10_000;
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function requestDeviceInfo(): void {
+    if (deviceInfoRetry !== null) return;
+    cmd.getDeviceInfo();
+    deviceInfoRetry = setTimeout(() => {
+      deviceInfoRetry = null;
+      if (connected) requestDeviceInfo();
+    }, DEVICE_INFO_RETRY_MS);
+  }
+
+  function requestPatchList(): void {
+    if (!hasPatchList && patchListRetry === null) {
+      cmd.listPatches();
+      patchListRetry = setTimeout(() => {
+        patchListRetry = null;
+        requestPatchList();
+      }, PATCH_LIST_RETRY_MS);
+    }
+  }
+
+  function requestGlobalFallback(): void {
+    if (!hasGlobal && globalRetry === null) {
+      cmd.getGlobal();
+      globalRetry = setTimeout(() => {
+        globalRetry = null;
+        requestGlobalFallback();
+      }, GLOBAL_RETRY_MS);
+    }
+  }
 
   function resync(): void {
     // Cheap re-sync on every (re)connect: just the current bank/slot.
     // StageView re-pulls CONTEXT + PATCH itself on the same transition.
-    cmd.getDeviceInfo();
+    requestDeviceInfo();
 
-    if (!fullBootstrapDone) {
-      fullBootstrapDone = true;
-      cmd.getGlobal();
-      cmd.listPatches();
-    }
+    // PATCH_LIST is small and supplies the lower-row rig names. It is sent
+    // immediately, independently of navigation config. New firmware carries
+    // the tiny preset_navigation subtree in DEVICE_INFO; legacy firmware is
+    // detected from that response and only then falls back to GET_GLOBAL.
+    requestPatchList();
     everBooted = true;
 
     // The manifest is deliberately NOT fetched. On the RP2040 it streams
@@ -59,60 +100,157 @@
   onMount(() => {
     const offs: Array<() => void> = [];
     let poll: ReturnType<typeof setInterval> | null = null;
+    let disposed = false;
+    let announcedLocation = "";
+    let announcedUntil = 0;
+    const keep = (off: () => void) => disposed ? off() : offs.push(off);
 
     async function sync() {
       const up = await isConnected();
+      // The component may have been torn down while the transport query was
+      // pending. Never let that stale continuation recreate bootstrap timers.
+      if (disposed) return;
       if (up && !connected) {
         connected = true;
         resync();
+      } else if (up) {
+        // A PATCH_LIST response can be lost without a link transition.
+        requestPatchList();
       } else if (!up && connected) {
         connected = false;
       }
     }
 
     (async () => {
-      offs.push(
-        await onFirmwareMessage((msg: FirmwareMessage) => {
+      keep(await onFirmwareMessage((msg: FirmwareMessage) => {
           switch (msg.type) {
             case "DEVICE_INFO":
+              if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
+              deviceInfoRetry = null;
               deviceInfo = {
                 fw: msg.fw,
                 device: msg.device,
                 bank: msg.current?.bank ?? 1,
                 slot: msg.current?.slot ?? 1,
               };
+              if (isRecord(msg.tft_colors)) {
+                globalDevice = { ...(globalDevice ?? {}), tft_colors: msg.tft_colors };
+              }
+              if (isRecord(msg.tft_labels)) {
+                globalDevice = { ...(globalDevice ?? {}), tft_labels: msg.tft_labels };
+              }
+              if (isRecord(msg.preset_navigation)) {
+                // StageView only consumes this subtree. Avoiding the full
+                // multi-KB GLOBAL stream removes several seconds from boot.
+                globalDevice = {
+                  ...(globalDevice ?? {}),
+                  preset_navigation: msg.preset_navigation,
+                };
+                hasGlobal = true;
+                if (globalRetry) clearTimeout(globalRetry);
+                globalRetry = null;
+              } else if (!hasGlobal) {
+                // Backward compatibility with firmware that predates the
+                // DEVICE_INFO fast path. LIST_PATCHES is already in flight.
+                requestGlobalFallback();
+              }
+              if (deviceInfoRefreshPending) {
+                deviceInfoRefreshPending = false;
+                requestDeviceInfo();
+              }
               break;
             case "MANIFEST":
               manifest = msg as unknown as Manifest;
               break;
             case "GLOBAL":
-              globalDevice = msg.device ?? null;
+              // A malformed response must not permanently disarm the retry:
+              // preset_navigation comes from this object and without it the
+              // lower row cannot be mapped even if PATCH_LIST succeeded.
+              if (!isRecord(msg.device)) break;
+              globalDevice = msg.device;
+              hasGlobal = true;
+              if (globalRetry) clearTimeout(globalRetry);
+              globalRetry = null;
               break;
             case "PATCH_LIST":
-              patches = msg.patches ?? [];
+              // Do not let a truncated/corrupt response permanently disarm
+              // the watchdog while leaving the navigation row empty.
+              if (!Array.isArray(msg.patches)) break;
+              patches = msg.patches;
+              hasPatchList = true;
+              if (patchListRetry) clearTimeout(patchListRetry);
+              patchListRetry = null;
               break;
+            case "CONTEXT": {
+              const bank = Number(msg.context?.bank);
+              const slot = Number(msg.context?.slot);
+              const location = `${bank}/${slot}`;
+              if (announcedLocation && Date.now() < announcedUntil
+                  && Number.isFinite(bank) && Number.isFinite(slot)
+                  && location !== announcedLocation) {
+                break;
+              }
+              if (deviceInfo && Number.isFinite(bank) && Number.isFinite(slot)
+                  && (bank !== deviceInfo.bank || slot !== deviceInfo.slot)) {
+                deviceInfo = { ...deviceInfo, bank, slot };
+              }
+              break;
+            }
             case "EVENT":
-              if (msg.event === "patch_switched" && deviceInfo) {
+              if (msg.event === "global_changed" && connected) {
+                // A save may overtake an older DEVICE_INFO snapshot. Read
+                // once after that reply rather than keeping its old colors.
+                if (deviceInfoRetry !== null) deviceInfoRefreshPending = true;
+                else requestDeviceInfo();
+              } else if (msg.event === "patch_switched" && deviceInfo) {
+                const bank = Number(msg.bank ?? deviceInfo.bank);
+                const slot = Number(msg.slot ?? deviceInfo.slot);
+                announcedLocation = `${bank}/${slot}`;
+                announcedUntil = Date.now() + 2000;
                 deviceInfo = {
                   ...deviceInfo,
-                  bank: Number(msg.bank ?? deviceInfo.bank),
-                  slot: Number(msg.slot ?? deviceInfo.slot),
+                  bank,
+                  slot,
                 };
               }
               break;
           }
-        }),
-      );
-      // React to link transitions immediately; the poll is just a backstop.
-      offs.push(await onReconnected(() => void sync()));
-      offs.push(await onDisconnected(() => void sync()));
+        }));
+      // Link events already describe the transition. Do not query the current
+      // state from both callbacks: a fast down/up pair can make both async
+      // queries observe only the final "up" state, losing the reconnect and
+      // therefore the bootstrap re-sync.
+      keep(await onReconnected(() => {
+        connected = true;
+        resync();
+      }));
+      keep(await onDisconnected(() => {
+        connected = false;
+        // Anything in flight on the old CDC session is gone; allow the next
+        // link-up to retry immediately rather than waiting for the watchdog.
+        if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
+        if (globalRetry) clearTimeout(globalRetry);
+        if (patchListRetry) clearTimeout(patchListRetry);
+        deviceInfoRetry = null;
+        deviceInfoRefreshPending = false;
+        globalRetry = null;
+        patchListRetry = null;
+      }));
+      if (disposed) return;
       await sync();
-      poll = setInterval(sync, 2000);
+      if (!disposed) poll = setInterval(sync, 2000);
     })();
 
     return () => {
+      disposed = true;
       for (const off of offs) off();
       if (poll) clearInterval(poll);
+      if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
+      if (globalRetry) clearTimeout(globalRetry);
+      if (patchListRetry) clearTimeout(patchListRetry);
+      deviceInfoRetry = null;
+      globalRetry = null;
+      patchListRetry = null;
     };
   });
 </script>

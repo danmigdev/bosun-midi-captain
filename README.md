@@ -366,6 +366,17 @@ npm run package:portable    # build the distributable extract-and-run ZIP
 
 You need Node 20+ and the Rust toolchain (install via `rustup`). The editor is a Tauri app: a Svelte + TypeScript frontend over a Rust core that owns the serial connection.
 
+Both distribution scripts synchronize `firmware/` into the Tauri resources
+and verify content hashes before packaging, so a stale gitignored resource
+tree cannot leak into Android or portable builds. A read-only audit is
+available with `python tools/sync_firmware_resources.py --check`.
+
+The Captain's memory-heavy `.mpy` modules must be built with the pinned
+CircuitPython compiler, not the similarly named MicroPython package from PyPI.
+See [Reproducible Captain `.mpy` builds](docs/firmware-mpy-build.md) for the
+identity checks, normalized source paths, read-only verification and explicit
+write workflow.
+
 The firmware and editor are always released at the same version. When bumping, change all four in lockstep: `firmware/lib/captain/__init__.py`, `editor/src-tauri/tauri.conf.json`, `editor/src-tauri/Cargo.toml`, and `editor/package.json`.
 
 ## Project layout

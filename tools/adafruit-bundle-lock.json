@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "tag": "20260729",
+  "circuitpython_major": 9,
+  "bundle_series": "9.x",
+  "filename": "adafruit-circuitpython-bundle-9.x-mpy-20260729.zip",
+  "url": "https://github.com/adafruit/Adafruit_CircuitPython_Bundle/releases/download/20260729/adafruit-circuitpython-bundle-9.x-mpy-20260729.zip",
+  "size": 17204092,
+  "sha256": "88131525b851c216db17c864ee3a1081df3da4fe8511af39a77f71a7338d6539",
+  "files": {
+    "adafruit_display_text/__init__.mpy": "6ef4562d1d75ad9c362e16d8377b1da3061efb0517cb1c18bf306bdd799593ea",
+    "adafruit_display_text/bitmap_label.mpy": "90950301693665f1de3fbcce02f0c8e038d4ac51adb17eaa9dcb1688f4c44ea9",
+    "adafruit_display_text/label.mpy": "3fc061e0db14feb9033605000bd15d8e05502950d4df199e300a400e27c09f18",
+    "adafruit_display_text/outlined_label.mpy": "ce2966c797be3a9829804029d3e77ea49f485ce81b98915ad0978d73f8c50001",
+    "adafruit_display_text/scrolling_label.mpy": "8bd7a5383967621993d50d058d6e2dbb24b9491d1487b021108f2299318c89b2",
+    "adafruit_display_text/text_box.mpy": "21357ae3b2660b376986a281e41e4eda43d7e53d3b41038fb63167638dd8a591",
+    "adafruit_pixelbuf.mpy": "3bd7456def82ff6f5c84f41e72c8f66af2ec08d80524e5bfac3947b545a4d08a",
+    "adafruit_st7789.mpy": "ace1d19543a25be84032fa3c925a9e37ffc985e747769d523b61b741140c29e5",
+    "neopixel.mpy": "23d8de990aba5563d1955b11297b40104914de90187752d32e61e15af1e26a51"
+  }
+}

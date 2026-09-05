@@ -36,6 +36,7 @@ sys.modules["digitalio"].DigitalInOut = object
 sys.modules["digitalio"].Direction = types.SimpleNamespace(INPUT="in", OUTPUT="out")
 sys.modules["digitalio"].Pull = types.SimpleNamespace(UP="up", DOWN="down")
 sys.modules["terminalio"].FONT = object()
+sys.modules["displayio"].Group = object
 
 from captain.app import Captain  # noqa: E402
 

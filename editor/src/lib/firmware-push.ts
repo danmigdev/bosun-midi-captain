@@ -8,10 +8,206 @@
 // a virgin pedal where CircuitPython itself has to be flashed first.
 
 import { invoke } from "@tauri-apps/api/core";
-import { cmd, waitForReboot, type FirmwareFile } from "./protocol";
+import {
+  cmd,
+  waitForReboot,
+  FirmwareCommandTimeoutError,
+  type FirmwareFile,
+  type FirmwareMessage,
+} from "./protocol";
 import { backupAllProfiles } from "./config-backup";
 
-const CHUNK_B64 = 512;
+// 128 base64 characters decode to at most 96 bytes.  Larger chunks overlap
+// with the Captain's 256-byte USB-MIDI read and can exceed the RP2040's
+// contiguous free heap during an update, making the pedal stop ACKing chunks.
+// Keep this aligned with tools/push_firmware.py.
+export const FIRMWARE_CHUNK_B64 = 128;
+export const FIRMWARE_FILE_RETRIES = 3;
+
+type FirmwareAck = Extract<FirmwareMessage, { type: "ACK" }>;
+
+/** Narrow command surface used by one OTA file transaction.  Keeping this
+ * injectable makes the append/ACK ambiguity testable without a serial port. */
+export interface FirmwareUploadCommands {
+  putFileBegin(path: string, size: number): Promise<FirmwareMessage>;
+  putFileChunk(path: string, dataB64: string, offset: number): Promise<FirmwareMessage>;
+  putFileEnd(path: string): Promise<FirmwareMessage>;
+}
+
+export interface FirmwareFileUploadResult {
+  size: number;
+  attempts: number;
+  /** Raw-byte offsets whose append completed without a correlated ACK. */
+  uncertainOffsets: number[];
+}
+
+export interface FirmwareFileUploadOptions {
+  commands?: FirmwareUploadCommands;
+  retries?: number;
+  retryDelayMs?: number;
+  onWarning?: (message: string) => void;
+}
+
+function base64Value(code: number): number {
+  if (code >= 65 && code <= 90) return code - 65;
+  if (code >= 97 && code <= 122) return code - 97 + 26;
+  if (code >= 48 && code <= 57) return code - 48 + 52;
+  if (code === 43) return 62;
+  if (code === 47) return 63;
+  return -1;
+}
+
+/** Return the exact decoded byte length of canonical standard base64.
+ * No decoded copy is allocated: large firmware modules remain a single
+ * string until their bounded chunks are sent. */
+export function decodedBase64Size(dataB64: string): number {
+  const length = dataB64.length;
+  if (length === 0) return 0;
+  if (length % 4 !== 0) throw new Error("invalid firmware base64 length");
+
+  let padding = 0;
+  if (dataB64.charCodeAt(length - 1) === 61) padding += 1;
+  if (dataB64.charCodeAt(length - 2) === 61) padding += 1;
+  const dataEnd = length - padding;
+
+  for (let i = 0; i < dataEnd; i += 1) {
+    if (base64Value(dataB64.charCodeAt(i)) < 0) {
+      throw new Error(`invalid firmware base64 character at ${i}`);
+    }
+  }
+  for (let i = dataEnd; i < length; i += 1) {
+    if (dataB64.charCodeAt(i) !== 61) {
+      throw new Error(`invalid firmware base64 padding at ${i}`);
+    }
+  }
+
+  // Reject non-canonical encodings whose unused low bits are non-zero.
+  // Rust's STANDARD encoder always emits canonical data; accepting anything
+  // else would make the advertised size weaker than the bytes being sent.
+  if (padding === 2 && (base64Value(dataB64.charCodeAt(dataEnd - 1)) & 0x0f) !== 0) {
+    throw new Error("non-canonical firmware base64 padding");
+  }
+  if (padding === 1 && (base64Value(dataB64.charCodeAt(dataEnd - 1)) & 0x03) !== 0) {
+    throw new Error("non-canonical firmware base64 padding");
+  }
+
+  return (length / 4) * 3 - padding;
+}
+
+function requireAck(response: FirmwareMessage, operation: string): FirmwareAck {
+  if (response.type !== "ACK") {
+    throw new Error(`${operation}: expected ACK, received ${response.type}`);
+  }
+  return response;
+}
+
+function delay(ms: number): Promise<void> {
+  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+/** Upload one file as a transaction.
+ *
+ * PUT_FILE_CHUNK is append-only on every deployed Captain and has no request
+ * id deduplication.  A timeout therefore makes the append ambiguous: sending
+ * that same chunk again could duplicate bytes.  We send each chunk at most
+ * once per transaction.  When BEGIN explicitly negotiated exact-size
+ * verification, we continue after an ACK timeout and let PUT_FILE_END decide;
+ * if the chunk truly never arrived, END rejects the short temporary file and
+ * the next attempt starts from a truncating BEGIN.  Legacy firmware cannot
+ * make that decision, so an uncertain chunk aborts its attempt immediately. */
+export async function pushFirmwareFile(
+  path: string,
+  dataB64: string,
+  options: FirmwareFileUploadOptions = {},
+): Promise<FirmwareFileUploadResult> {
+  const commands = options.commands ?? cmd;
+  const retries = options.retries ?? FIRMWARE_FILE_RETRIES;
+  const retryDelayMs = options.retryDelayMs ?? 500;
+  if (!Number.isSafeInteger(retries) || retries < 1) {
+    throw new Error("firmware file retries must be a positive integer");
+  }
+  if (!Number.isFinite(retryDelayMs) || retryDelayMs < 0) {
+    throw new Error("firmware retry delay must be non-negative");
+  }
+
+  // This is the post-normalisation payload returned by Tauri (not the file
+  // metadata size, which can still include a stripped UTF-8 BOM).
+  const expectedSize = decodedBase64Size(dataB64);
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const uncertainOffsets: number[] = [];
+    try {
+      const beginAck = requireAck(
+        await commands.putFileBegin(path, expectedSize),
+        `PUT_FILE_BEGIN ${path}`,
+      );
+      // Older firmware accepts unknown JSON fields, so merely sending `size`
+      // does not prove END will enforce it.  Trust the ambiguity-resolving
+      // path only when the firmware explicitly echoes this transaction's
+      // exact expected size.  On legacy firmware a chunk timeout aborts the
+      // attempt and a fresh BEGIN truncates the temporary file before retry.
+      if (beginAck.size_check === true && beginAck.size !== expectedSize) {
+        throw new Error(
+          `${path}: PUT_FILE_BEGIN size capability mismatch ` +
+          `(expected ${expectedSize}, echoed ${String(beginAck.size)})`,
+        );
+      }
+      const endVerifiesSize = beginAck.size_check === true &&
+        beginAck.size === expectedSize;
+
+      let offset = 0;
+      for (let i = 0; i < dataB64.length; i += FIRMWARE_CHUNK_B64) {
+        const chunk = dataB64.slice(i, i + FIRMWARE_CHUNK_B64);
+        const chunkSize = decodedBase64Size(chunk);
+        const chunkOffset = offset;
+        offset += chunkSize;
+        try {
+          requireAck(
+            await commands.putFileChunk(path, chunk, chunkOffset),
+            `PUT_FILE_CHUNK ${path}@${chunkOffset}`,
+          );
+        } catch (error) {
+          if (error instanceof FirmwareCommandTimeoutError &&
+              error.commandType === "PUT_FILE_CHUNK") {
+            if (!endVerifiesSize) {
+              options.onWarning?.(
+                `${path}: firmware did not confirm end-to-end size checking; ` +
+                `restarting after uncertain chunk at offset ${chunkOffset}`,
+              );
+              throw error;
+            }
+            uncertainOffsets.push(chunkOffset);
+            options.onWarning?.(
+              `${path}: no ACK for chunk at offset ${chunkOffset}; ` +
+              "continuing without unsafe resend",
+            );
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      if (offset !== expectedSize) {
+        throw new Error(
+          `${path}: local size mismatch (expected ${expectedSize}, chunked ${offset})`,
+        );
+      }
+
+      requireAck(await commands.putFileEnd(path), `PUT_FILE_END ${path}`);
+      return { size: expectedSize, attempts: attempt, uncertainOffsets };
+    } catch (error) {
+      if (attempt === retries) throw error;
+      options.onWarning?.(
+        `${path}: ${String(error)}; retrying complete file ` +
+        `(${attempt + 1}/${retries})`,
+      );
+      await delay(retryDelayMs);
+    }
+  }
+
+  // The validated retries invariant and loop bounds make this unreachable.
+  throw new Error(`${path}: firmware upload exhausted without a result`);
+}
 
 export interface FirmwarePushProgress {
   total: number;
@@ -86,13 +282,9 @@ export async function pushFirmware(
       const b64 = opts.source
         ? await invoke<string>("read_firmware_file_at_b64", { root: opts.source, rel: file.rel })
         : await invoke<string>("read_firmware_file_b64", { rel: file.rel });
-      await cmd.putFileBegin(file.dst);
-      for (let i = 0; i < b64.length; i += CHUNK_B64) {
-        await cmd.putFileChunk(file.dst, b64.slice(i, i + CHUNK_B64));
-      }
-      await cmd.putFileEnd(file.dst);
+      const uploaded = await pushFirmwareFile(file.dst, b64, { onWarning: log });
       progress.done += 1;
-      log(`OK  ${file.dst}  (${humanBytes(file.size)})`);
+      log(`OK  ${file.dst}  (${humanBytes(uploaded.size)})`);
     }
 
     if (opts.reboot !== false) {

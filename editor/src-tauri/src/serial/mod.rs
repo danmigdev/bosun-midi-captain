@@ -13,9 +13,7 @@
 //! compiled on every target so its regression tests run on the host.
 
 mod android_helpers;
-pub use android_helpers::{
-    is_transient_error, marker_found, port_index, sort_ports_desc,
-};
+pub use android_helpers::marker_found;
 
 #[cfg(not(target_os = "android"))]
 mod desktop;

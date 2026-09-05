@@ -18,7 +18,8 @@ import time
 
 import serial
 
-CHUNK = 1024
+# Keep OTA decode allocations below 100 bytes on the fragmented RP2040 heap.
+CHUNK = 96
 
 
 def send_line(s, obj):

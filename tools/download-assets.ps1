@@ -3,11 +3,11 @@
   Download CircuitPython UF2 + Adafruit libraries the installer needs to bundle.
 
 .DESCRIPTION
-  Pulls the CircuitPython UF2 image for the Raspberry Pi Pico and extracts the
-  four Adafruit libraries the firmware imports (adafruit_display_text/,
-  adafruit_st7789.mpy, neopixel.mpy, adafruit_pixelbuf.mpy) from the official
-  Adafruit CircuitPython Bundle release. Also mirrors the local /firmware/
-  tree into editor/src-tauri/resources/firmware so Tauri can bundle it.
+  Pulls the CircuitPython UF2 image for the Raspberry Pi Pico and installs the
+  nine locked files belonging to the four Adafruit libraries the firmware
+  imports. The official bundle release, archive SHA-256 and individual file
+  hashes come from tools/adafruit-bundle-lock.json; no moving "latest" release
+  is used. It then invokes the shared resource sync.
 
   After running this script, the editor's "Pedal setup" wizard can flash a
   blank pedal end-to-end without any further downloads.
@@ -15,26 +15,31 @@
 .PARAMETER CircuitPythonVersion
   Specific CircuitPython release to install. Defaults to 9.2.7 (stable 9.x).
 
-.PARAMETER BundleSeries
-  Which Adafruit bundle line to pull from (matches CircuitPython major).
-  Defaults to "9.x".
-
 .EXAMPLE
   pwsh -File tools\download-assets.ps1
-  pwsh -File tools\download-assets.ps1 -CircuitPythonVersion 10.0.0 -BundleSeries 10.x
 #>
 
 [CmdletBinding()]
 param(
-    [string] $CircuitPythonVersion = "9.2.7",
-    [string] $BundleSeries = "9.x"
+    [ValidateSet("9.2.7")]
+    [string] $CircuitPythonVersion = "9.2.7"
 )
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-NativeTool {
+    param([scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Command } finally { $ErrorActionPreference = $previous }
+}
+
 $repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $resources  = Join-Path $repoRoot "editor\src-tauri\resources"
 $libDir     = Join-Path $resources "lib"
+$syncScript = Join-Path $PSScriptRoot "sync_firmware_resources.py"
+$vendorScript = Join-Path $PSScriptRoot "provision_adafruit_bundle.py"
+$pythonExe  = (Get-Command python -ErrorAction Stop).Source
 
 New-Item -ItemType Directory -Force -Path $resources, $libDir | Out-Null
 
@@ -51,65 +56,20 @@ if (Test-Path $cpOut) {
     Write-Host "[ok  ] $cpOut"
 }
 
-# ---------- 2. Adafruit CircuitPython Bundle (latest release) ----------
+# ---------- 2. SHA-pinned Adafruit CircuitPython 9.x bundle ----------
 
-Write-Host "[get ] Adafruit Bundle release index"
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest"
-$assetRegex = "adafruit-circuitpython-bundle-${BundleSeries}-mpy-\d+\.zip"
-$asset = $release.assets | Where-Object { $_.name -match $assetRegex } | Select-Object -First 1
-if (-not $asset) {
-    throw "Could not find an asset matching '$assetRegex' in release '$($release.tag_name)'. Try a different -BundleSeries."
+Invoke-NativeTool { & $pythonExe $vendorScript --destination $libDir }
+if ($LASTEXITCODE -ne 0) {
+    throw "Pinned Adafruit bundle provisioning failed"
 }
 
-$zipPath = Join-Path $env:TEMP $asset.name
-Write-Host "[get ] $($asset.name)"
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+# ---------- 3. Synchronize canonical firmware resources ----------
 
-$tmp = Join-Path $env:TEMP ("captain-bundle-" + [guid]::NewGuid().ToString())
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $tmp)
-
-$wanted = @(
-    "adafruit_display_text",
-    "adafruit_st7789.mpy",
-    "neopixel.mpy",
-    "adafruit_pixelbuf.mpy"
-)
-
-foreach ($name in $wanted) {
-    $hit = Get-ChildItem -Path $tmp -Recurse -Filter $name -ErrorAction SilentlyContinue |
-           Where-Object { $_.FullName -match "[\\/]lib[\\/]" } |
-           Select-Object -First 1
-    if (-not $hit) {
-        Write-Warning "Bundle did not contain '$name'"
-        continue
-    }
-    $dst = Join-Path $libDir $name
-    if ($hit.PSIsContainer) {
-        if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
-        Copy-Item -Recurse $hit.FullName $dst
-    } else {
-        Copy-Item -Force $hit.FullName $dst
-    }
-    Write-Host "[ok  ] lib/$name"
+Invoke-NativeTool { & $pythonExe $syncScript --repo-root $repoRoot }
+if ($LASTEXITCODE -ne 0) {
+    throw "Firmware resource sync failed"
 }
-
-Remove-Item -Recurse -Force $tmp
-Remove-Item -Force $zipPath
-
-# ---------- 3. Mirror firmware tree into resources ----------
-
-$fwSrc = Join-Path $repoRoot "firmware"
-$fwDst = Join-Path $resources "firmware"
-
-if (-not (Test-Path $fwSrc)) {
-    throw "Firmware tree not found at $fwSrc"
-}
-
-if (Test-Path $fwDst) { Remove-Item -Recurse -Force $fwDst }
-Copy-Item -Recurse $fwSrc $fwDst
-Write-Host "[ok  ] mirrored firmware tree to resources/firmware"
 
 Write-Host ""
 Write-Host "Assets ready. The Pedal Setup wizard can now flash a blank pedal." -ForegroundColor Green
-Write-Host "Re-run this script when you update CircuitPython, the bundle, or the firmware." -ForegroundColor Green
+Write-Host "Firmware-only changes are synced automatically by every package build." -ForegroundColor Green

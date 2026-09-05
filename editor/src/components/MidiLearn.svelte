@@ -24,6 +24,7 @@
     currentBank: number;
     currentSlot: number;
     bridge: BridgeStatus;
+    networkSession?: boolean;
     onStartBridge: () => void;
     onStopBridge: () => void;
     onUpdate: (table: MidiLearnTable) => void;
@@ -32,7 +33,7 @@
   };
 
   let { learning, table, captures, patches, currentBank, currentSlot,
-        bridge, onStartBridge, onStopBridge,
+        bridge, networkSession = false, onStartBridge, onStopBridge,
         onUpdate, onClearCapture, onClearAllCaptures }: Props = $props();
 
   let assigningIdx = $state<number | null>(null);
@@ -93,6 +94,9 @@
     <span class="status" class:on={learning}>{learning ? "capturing" : "stopped"}</span>
   </header>
 
+  {#if networkSession}
+    <p class="bridge-hint">MIDI routing is managed by the Raspberry Pi.</p>
+  {:else}
   <!-- USB-MIDI bridge. Only needed when the amp and the pedal are both plugged
        into THIS PC over USB and so can't see each other's MIDI directly (the
        Kemper Player case). If they're wired straight to each other - a direct
@@ -120,6 +124,7 @@
     straight to each other - a direct USB-MIDI link or a DIN MIDI cable - their
     MIDI already crosses, so the bridge isn't needed.
   </p>
+  {/if}
 
   {#if captures.length > 0}
     <div class="captures">

@@ -13,6 +13,11 @@ class PatchStore:
     def __init__(self, autosave_enabled=True, autosave_debounce_ms=2000):
         self._cache = {}                          # (bank, slot) -> patch dict
         self._dirty_ms = {}                       # (bank, slot) -> last_modified_ms
+        # At most the active patch plus one recently used clean patch. Dirty
+        # and otherwise non-persisted values are deliberately not tracked here
+        # and can never be evicted.
+        self._clean_lru = []
+        self._protected_key = None
         self.autosave_enabled = autosave_enabled
         self.autosave_debounce_ms = autosave_debounce_ms
         self.on_dirty_changed = None              # callback()
@@ -24,12 +29,37 @@ class PatchStore:
     def get(self, bank, slot):
         key = (bank, slot)
         if key not in self._cache:
+            # Make room before parsing JSON so peak RAM contains at most the
+            # protected patch plus the patch currently being loaded.
+            self._reserve_clean_slot()
             self._cache[key] = config.load_patch(bank, slot)
+            self._clean_lru.append(key)
+        elif key in self._clean_lru:
+            self._touch_clean(key)
         return self._cache[key]
 
+    def read(self, bank, slot):
+        """Return the authoritative patch without retaining a clean disk read."""
+        key = (bank, slot)
+        if key in self._cache:
+            return self._cache[key]
+        return config.load_patch(bank, slot)
+
+    def protect(self, bank, slot):
+        """Pin the active patch so clean-cache eviction cannot duplicate it."""
+        self._protected_key = (bank, slot)
+
     def has(self, bank, slot):
+        key = (bank, slot)
+        if key in self._cache:
+            return True
         try:
-            self.get(bank, slot)
+            # Existence checks (notably preset-navigation discovery) must not
+            # retain a complete patch merely to answer a boolean question.
+            # Opening the canonical path also rejects missing/unreadable files
+            # without allocating their JSON object graph.
+            with open(config.patch_path(bank, slot)):
+                pass
             return True
         except OSError:
             return False
@@ -42,21 +72,32 @@ class PatchStore:
         the patches view without a follow-up GET_PATCH per row."""
         out = []
         seen = set()
-        for bank, slot in config.list_patches():
-            seen.add((bank, slot))
+        try:
+            disk_patches = config.list_patches()
+        except OSError:
+            disk_patches = ()
+        for bank, slot in disk_patches:
+            key = (bank, slot)
+            seen.add(key)
             name = ""
             linked_to = None
             try:
-                patch = self.get(bank, slot)
+                # RAM is authoritative for clean cached values and unsaved
+                # edits.  Otherwise load only long enough to copy metadata;
+                # using get() here would permanently cache every full patch.
+                patch = self.read(bank, slot)
                 name = patch.get("name", "")
                 linked_to = patch.get("linked_to")
             except OSError:
                 pass
+            # Drop the full transient object before allocating the next one.
+            # `name`/`linked_to` retain only the metadata needed in `out`.
+            patch = None
             entry = {
                 "bank": bank,
                 "slot": slot,
                 "name": name,
-                "dirty": (bank, slot) in self._dirty_ms,
+                "dirty": key in self._dirty_ms,
             }
             if linked_to:
                 entry["linked_to"] = linked_to
@@ -103,14 +144,30 @@ class PatchStore:
 
     def delete(self, bank, slot):
         key = (bank, slot)
-        self._cache.pop(key, None)
-        self._dirty_ms.pop(key, None)
+        was_dirty = key in self._dirty_ms
         try:
             import os
             os.remove(config.patch_path(bank, slot))
-        except OSError:
-            pass
-        if self.on_dirty_changed:
+        except OSError as e:
+            # Deletion is intentionally idempotent: a RAM-only patch has no
+            # file yet, and deleting an already absent slot is a successful
+            # no-op. Every other filesystem failure is real (notably EROFS
+            # while USB mass storage owns CIRCUITPY) and must leave RAM as the
+            # authoritative copy rather than silently losing unsaved edits.
+            err = getattr(e, "errno", None)
+            if err is None and getattr(e, "args", None):
+                err = e.args[0]
+            if err != 2:  # ENOENT (CircuitPython's errno module is optional)
+                raise
+        # Commit the in-memory half only after unlink succeeded or the file was
+        # already absent. From here on all operations are bounded dict/list
+        # removals, so a failed unlink can never leave a half-deleted patch.
+        self._cache.pop(key, None)
+        self._forget_clean(key)
+        self._dirty_ms.pop(key, None)
+        if self._protected_key == key:
+            self._protected_key = None
+        if was_dirty and self.on_dirty_changed:
             self.on_dirty_changed()
 
     # ---------- persistence ----------
@@ -125,13 +182,14 @@ class PatchStore:
             try:
                 config.save_patch(k[0], k[1], self._cache[k])
                 self._dirty_ms.pop(k, None)
+                self._touch_clean(k)
                 saved.append(k)
             except OSError as e:
                 print("save error:", k, e)
                 if getattr(e, "errno", None) == 30:
-                    # Read-only filesystem (USB MSC active). Drop the dirty
-                    # marker so we don't loop, and stop trying autosave.
-                    self._dirty_ms.pop(k, None)
+                    # Read-only filesystem (USB MSC active). Stop automatic
+                    # retries but KEEP the dirty marker and RAM value: neither
+                    # was persisted, so clean-cache eviction must not lose it.
                     if self.autosave_enabled:
                         print("autosave disabled (filesystem read-only)")
                         self.autosave_enabled = False
@@ -150,10 +208,16 @@ class PatchStore:
         discarded = []
         for k in keys:
             try:
-                self._cache[k] = config.load_patch(*k)
+                self._reserve_clean_slot()
+                patch = config.load_patch(*k)
+                self._cache[k] = patch
+                self._dirty_ms.pop(k, None)
+                self._clean_lru.append(k)
+                patch = None
             except OSError:
                 self._cache.pop(k, None)
-            self._dirty_ms.pop(k, None)
+                self._forget_clean(k)
+                self._dirty_ms.pop(k, None)
             discarded.append(k)
         if discarded:
             if self.on_discarded:
@@ -176,6 +240,28 @@ class PatchStore:
 
     def _mark_dirty(self, key, now_ms):
         was_clean = key not in self._dirty_ms
+        self._forget_clean(key)
         self._dirty_ms[key] = now_ms
         if was_clean and self.on_dirty_changed:
             self.on_dirty_changed()
+
+    def _reserve_clean_slot(self):
+        while len(self._clean_lru) >= 2:
+            for i, old in enumerate(self._clean_lru):
+                if old != self._protected_key:
+                    self._clean_lru.pop(i)
+                    self._cache.pop(old, None)
+                    break
+            else:
+                return
+
+    def _touch_clean(self, key):
+        if key in self._clean_lru:
+            self._clean_lru.remove(key)
+        else:
+            self._reserve_clean_slot()
+        self._clean_lru.append(key)
+
+    def _forget_clean(self, key):
+        if key in self._clean_lru:
+            self._clean_lru.remove(key)

@@ -51,6 +51,9 @@ for _i in range(30):
 digitalio = _mod("digitalio")
 class _DIO:
     def __init__(self, pin): self.pin = pin; self.direction = None; self.pull = None; self.value = True
+    def switch_to_output(self, value=False):
+        self.direction = digitalio.Direction.OUTPUT
+        self.value = value
     def deinit(self): pass
 digitalio.DigitalInOut = _DIO
 digitalio.Direction = types.SimpleNamespace(INPUT="in", OUTPUT="out")
@@ -72,7 +75,6 @@ class _PWM:
 pwmio.PWMOut = _PWM
 
 terminalio = _mod("terminalio")
-terminalio.FONT = object()
 
 fourwire = _mod("fourwire")
 class _FourWire:
@@ -81,23 +83,53 @@ fourwire.FourWire = _FourWire
 
 displayio = _mod("displayio")
 class _Group:
-    def __init__(self, *a, **k): self._c = []
+    def __init__(self, *a, **k):
+        self._c = []
+        self.x = k.get("x", 0); self.y = k.get("y", 0)
+        self.scale = k.get("scale", 1); self.hidden = False
     def append(self, x): self._c.append(x)
+    def pop(self, index=-1): return self._c.pop(index)
+    def __getitem__(self, index): return self._c[index]
+    def __setitem__(self, index, value): self._c[index] = value
+    def __len__(self): return len(self._c)
+    def __iter__(self): return iter(self._c)
 class _Bitmap:
-    def __init__(self, w, h, n): self.w = w; self.h = h
+    def __init__(self, w, h, n):
+        self.w = self.width = w; self.h = self.height = h
     def __setitem__(self, k, v): pass
     def __getitem__(self, k): return 0
 class _Palette:
     def __init__(self, n): self._c = [0] * n
     def __setitem__(self, k, v): self._c[k] = v
+    def __getitem__(self, k): return self._c[k]
     def make_transparent(self, i): pass
 class _TileGrid:
-    def __init__(self, *a, **k): pass
+    def __init__(self, bitmap, **k):
+        self.bitmap = bitmap
+        self.x = k.get("x", 0); self.y = k.get("y", 0)
+        self.width = k.get("width", 1); self.height = k.get("height", 1)
+        self.pixel_shader = k.get("pixel_shader")
+        self.hidden = False
+        self._tiles = [k.get("default_tile", 0)] * (self.width * self.height)
+    def __getitem__(self, index):
+        return self._tiles[index if isinstance(index, int) else index[1] * self.width + index[0]]
+    def __setitem__(self, index, value):
+        self._tiles[index if isinstance(index, int) else index[1] * self.width + index[0]] = value
 displayio.Group = _Group
 displayio.Bitmap = _Bitmap
 displayio.Palette = _Palette
 displayio.TileGrid = _TileGrid
 displayio.release_displays = lambda: None
+
+class _BuiltinFont:
+    bitmap = _Bitmap(6 * 95, 14, 2)
+    def get_bounding_box(self): return (6, 14)
+    def get_glyph(self, codepoint):
+        if not 32 <= codepoint <= 126:
+            return None
+        return types.SimpleNamespace(bitmap=self.bitmap, tile_index=codepoint - 32,
+                                     width=6, height=14, dx=0, dy=0, shift_x=6, shift_y=0)
+terminalio.FONT = _BuiltinFont()
 
 _adt = _mod("adafruit_display_text")
 _label = _mod("adafruit_display_text.label")
@@ -145,11 +177,19 @@ class _CDC:
     def __init__(self):
         self.connected = True
         self.write_timeout = None
+        self.timeout = None
         self.out = bytearray()
         self._in = bytearray()
     @property
     def in_waiting(self): return len(self._in)
     def read(self, n): chunk = bytes(self._in[:n]); del self._in[:n]; return chunk
+    def readinto(self, buffer):
+        assert self.timeout == 0, "CDC input must remain non-blocking"
+        count = min(len(buffer), len(self._in))
+        for i in range(count):
+            buffer[i] = self._in[i]
+        del self._in[:count]
+        return count
     def write(self, b): self.out.extend(b); return len(b)
     def feed(self, obj): self._in.extend((json.dumps(obj) + "\n").encode())
 usb_cdc.data = _CDC()

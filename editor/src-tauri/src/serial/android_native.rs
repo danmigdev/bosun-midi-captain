@@ -8,11 +8,9 @@
 //! multi-second read/write hangs even after `android.rs`'s own
 //! `call_with_timeout` watchdog made them survivable rather than fatal.
 //!
-//! Mirrors `midi_android.rs`'s `with_jni` dispatch pattern - every Kotlin
-//! call runs on the Android main thread via wry's JNI pump, with the
-//! result shipped back over a channel so this stays synchronous for
-//! `android.rs`'s I/O thread while all JNI access happens on the main
-//! thread.
+//! Wry's main-thread dispatch is used once to cache the JavaVM and a global
+//! activity reference. Actual Kotlin calls run on attached Rust worker
+//! threads, keeping every blocking USB operation off Android's UI thread.
 //!
 //! Kotlin contract - keep in sync with `BosunSerialBridge.kt`:
 //!
@@ -22,45 +20,62 @@
 //! object BosunSerialBridge {
 //!   const val PORT_NAME = "usb-data"
 //!   @JvmStatic fun listPorts(context: Context): Array<String>
-//!   @JvmStatic fun open(context: Context, port: String): String   // throws on failure
-//!   @JvmStatic fun close(context: Context)
-//!   @JvmStatic fun read(maxLen: Int, timeoutMs: Int): ByteArray   // empty = timeout, never null
-//!   @JvmStatic fun write(data: ByteArray, timeoutMs: Int): Int    // bytes written, or throws
+//!   @JvmStatic fun open(context: Context, port: String, generation: Long): String
+//!   @JvmStatic fun close(context: Context, generation: Long)
+//!   @JvmStatic fun read(generation: Long, maxLen: Int, timeoutMs: Int): ByteArray
+//!   @JvmStatic fun write(generation: Long, data: ByteArray, timeoutMs: Int): Int
 //! }
 //! ```
 #![cfg(target_os = "android")]
 
-use std::sync::mpsc;
+use std::sync::{mpsc, OnceLock};
 
-use jni::objects::{JByteArray, JClass, JObject, JObjectArray, JString, JThrowable, JValue};
-use jni::JNIEnv;
+use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JObjectArray, JString, JThrowable, JValue};
+use jni::{JNIEnv, JavaVM};
 use tauri::wry::prelude::dispatch;
 
 const BRIDGE_CLASS: &str = "com/bosun/app/BosunSerialBridge";
 const GET_APP_CONTEXT_SIG: &str = "()Landroid/content/Context;";
 const LIST_PORTS_SIG: &str = "(Landroid/content/Context;)[Ljava/lang/String;";
-const OPEN_SIG: &str = "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;";
-const CLOSE_SIG: &str = "(Landroid/content/Context;)V";
-const READ_SIG: &str = "(II)[B";
-const WRITE_SIG: &str = "([BI)I";
+const OPEN_SIG: &str = "(Landroid/content/Context;Ljava/lang/String;J)Ljava/lang/String;";
+const CLOSE_SIG: &str = "(Landroid/content/Context;J)V";
+const READ_SIG: &str = "(JII)[B";
+const WRITE_SIG: &str = "(J[BI)I";
 const GET_MESSAGE_SIG: &str = "()Ljava/lang/String;";
 
-/// Run `f` on the Android main thread with a JNI env and the activity, then
-/// wait for its result. See `midi_android.rs::with_jni` - identical
-/// mechanism, duplicated rather than shared because the two modules'
-/// bridged classes are independent Kotlin singletons with no reason to
-/// couple their Rust call sites together.
+struct JniContext {
+    vm: JavaVM,
+    activity: GlobalRef,
+}
+
+static JNI_CONTEXT: OnceLock<JniContext> = OnceLock::new();
+
+/// Cache only the VM/activity handles on Android's UI thread, then execute
+/// every actual bridge call on the Rust caller thread attached to the VM.
+/// This is critical: UsbDeviceConnection bulk I/O must never run inside
+/// wry's main-thread dispatch callback.
 fn with_jni<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> Result<T, String> + Send + 'static,
     T: Send + 'static,
 {
-    let (tx, rx) = mpsc::channel();
-    dispatch(move |env, activity, _webview| {
-        let result = f(env, activity);
-        let _ = tx.send(result);
-    });
-    rx.recv().map_err(|_| "JNI dispatch channel closed".to_string())?
+    if JNI_CONTEXT.get().is_none() {
+        let (tx, rx) = mpsc::channel();
+        dispatch(move |env, activity, _webview| {
+            let result = env.get_java_vm()
+                .map_err(|e| format!("get JavaVM: {e}"))
+                .and_then(|vm| env.new_global_ref(activity)
+                    .map(|activity| JniContext { vm, activity })
+                    .map_err(|e| format!("global activity ref: {e}")));
+            let _ = tx.send(result);
+        });
+        let context = rx.recv().map_err(|_| "JNI bootstrap channel closed".to_string())??;
+        let _ = JNI_CONTEXT.set(context);
+    }
+    let context = JNI_CONTEXT.get().ok_or_else(|| "JNI context unavailable".to_string())?;
+    let mut env = context.vm.attach_current_thread()
+        .map_err(|e| format!("attach JNI worker: {e}"))?;
+    f(&mut env, context.activity.as_obj())
 }
 
 fn application_context<'local>(
@@ -142,7 +157,7 @@ fn jstring_to_rust(env: &mut JNIEnv<'_>, value: &JObject<'_>) -> Result<String, 
 /// Enumerate the synthetic port list ("usb-data" if the Captain is present
 /// on the bus, empty otherwise).
 pub fn available_ports() -> Result<Vec<String>, String> {
-    with_jni(|env, activity| {
+    with_jni(move |env, activity| {
         let context = application_context(env, activity)?;
         let class = bridge_class(env, activity)?;
         let value = env
@@ -168,7 +183,7 @@ pub fn available_ports() -> Result<Vec<String>, String> {
 /// CircuitPython's CDC ACM does not act on the line-coding baud value (see
 /// BosunSerialDevice.setLineCoding's doc comment). Returns the canonical
 /// port name on success.
-pub fn open(path: String, _baud: u32) -> Result<String, String> {
+pub fn open(path: String, _baud: u32, generation: u64) -> Result<String, String> {
     with_jni(move |env, activity| {
         let context = application_context(env, activity)?;
         let port_js = env.new_string(&path).map_err(|e| format!("new_string: {e}"))?;
@@ -176,7 +191,7 @@ pub fn open(path: String, _baud: u32) -> Result<String, String> {
         let value = env
             .call_static_method(
                 class, "open", OPEN_SIG,
-                &[JValue::Object(&context), JValue::Object(&port_js)],
+                &[JValue::Object(&context), JValue::Object(&port_js), JValue::Long(generation as i64)],
             )
             .and_then(|v| v.l());
         take_pending_exception(env)?;
@@ -185,11 +200,11 @@ pub fn open(path: String, _baud: u32) -> Result<String, String> {
     })
 }
 
-pub fn close(_path: String) -> Result<(), String> {
-    with_jni(|env, activity| {
+pub fn close(_path: String, generation: u64) -> Result<(), String> {
+    with_jni(move |env, activity| {
         let context = application_context(env, activity)?;
         let class = bridge_class(env, activity)?;
-        let result = env.call_static_method(class, "close", CLOSE_SIG, &[JValue::Object(&context)]);
+        let result = env.call_static_method(class, "close", CLOSE_SIG, &[JValue::Object(&context), JValue::Long(generation as i64)]);
         take_pending_exception(env)?;
         result.map_err(|e| format!("close: {e}"))?;
         Ok(())
@@ -200,13 +215,13 @@ pub fn close(_path: String) -> Result<(), String> {
 /// string means a normal timeout with nothing available (matches the old
 /// plugin path's contract, which `android.rs`'s `Ok(data) if
 /// !data.is_empty()` check already expects).
-pub fn read(timeout_ms: u64, max_len: usize) -> Result<String, String> {
+pub fn read(timeout_ms: u64, max_len: usize, generation: u64) -> Result<String, String> {
     with_jni(move |env, _activity| {
         let class = bridge_class(env, _activity)?;
         let value = env
             .call_static_method(
                 class, "read", READ_SIG,
-                &[JValue::Int(max_len as i32), JValue::Int(timeout_ms as i32)],
+                &[JValue::Long(generation as i64), JValue::Int(max_len as i32), JValue::Int(timeout_ms as i32)],
             )
             .and_then(|v| v.l());
         take_pending_exception(env)?;
@@ -219,14 +234,14 @@ pub fn read(timeout_ms: u64, max_len: usize) -> Result<String, String> {
 
 /// Writes `data`, blocking at most `timeout_ms`. Returns the byte count
 /// written.
-pub fn write(data: String, timeout_ms: u64) -> Result<usize, String> {
+pub fn write(data: String, timeout_ms: u64, generation: u64) -> Result<usize, String> {
     with_jni(move |env, _activity| {
         let class = bridge_class(env, _activity)?;
         let bytes = data.as_bytes();
         let array = env.byte_array_from_slice(bytes).map_err(|e| format!("write encode: {e}"))?;
         let value = env.call_static_method(
             class, "write", WRITE_SIG,
-            &[JValue::Object(&array), JValue::Int(timeout_ms as i32)],
+            &[JValue::Long(generation as i64), JValue::Object(&array), JValue::Int(timeout_ms as i32)],
         );
         take_pending_exception(env)?;
         let n = value.and_then(|v| v.i()).map_err(|e| format!("write: {e}"))?;

@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bosun_hub.server import run  # noqa: E402
+from bosun_hub.server import MAX_CLIENT_LINE  # noqa: E402
 from tests.fake_pedal import FakePedal  # noqa: E402
 
 
@@ -32,6 +33,15 @@ async def _tcp_roundtrip(port: int) -> None:
         if b"smoke1" in buf and b"ACK" in buf:
             break
     assert b"smoke1" in buf and b"ACK" in buf, buf
+    writer.close()
+    await writer.wait_closed()
+
+
+async def _tcp_oversize_isolated(port: int) -> None:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(b"x" * (MAX_CLIENT_LINE + 1))
+    await writer.drain()
+    assert await asyncio.wait_for(reader.read(1), timeout=2) == b""
     writer.close()
     await writer.wait_closed()
 
@@ -73,6 +83,9 @@ def test_server_smoke(tmp_path_factory=None):
         )
         await asyncio.sleep(1.0)  # let the link sync and listeners bind
         try:
+            await _tcp_roundtrip(9899)
+            await _tcp_oversize_isolated(9899)
+            # Rejecting one abusive client must not affect healthy clients.
             await _tcp_roundtrip(9899)
             await _ws_roundtrip(8091)
             body_html = await asyncio.get_event_loop().run_in_executor(

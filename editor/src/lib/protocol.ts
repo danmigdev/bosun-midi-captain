@@ -388,10 +388,17 @@ export interface MidiInCapturedEvent {
 }
 
 export type FirmwareMessage =
-  | { type: "ACK"; id?: string; fw?: string }
+  | { type: "ACK"; id?: string; fw?: string;
+      /** PUT_FILE_BEGIN capability echo.  Both fields are required before a
+       * host may rely on PUT_FILE_END to resolve an ambiguous chunk ACK. */
+      size_check?: boolean; size?: number }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
   | { type: "ERROR"; id?: string; error: string; of?: string; detail?: string }
-  | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number } }
+  | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number };
+      /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
+      preset_navigation?: Record<string, unknown>;
+      tft_colors?: Record<string, unknown>;
+      tft_labels?: Record<string, unknown> }
   | { type: "GLOBAL"; id?: string; device: Record<string, unknown> }
   | { type: "PATCH_LIST"; id?: string; patches: PatchSummary[] }
   | { type: "PATCH"; id?: string; bank: number; slot: number; patch: Patch }
@@ -427,8 +434,26 @@ export async function listPorts(): Promise<PortInfo[]> {
   return [...serial, ...tcp];
 }
 
+export type DiscoveredHub = { name: string; host: string; tcp_port: number };
+export async function discoverHubs(hint?: string): Promise<DiscoveredHub[]> {
+  return invoke<DiscoveredHub[]>("discover_hubs", { hint: hint ?? null });
+}
+
+// Keep the successful transport through disconnect/reboot. Network sessions
+// must return to their Raspberry instead of probing this computer's USB bus.
+let _tcpReconnectAddress: string | null = null;
 export async function tcpConnect(addr: string): Promise<void> {
   await invoke("tcp_connect", { addr });
+  _tcpReconnectAddress = addr;
+}
+
+export async function reconnectLast(): Promise<string> {
+  if (_tcpReconnectAddress !== null) {
+    const addr = _tcpReconnectAddress;
+    await tcpConnect(addr);
+    return `tcp://${addr}`;
+  }
+  return autoConnect();
 }
 
 // ---- USB-MIDI bridge (Kemper Player <-> pedal) ----
@@ -454,9 +479,12 @@ export async function midiBridgeStatus(): Promise<BridgeStatus> {
 }
 export async function connect(port: string): Promise<void> {
   await invoke("connect", { port });
+  _tcpReconnectAddress = null;
 }
 export async function autoConnect(): Promise<string> {
-  return invoke<string>("auto_connect");
+  const port = await invoke<string>("auto_connect");
+  _tcpReconnectAddress = null;
+  return port;
 }
 export async function disconnect(): Promise<void> {
   // Unblock anyone still waiting on a response - the Rust side is about
@@ -469,7 +497,7 @@ export async function isConnected(): Promise<boolean> {
 }
 
 /** Wait for the firmware to come back online after a self-issued reboot
- * (SWITCH_PROFILE, REBOOT, etc). Tries autoConnect repeatedly within
+ * (SWITCH_PROFILE, REBOOT, etc). Reconnects the last transport within
  * `budgetMs` and verifies the link with a PING. Returns true on
  * success, false on timeout. Always force-disconnects first so a stale
  * Rust handle from before the reboot doesn't block the new connection.
@@ -496,7 +524,7 @@ export async function waitForReboot(budgetMs = 15000): Promise<boolean> {
     while (Date.now() < deadline) {
       try { await disconnect(); } catch {}
       try {
-        await invoke<string>("auto_connect");
+        await reconnectLast();
         // Confirm liveness with a PING - autoConnect's own probe only
         // checks the CDC layer, not that the firmware is responding to
         // protocol messages.
@@ -564,31 +592,63 @@ type PendingResolver = (msg: FirmwareMessage) => void;
 const _pending = new Map<string, PendingResolver>();
 let _awaitListener: UnlistenFn | null = null;
 
+/** A request reached the transport but no correlated response arrived before
+ * its deadline.  For append-only OTA chunks this is materially different
+ * from an explicit firmware ERROR: the bytes may already have been appended
+ * and only the ACK may have been lost.  Keep that distinction structured so
+ * callers never have to parse an error string to decide whether resending is
+ * safe. */
+export class FirmwareCommandTimeoutError extends Error {
+  readonly commandType: string;
+  readonly commandId: string;
+
+  constructor(commandType: string, commandId: string) {
+    super(`timeout: ${commandType}#${commandId}`);
+    this.name = "FirmwareCommandTimeoutError";
+    this.commandType = commandType;
+    this.commandId = commandId;
+  }
+}
+
 /** Set of subscribers receiving every firmware message after drain. */
 const _firmwareSubscribers = new Set<(msg: FirmwareMessage) => void>();
 /** Raw-line subscribers (used by debug listeners that want pre-parse text). */
 const _firmwareRawSubscribers = new Set<(line: string) => void>();
 let _doorbellListener: UnlistenFn | null = null;
+let _doorbellSetup: Promise<void> | null = null;
 let _draining = false;
+let _drainPending = false;
 
 async function _drainOnce(): Promise<void> {
-  if (_draining) return;
+  if (_draining) {
+    _drainPending = true;
+    return;
+  }
   _draining = true;
   try {
-    const lines = await invoke<string[]>("drain_inbox");
-    for (const line of lines) {
-      for (const sub of _firmwareRawSubscribers) sub(line);
-      let obj: FirmwareMessage | null = null;
-      try { obj = JSON.parse(line) as FirmwareMessage; }
-      catch { console.warn("non-json firmware line:", line); continue; }
-      const id = (obj as { id?: string }).id;
-      if (id && _pending.has(id)) {
-        const cb = _pending.get(id)!;
-        _pending.delete(id);
-        cb(obj);
+    do {
+      _drainPending = false;
+      const lines = await invoke<string[]>("drain_inbox");
+      for (const line of lines) {
+        for (const sub of _firmwareRawSubscribers) {
+          try { sub(line); }
+          catch (error) { console.error("firmware raw subscriber failed:", error); }
+        }
+        let obj: FirmwareMessage | null = null;
+        try { obj = JSON.parse(line) as FirmwareMessage; }
+        catch { console.warn("non-json firmware line:", line); continue; }
+        const id = (obj as { id?: string }).id;
+        if (id && _pending.has(id)) {
+          const cb = _pending.get(id)!;
+          _pending.delete(id);
+          cb(obj);
+        }
+        for (const sub of _firmwareSubscribers) {
+          try { sub(obj); }
+          catch (error) { console.error("firmware subscriber failed:", error); }
+        }
       }
-      for (const sub of _firmwareSubscribers) sub(obj);
-    }
+    } while (_drainPending);
   } finally {
     _draining = false;
   }
@@ -596,10 +656,19 @@ async function _drainOnce(): Promise<void> {
 
 async function _ensureDoorbell(): Promise<void> {
   if (_doorbellListener) return;
-  _doorbellListener = await listen("firmware-data-ready", () => { void _drainOnce(); });
-  // Always drain once on subscribe in case the reader queued data before
-  // we registered (e.g. across HMR reloads with a live serial handle).
-  void _drainOnce();
+  if (!_doorbellSetup) {
+    _doorbellSetup = (async () => {
+      const unlisten = await listen("firmware-data-ready", () => { void _drainOnce(); });
+      // A second setup should never win, but dispose it defensively rather
+      // than leaking a native listener if the transport behaves unusually.
+      if (_doorbellListener) unlisten();
+      else _doorbellListener = unlisten;
+      // Always drain once on subscribe in case the reader queued data before
+      // we registered (e.g. across HMR reloads with a live serial handle).
+      void _drainOnce();
+    })().finally(() => { _doorbellSetup = null; });
+  }
+  await _doorbellSetup;
 }
 
 async function _ensureAwaitListener(): Promise<void> {
@@ -617,7 +686,7 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       _pending.delete(id);
-      reject(new Error(`timeout: ${message.type}#${id}`));
+      reject(new FirmwareCommandTimeoutError(message.type, id));
     }, timeoutMs);
     _pending.set(id, (msg) => {
       clearTimeout(timer);
@@ -627,7 +696,10 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
         resolve(msg as T);
       }
     });
-    invoke("send_command", { line: JSON.stringify(message) }).catch((e) => {
+    // Put correlation metadata before potentially large configuration data,
+    // so a memory-constrained receiver can still identify a failed request.
+    const { type: requestType, id: requestId, ...body } = message;
+    invoke("send_command", { line: JSON.stringify({ type: requestType, id: requestId, ...body }) }).catch((e) => {
       clearTimeout(timer);
       _pending.delete(id);
       // Rust's send_command rejects with "not connected" when the
@@ -678,12 +750,50 @@ export async function onReconnected(handler: () => void): Promise<UnlistenFn> {
   return listen("firmware-reconnected", handler);
 }
 
+function unsupportedAndroidFirmwareOta(): Promise<never> {
+  return Promise.reject(new Error(
+    "firmware OTA is not supported by the Android serial backend",
+  ));
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((value, index) => sameJsonValue(value, right[index]));
+  }
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key =>
+    Object.prototype.hasOwnProperty.call(b, key) && sameJsonValue(a[key], b[key]));
+}
+
+async function putGlobal(device: Record<string, unknown>): Promise<Extract<FirmwareMessage, { type: "ACK" }>> {
+  const snapshot = JSON.parse(JSON.stringify(device)) as Record<string, unknown>;
+  try {
+    const result = await sendAndAwait({ type: "PUT_GLOBAL", device: snapshot }, 12000);
+    if (result.type !== "ACK") throw new Error("Unexpected response while saving the configuration.");
+    return result;
+  } catch (error) {
+    if (!(error instanceof FirmwareCommandTimeoutError)) throw error;
+    // A lost/delayed ACK does not prove the write failed. Check what the
+    // Captain now reports, without repeating a write whose outcome is unknown.
+    try {
+      const current = await sendAndAwait({ type: "GET_GLOBAL" }, 10000);
+      if (current.type === "GLOBAL" && sameJsonValue(snapshot, current.device)) return { type: "ACK" };
+    } catch { /* Keep the original save failure if verification also fails. */ }
+    error.message += ". Save could not be confirmed. Check the Captain connection before trying again.";
+    throw error;
+  }
+}
+
 
 export const cmd = {
   ping:           () => send({ type: "PING",            id: nextId() }),
   getDeviceInfo:  () => send({ type: "GET_DEVICE_INFO", id: nextId() }),
   getGlobal:      () => send({ type: "GET_GLOBAL",      id: nextId() }),
-  putGlobal:      (device: Record<string, unknown>) => sendAndAwait({ type: "PUT_GLOBAL", device }, 4000),
+  putGlobal,
   getManifest:    () => send({ type: "GET_MANIFEST",    id: nextId() }),
   // Awaited variant for the retry watchdog (App.svelte): the manifest is by
   // far the largest response in the protocol (22 KB+, streamed field-by-
@@ -724,9 +834,9 @@ export const cmd = {
   putMidiLearn:   (table: MidiLearnTable) => send({ type: "PUT_MIDI_LEARN", id: nextId(), table }),
   reboot:         () => { if (!IS_ANDROID) send({ type: "REBOOT", id: nextId() }); },
   getStats:       () => sendAndAwait<{ type: "STATS" } & DeviceStats>({ type: "STATS" }, 6000),
-  putFileBegin:   (path: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_BEGIN", path }, 5000),
-  putFileChunk:   (path: string, data_b64: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64 }, 5000),
-  putFileEnd:     (path: string) => IS_ANDROID ? Promise.resolve({ type: "ACK" } as FirmwareMessage) : sendAndAwait({ type: "PUT_FILE_END", path }, 5000),
+  putFileBegin:   (path: string, size: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_BEGIN", path, size }, 5000),
+  putFileChunk:   (path: string, data_b64: string, offset: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64, offset }, 5000),
+  putFileEnd:     (path: string) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_END", path }, 5000),
 
   // ----- profiles -----
   listProfiles:   () => sendAndAwait<{ type: "PROFILE_LIST"; profiles: ProfileInfo[]; active: string }>(

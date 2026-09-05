@@ -171,15 +171,22 @@ class UsbMidiDevice private constructor(
      * beats a stuck pedal" philosophy already used on the firmware side's
      * own USB-MIDI retry loop (see midi.py's _tx_usb).
      */
-    fun send(message: ByteArray) {
-        val ep = outEndpoint ?: return
+    @Synchronized
+    fun send(message: ByteArray): Boolean {
+        val ep = outEndpoint ?: return false
         for (packet in UsbMidiPacketCodec.encode(message)) {
-            try {
+            val written = try {
                 connection.bulkTransfer(ep, packet, packet.size, WRITE_TIMEOUT_MS)
             } catch (e: Exception) {
                 Log.e(TAG, "[$label] bulkTransfer write threw", e)
+                return false
+            }
+            if (written != packet.size) {
+                Log.e(TAG, "[$label] short bulkTransfer write: $written/${packet.size}")
+                return false
             }
         }
+        return true
     }
 
     /** Stops the read loop and releases the interface/connection. Safe to

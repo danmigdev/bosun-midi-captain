@@ -85,7 +85,9 @@ class MainActivity : TauriActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        usbReceiver?.let { unregisterReceiver(it) }
+        usbReceiver?.let { receiver -> runCatching { unregisterReceiver(receiver) } }
+        usbReceiver = null
+        requestedDevice = null
         super.onDestroy()
     }
 

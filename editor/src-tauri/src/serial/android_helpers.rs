@@ -10,6 +10,7 @@
 /// Extract the port index from a serialplugin port path.
 /// Port paths look like /dev/bus/usb/001/002#0, /dev/bus/usb/001/002#1.
 /// Returns -1 when the name has no #N suffix.
+#[cfg(any(target_os = "android", test))]
 pub fn port_index(name: &str) -> i32 {
     name.rsplit('#').next()
         .and_then(|n| n.parse::<i32>().ok())
@@ -19,6 +20,7 @@ pub fn port_index(name: &str) -> i32 {
 /// Sort port names in descending index order so the data CDC (index 1+)
 /// is tried before the console CDC (index 0).  Opening the console CDC
 /// asserts DTR and soft-resets CircuitPython, killing the connection.
+#[cfg(any(target_os = "android", test))]
 pub fn sort_ports_desc(ports: &mut Vec<String>) {
     ports.sort_by(|a, b| port_index(b).cmp(&port_index(a)));
 }
@@ -31,14 +33,21 @@ pub fn sort_ports_desc(ports: &mut Vec<String>) {
 pub fn marker_found(buf: &[u8], id: &str) -> bool {
     let compact = format!("\"id\":\"{}\"", id);
     let spaced = format!("\"id\": \"{}\"", id);
-    buf.windows(compact.len()).any(|w| w == compact.as_bytes())
-        || buf.windows(spaced.len()).any(|w| w == spaced.as_bytes())
+    let ack_compact = b"\"type\":\"ACK\"";
+    let ack_spaced = b"\"type\": \"ACK\"";
+    buf.split(|b| *b == b'\n').any(|line| {
+        let has_id = line.windows(compact.len()).any(|w| w == compact.as_bytes())
+            || line.windows(spaced.len()).any(|w| w == spaced.as_bytes());
+        has_id && (line.windows(ack_compact.len()).any(|w| w == ack_compact)
+            || line.windows(ack_spaced.len()).any(|w| w == ack_spaced))
+    })
 }
 
 /// Classify a serialplugin error message.  The plugin returns read
 /// timeouts as Err("no data received within N ms") rather than an
 /// empty Ok(..) like desktop serial2; treating those as fatal killed
 /// the connection on the very first idle read (2026-08-12 regression).
+#[cfg(any(target_os = "android", test))]
 pub fn is_transient_error(msg: &str) -> bool {
     msg.contains("lock timeout")
         || msg.contains("no data received")
@@ -58,6 +67,7 @@ pub fn is_transient_error(msg: &str) -> bool {
 /// writes with no intervening successful read catches that case
 /// independently of the wall-clock check, which still covers the
 /// complementary "nothing sent and nothing received" idle-but-dead case.
+#[cfg(any(target_os = "android", test))]
 pub fn is_write_only_stall(writes_since_last_read: u32, threshold: u32) -> bool {
     writes_since_last_read >= threshold
 }
@@ -83,6 +93,7 @@ pub fn is_write_only_stall(writes_since_last_read: u32, threshold: u32) -> bool 
 /// abandoned if `f` never returns - a leaked thread is a strictly better
 /// outcome than a permanently frozen I/O loop, and it only happens on the
 /// rare occasion the underlying call actually wedges.
+#[cfg(any(target_os = "android", test))]
 pub fn call_with_timeout<T, F>(timeout: std::time::Duration, f: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -142,6 +153,18 @@ mod tests {
     fn marker_matches_compact_format() {
         let ack = b"{\"type\":\"ACK\",\"id\":\"__sync_123_456\"}\n";
         assert!(marker_found(ack, "__sync_123_456"));
+    }
+
+    #[test]
+    fn marker_rejects_non_ack_with_same_id() {
+        let event = b"{\"type\":\"EVENT\",\"id\":\"__sync_123_456\"}\n";
+        assert!(!marker_found(event, "__sync_123_456"));
+    }
+
+    #[test]
+    fn marker_requires_ack_and_id_on_same_protocol_line() {
+        let mixed = b"{\"type\":\"ACK\",\"id\":\"other\"}\n{\"type\":\"EVENT\",\"id\":\"__sync_123_456\"}\n";
+        assert!(!marker_found(mixed, "__sync_123_456"));
     }
 
     #[test]
@@ -205,7 +228,8 @@ mod tests {
         // Mirrors the intended call site: the counter is reset to 0 the
         // instant ANY read returns data, regardless of which outstanding
         // write it happens to answer.
-        let mut writes_since_last_read: u32 = 4;
+        let mut writes_since_last_read: u32 = 5;
+        assert!(is_write_only_stall(writes_since_last_read, 5));
         writes_since_last_read = 0; // a read arrived
         assert!(!is_write_only_stall(writes_since_last_read, 5));
     }

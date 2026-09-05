@@ -525,17 +525,18 @@ Builds:
       - export WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$(pwd)/app/src/main/java/com/bosun/app/generated"
       - export WRY_ANDROID_PACKAGE="com.bosun.app"
       - export WRY_ANDROID_LIBRARY="bosun_editor_lib"
-      # editor/src-tauri/resources/{firmware,lib} are gitignored (hand-
-      # synced from firmware/ locally, or provisioned as a CI step -
-      # release.yml's "Provision bundled firmware resources"). Tauri's own
-      # build.rs needs at least the directories to exist even if resources/
-      # lib stays empty (that's all release.yml itself does - the fuller
-      # firmware/lib/ sync is a LOCAL packaging step, not part of the
-      # release artifact). Confirmed live 2026-08-16, pipeline #2763746808:
+      # editor/src-tauri/resources/{firmware,lib} are gitignored derived
+      # trees. Use the same verified helpers as local and release.yml builds:
+      # provision_adafruit_bundle.py installs the exact nine vendor files from
+      # the locked CP9 archive, then sync_firmware_resources.py adds Bosun's
+      # own trees. Hand-written cp variants previously drifted and could also
+      # nest an existing destination as resources/firmware/firmware. Tauri's
+      # own build.rs requires both directories. Confirmed live 2026-08-16,
+      # pipeline #2763746808:
       # got all the way to compiling bosun-editor itself before failing
       # with "resource path 'resources/lib' doesn't exist" - every one of
       # its ~150 dependencies built fine first.
-      - cd ../../../.. && mkdir -p editor/src-tauri/resources/firmware editor/src-tauri/resources/lib && cp -r firmware editor/src-tauri/resources/firmware && find editor/src-tauri/resources/firmware -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null; curl -fL -o editor/src-tauri/resources/circuitpython.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2
+      - cd ../../../.. && rm -rf editor/src-tauri/resources/firmware editor/src-tauri/resources/lib && mkdir -p editor/src-tauri/resources/lib && curl -fL -o editor/src-tauri/resources/circuitpython.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2 && python3 tools/provision_adafruit_bundle.py --destination editor/src-tauri/resources/lib && python3 tools/sync_firmware_resources.py --repo-root .
       - cd editor && npm ci && npm run build
       # Building all four targets in one cargo invocation (multiple
       # --target flags, each gets its own target/<triple>/release/ dir) -
@@ -556,9 +557,10 @@ Builds:
       # resources/{circuitpython.uf2,firmware,lib} to bundle-root paths -
       # done by Tauri's own bundler (part of the real `tauri android
       # build`, which this recipe deliberately never calls), not by cargo
-      # build or gradlew on their own. resources/lib stays empty in every
-      # real release too (release.yml's own comment), so it's absent from
-      # BOTH sides of the diff - only the other two needed copying.
+      # build or gradlew on their own. The shared sync now populates
+      # resources/lib with the canonical Bosun libraries and the SHA-locked
+      # Adafruit dependencies on both sides, so the manual asset staging below
+      # must copy it as well.
       #
       # RESOLVED (2026-08-16, pipeline for commit 37b1acc6): the plain `cp`
       # for tauri.conf.json was itself wrong, though - the reference APK's
@@ -596,6 +598,7 @@ Builds:
       - printf '%s' '{"$schema":"https://schema.tauri.app/config/2","productName":"Bosun","version":"0.6.0","identifier":"com.bosun.app","app":{"windows":[{"label":"main","create":true,"url":"index.html","dragDropEnabled":true,"center":false,"width":1100.0,"height":720.0,"minWidth":800.0,"minHeight":600.0,"resizable":true,"maximizable":true,"minimizable":true,"closable":true,"title":"Bosun","fullscreen":false,"focus":true,"focusable":true,"transparent":false,"maximized":false,"visible":true,"decorations":true,"alwaysOnBottom":false,"alwaysOnTop":false,"visibleOnAllWorkspaces":false,"contentProtected":false,"skipTaskbar":false,"titleBarStyle":"Visible","hiddenTitle":false,"acceptFirstMouse":false,"shadow":true,"incognito":false,"zoomHotkeysEnabled":false,"browserExtensionsEnabled":false,"useHttpsScheme":false,"javascriptDisabled":false,"allowLinkPreview":true,"disableInputAccessoryView":false,"scrollBarStyle":"default","generalAutofillEnabled":true}],"security":{"freezePrototype":false,"dangerousDisableAssetCspModification":false,"assetProtocol":{"scope":[],"enable":false},"pattern":{"use":"brownfield"},"capabilities":[]},"macOSPrivateApi":false,"withGlobalTauri":false,"enableGTKAppId":false},"build":{"devUrl":"http://localhost:1420/","frontendDist":"../dist","beforeDevCommand":"npm run dev","beforeBuildCommand":"npm run build","removeUnusedCommands":false,"additionalWatchFolders":[]},"bundle":{"active":true,"targets":[],"createUpdaterArtifacts":false,"icon":["icons/32x32.png","icons/128x128.png","icons/icon.icns","icons/icon.ico"],"resources":{"resources/firmware":"firmware","resources/lib":"lib","resources/circuitpython.uf2":"circuitpython.uf2"},"shortDescription":"Editor for PaintAudio MIDI Captain controllers running Bosun firmware.","longDescription":"Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more).","useLocalToolsDir":false,"windows":{"digestAlgorithm":null,"certificateThumbprint":null,"timestampUrl":null,"tsp":false,"webviewInstallMode":{"type":"downloadBootstrapper","silent":true},"allowDowngrades":true,"minimumWebview2Version":null,"wix":null,"nsis":null,"signCommand":null},"linux":{"appimage":{"bundleMediaFramework":false,"files":{}},"deb":{"files":{}},"rpm":{"release":"1","epoch":0,"files":{}}},"macOS":{"files":{},"minimumSystemVersion":"10.13","hardenedRuntime":true,"dmg":{"windowSize":{"width":660,"height":400},"appPosition":{"x":180,"y":170},"applicationFolderPosition":{"x":480,"y":170}}},"iOS":{"minimumSystemVersion":"14.0"},"android":{"minSdkVersion":29,"versionCode":29,"autoIncrementVersionCode":false}},"plugins":{}}' > src-tauri/gen/android/app/src/main/assets/tauri.conf.json
       - cp src-tauri/resources/circuitpython.uf2 src-tauri/gen/android/app/src/main/assets/circuitpython.uf2
       - cp -r src-tauri/resources/firmware src-tauri/gen/android/app/src/main/assets/firmware
+      - cp -r src-tauri/resources/lib src-tauri/gen/android/app/src/main/assets/lib
       # app/build.gradle.kts reads versionCode/versionName from gen/android/
       # app/tauri.properties (gitignored - app/.gitignore: /tauri.properties),
       # falling back to "1"/"1.0" if that file doesn't exist - which is

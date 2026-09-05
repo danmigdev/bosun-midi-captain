@@ -13,7 +13,6 @@
     "core:window:default",
     "core:path:default",
     "core:app:default",
-    "shell:default",
     "window-state:default"
   ]
 }

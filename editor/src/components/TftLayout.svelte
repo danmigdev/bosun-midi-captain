@@ -37,6 +37,8 @@
   let saving = $state(false);
   let savedAt = $state<string>("");
   let err = $state<string>("");
+  let expressionPreviewMode = $state("VOL");
+  let hasExpressionEntry = $derived(layout.some(e => e.field === "expression_mode"));
 
   let lastFingerprint = $state("");
   $effect(() => {
@@ -59,6 +61,7 @@
     { id: "slot",        label: "Captain slot",     source: "core" },
     { id: "setlist_pos", label: "Setlist position", source: "core" },
     { id: "hold_effect", label: "Held effect",      source: "core" },
+    { id: "expression_mode", label: "Expression pedal mode (VOL/WAH)", source: "core" },
   ];
   let pluginFields = $derived.by<FieldOpt[]>(() => {
     if (!manifest) return [];
@@ -78,7 +81,10 @@
     }
     return out;
   });
-  let allFields = $derived<FieldOpt[]>([...CORE_FIELDS, ...pluginFields]);
+  let allFields = $derived<FieldOpt[]>([
+    ...CORE_FIELDS.filter(core => !pluginFields.some(field => field.id === core.id)),
+    ...pluginFields,
+  ]);
 
   function addEntry() {
     layout = [...layout, {
@@ -95,12 +101,25 @@
     layout = layout.filter((_, idx) => idx !== i);
   }
 
+  function addExpressionEntry() {
+    // Opt-in for existing layouts: opening the editor never inserts or moves
+    // user labels. Match the Kemper new-profile default's bottom-right row.
+    layout = [...layout, {
+      field: "expression_mode",
+      halign: "right", valign: "bottom", x: -6, y: -6,
+      size: 2, color: "#ffffff", font: "system",
+    }];
+  }
+
   // ---- vertical pack / distribute helpers ----
   const TFT_HEIGHT = 240;
   const LINE_HEIGHT_BASE = 12;   // terminalio.FONT at scale 1; close enough for BDF too
 
   function labelHeight(e: LayoutEntry): number {
-    return LINE_HEIGHT_BASE * Math.max(1, e.size ?? 1);
+    // The firmware badge includes terminalio's 14px text bounds; its icon
+    // is 8x12 with a 2px gap. Account for it in vertical packing as well.
+    const base = e.field === "expression_mode" ? 14 : LINE_HEIGHT_BASE;
+    return base * Math.max(1, e.size ?? 1);
   }
 
   function packTop() {
@@ -227,6 +246,9 @@
   function previewText(e: LayoutEntry): string {
     const pfx = e.prefix ?? "";
     const sfx = e.suffix ?? "";
+    if (e.field === "expression_mode") {
+      return pfx + (expressionPreviewMode || "---") + sfx;
+    }
     if (e.field) {
       const v = PREVIEW_CTX[e.field] ?? "";
       return pfx + String(v) + sfx;
@@ -314,8 +336,12 @@
         <div class="entry">
           <div class="row">
             <label class="field">Field
-              <select bind:value={e.field}>
+              <select value={e.field ?? ""}
+                      onchange={(ev) => e.field = (ev.target as HTMLSelectElement).value}>
                 <option value="">- literal text -</option>
+                {#if e.field && !allFields.some(f => f.id === e.field)}
+                  <option value={e.field}>{e.field}</option>
+                {/if}
                 {#each allFields as f}
                   <option value={f.id}>{f.source} · {f.label}</option>
                 {/each}
@@ -329,12 +355,14 @@
           </div>
           <div class="row">
             <label>H-align
-              <select bind:value={e.halign}>
+              <select value={e.halign ?? "left"}
+                      onchange={(ev) => e.halign = (ev.target as HTMLSelectElement).value as LayoutEntry["halign"]}>
                 {#each HALIGN as a}<option value={a}>{a}</option>{/each}
               </select>
             </label>
             <label>V-align
-              <select bind:value={e.valign}>
+              <select value={e.valign ?? "top"}
+                      onchange={(ev) => e.valign = (ev.target as HTMLSelectElement).value as LayoutEntry["valign"]}>
                 {#each VALIGN as a}<option value={a}>{a}</option>{/each}
               </select>
             </label>
@@ -350,7 +378,8 @@
               </select>
             </label>
             <label class="chk" title="Scroll the text horizontally when it is too wide for the screen">Scroll
-              <input type="checkbox" bind:checked={e.scroll} />
+              <input type="checkbox" checked={e.scroll ?? false}
+                     onchange={(ev) => e.scroll = (ev.target as HTMLInputElement).checked} />
             </label>
             {#if e.scroll}
               <label title="Scroll speed in pixels per second">Speed
@@ -368,10 +397,20 @@
         </div>
       {/each}
       <button class="addbtn" onclick={addEntry}>+ Add label</button>
+      <button class="addbtn" onclick={addExpressionEntry}>+ Add pedal indicator</button>
     </div>
 
     <div class="previewWrap">
       <h3>Preview (240×240)</h3>
+      {#if hasExpressionEntry}
+        <label class="pedalPreview">Pedal preview
+          <select bind:value={expressionPreviewMode}>
+            <option value="VOL">VOL</option>
+            <option value="WAH">WAH</option>
+            <option value="">Unknown (---)</option>
+          </select>
+        </label>
+      {/if}
       <div class="preview" style="width: {PREV_W}px; height: {PREV_H}px;">
         {#each layout as e, i (i)}
           {@const scrolling = !!e.scroll && (marqueeSpan[i] ?? 0) > 0}
@@ -381,16 +420,28 @@
           {@const baseY = v === "center" ? PREV_H/2 : (v === "bottom" ? PREV_H : 0)}
           {@const tx = scrolling ? "0" : (h === "center" ? "-50%" : (h === "right" ? "-100%" : "0"))}
           {@const ty = v === "center" ? "-50%" : (v === "bottom" ? "-100%" : "0")}
-          {@const boxH = (e.size ?? 1) * 12}
+          {@const boxH = labelHeight(e)}
           {@const offX = scrolling ? 0 : e.x}
           <div class="prevlabel"
                style="left:{baseX + offX}px; top:{baseY + e.y}px;
                       transform: translate({tx}, {ty});
-                      color:{e.color}; font-size:{e.size * 9}px;
+                      color:{e.color}; font-size:{e.size * (e.field === "expression_mode" ? 10 : 9)}px;
                       height:{boxH}px; line-height:{boxH}px;">
             <span class="marqueeInner"
                   use:marquee={{ enabled: !!e.scroll, speed: e.scroll_speed ?? SCROLL_DEFAULT_SPEED,
-                                 text: previewText(e), size: e.size, idx: i }}>{previewText(e)}</span>
+                                 text: previewText(e), size: e.size, idx: i }}>{#if e.field === "expression_mode"}<svg
+                    class="pedalIcon" aria-hidden="true" viewBox="0 0 16 12"
+                    data-mode={expressionPreviewMode || "---"}
+                    width={16 * e.size} height={12 * e.size}
+                    style:margin-right="{2 * e.size}px"
+                    style:visibility={expressionPreviewMode ? "visible" : "hidden"}
+                    fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
+                    {#if expressionPreviewMode === "VOL"}
+                      <path d="M1 10.5H14.5V1.5Z" fill="currentColor" stroke="none" />
+                    {:else if expressionPreviewMode === "WAH"}
+                      <path d="M1 6.5 14 2 14.5 3.5 1.5 8Z M7 6.5V9 M9 6V9 M1 9.5H14.5V11H1Z" />
+                    {/if}
+                  </svg>{/if}{previewText(e)}</span>
           </div>
         {/each}
       </div>
@@ -472,6 +523,8 @@
     outline-offset: 0;
   }
   .marqueeInner { display: inline-block; white-space: nowrap; will-change: transform; }
+  .pedalIcon { display: inline-block; vertical-align: middle; }
+  .pedalPreview { margin-bottom: 0.5rem; }
   .prevhint { color: var(--text-dim); font-size: 0.72rem; margin: 0.4rem 0 0; max-width: 240px; }
 
   /* ---------- mobile ---------- */

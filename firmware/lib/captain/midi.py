@@ -15,12 +15,17 @@ class MidiParser:
     excludes the leading 0xF0 and trailing 0xF7. This lets the caller
     iterate one homogeneous event stream."""
 
+    # Kemper frames are small (normally tens of bytes).  Keep enough room for
+    # future extensions, but never let a missing F7 consume the RP2040 heap.
+    MAX_SYSEX_BYTES = 1024
+
     def __init__(self):
         self._status = 0
         self._data = []
         self._expected = 0
         self._in_sysex = False
         self._sysex_buf = []
+        self._sysex_overflow = False
 
     def feed(self, data):
         out = []
@@ -29,16 +34,27 @@ class MidiParser:
                 continue                          # real-time, single byte, skip
             if self._in_sysex:
                 if b == 0xF7:
-                    out.append((0, 0xF0, list(self._sysex_buf)))
+                    if not self._sysex_overflow:
+                        out.append((0, 0xF0, list(self._sysex_buf)))
                     self._sysex_buf = []
                     self._in_sysex = False
+                    self._sysex_overflow = False
                 elif b < 0x80:
-                    self._sysex_buf.append(b)
+                    if not self._sysex_overflow:
+                        if len(self._sysex_buf) < self.MAX_SYSEX_BYTES:
+                            self._sysex_buf.append(b)
+                        else:
+                            # Discard the oversized frame until F7.  Keeping
+                            # the parser in SYSEX mode prevents its tail from
+                            # being mistaken for channel messages.
+                            self._sysex_buf = []
+                            self._sysex_overflow = True
                 else:
                     # Stray status byte inside SYSEX - abort current SYSEX,
                     # then re-process this byte through the normal path.
                     self._sysex_buf = []
                     self._in_sysex = False
+                    self._sysex_overflow = False
                     # Fall through to the normal status handling below.
                     if b == 0xF0:
                         self._in_sysex = True
@@ -54,6 +70,7 @@ class MidiParser:
                 self._data = []
                 self._expected = 0
                 self._in_sysex = True
+                self._sysex_overflow = False
                 continue
             if b >= 0xF0:
                 self._status = 0                  # system common, drops running status
@@ -229,7 +246,22 @@ class MidiEngine:
             # effect LEDs) went stale after a rig change, and rig selection
             # itself sometimes silently failed to register - both explained
             # by a corrupted/lost message during the post-change burst.
-            data = self.usb_in.read(256)
+            try:
+                data = self.usb_in.read(256)
+            except MemoryError:
+                # A file/config transaction can temporarily fragment the
+                # small RP2040 heap enough that usb_midi cannot allocate its
+                # normal 257-byte result.  One failed read used to abort every
+                # main-loop tick, taking protocol replies and Stage updates
+                # down with it.  Collect and drain a smaller emergency slice;
+                # the normal 256-byte path remains unchanged when memory is
+                # healthy, so rig-change bursts still drain quickly.
+                try:
+                    import gc
+                    gc.collect()
+                    data = self.usb_in.read(64)
+                except MemoryError:
+                    data = None
             if data:
                 for ch, status, dlist in self._usb_parser.feed(data):
                     events.append(("usb", ch, status, dlist))

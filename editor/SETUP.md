@@ -31,8 +31,8 @@ This pulls in `@tauri-apps/api`, `@tauri-apps/cli`, Svelte, Vite, TypeScript.
 ## Download installer assets
 
 The **Pedal setup** wizard needs the CircuitPython UF2 image and a few
-Adafruit libraries bundled with the editor. One-time fetch (and re-run
-whenever you bump CircuitPython or the firmware tree):
+Adafruit libraries bundled with the editor. Run this once, and again only
+when changing CircuitPython or the Adafruit bundle:
 
 ```
 pwsh -File tools\download-assets.ps1
@@ -44,8 +44,36 @@ This populates `editor/src-tauri/resources/` with:
 - `lib/adafruit_display_text/`, `lib/adafruit_st7789.mpy`, `lib/neopixel.mpy`, `lib/adafruit_pixelbuf.mpy`
 - `firmware/` - mirror of the repo's top-level `firmware/` tree
 
+Android and portable builds run `tools/sync_firmware_resources.py`
+automatically before packaging. It refreshes the firmware mirror, preserves
+the vendored Adafruit libraries, excludes caches, and verifies SHA-256 hashes.
+To audit the derived trees without changing them, run:
+
+```
+python tools/sync_firmware_resources.py --check
+```
+
 If you skip this step the editor still launches, but the Pedal Setup wizard
 will report "Installer assets are missing" and refuse to flash.
+
+## Connect through a Raspberry Pi
+
+On the connection screen, choose **Raspberry Pi (network)**. Bosun searches
+the local network automatically; select a discovered hub, then **Connect**.
+Use **Find Raspberry Pi** to search again, or enter its **IP address or
+hostname** and **Port** directly (default `9876`). The Captain stays plugged
+into the Raspberry Pi by USB. This computer only needs a network connection.
+
+Bosun saves the connection method, address and port for the next launch.
+Reconnecting after a firmware reboot uses the same Raspberry. To change the
+address while connected, choose **Disconnect**, edit the fields and connect
+again. **USB** selects a Captain plugged directly into this computer.
+
+Automatic discovery requires the updated [Bosun Hub](../tools/rpi-hub/README.md)
+on the same local network and UDP port `9877` to be reachable. Manual
+connection also works when broadcasts are blocked or the hub runs an older
+version. Hostnames such as `bosun-hub.local` depend on the operating system's
+name resolution; an IP address works without it.
 
 ## Dev loop
 
@@ -76,9 +104,9 @@ installer assets (`circuitpython.uf2`, `firmware\`, `lib\`) and zips it to
 and double-clicks `Bosun.exe` - no install, no admin rights. WebView2 ships
 with Windows 11; older Windows needs the free Microsoft WebView2 runtime.
 
-Run `tools\download-assets.ps1` once first so the assets exist under
-`src-tauri/resources/`. Use `-SkipBuild` to repackage an existing
-`target\release` build.
+Run `tools\download-assets.ps1` once first so the UF2 and vendored libraries
+exist under `src-tauri/resources/`. Firmware changes are synchronized on every
+package run. Use `-SkipBuild` to repackage an existing `target\release` build.
 
 ## Build a release binary (bare exe)
 

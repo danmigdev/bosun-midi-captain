@@ -61,7 +61,9 @@ class BosunSerialService : Service() {
                 .build()
 
         startForeground(NOTIFICATION_ID, notification)
-        return START_STICKY
+        // The connection itself is process-local. Recreating only the
+        // notification after a process death would falsely claim a live link.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {

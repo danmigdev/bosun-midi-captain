@@ -12,7 +12,7 @@
 #![cfg(target_os = "android")]
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -63,6 +63,26 @@ const WRITE_TIMEOUT_MS: u64 = 1000;
 /// a DTR-triggered USB re-enumeration that tears down the Kemper MIDI
 /// bridge, was firing every ~15-30 s purely from Stage-view idleness).
 const KEEPALIVE_IDLE: Duration = Duration::from_secs(6);
+const MAX_INBOX_LINES: usize = 4096;
+const MAX_OUTBOX_LINES: usize = 1024;
+const MAX_ACCUM_BYTES: usize = 1024 * 1024;
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn push_bounded(q: &mut VecDeque<String>, line: String, max: usize) {
+    while q.len() >= max { q.pop_front(); }
+    q.push_back(line);
+}
+
+fn append_bounded(accum: &mut Vec<u8>, bytes: &[u8]) {
+    if bytes.len() >= MAX_ACCUM_BYTES {
+        accum.clear();
+        accum.extend_from_slice(&bytes[bytes.len() - MAX_ACCUM_BYTES..]);
+        return;
+    }
+    let overflow = accum.len().saturating_add(bytes.len()).saturating_sub(MAX_ACCUM_BYTES);
+    if overflow > 0 { accum.drain(..overflow); }
+    accum.extend_from_slice(bytes);
+}
 
 
 // --------------------- shared app state ---------------------
@@ -80,6 +100,7 @@ pub struct SerialHandle {
     pub path: String,
     pub stop: Arc<Mutex<bool>>,
     pub alive: Arc<AtomicBool>,
+    pub generation: u64,
 }
 
 impl SerialHandle {
@@ -104,8 +125,11 @@ pub struct PortInfo {
 // --------------------- list ---------------------
 
 #[tauri::command]
-pub fn list_ports(_app: AppHandle) -> Result<Vec<PortInfo>, String> {
-    let names = available_ports().map_err(|e| format!("list ports: {}", e))?;
+pub async fn list_ports(_app: AppHandle) -> Result<Vec<PortInfo>, String> {
+    let names = tauri::async_runtime::spawn_blocking(available_ports)
+        .await
+        .map_err(|e| format!("list ports worker: {e}"))?
+        .map_err(|e| format!("list ports: {}", e))?;
     let out: Vec<PortInfo> = names
         .into_iter()
         .map(|name| PortInfo {
@@ -127,16 +151,23 @@ pub async fn connect(
 ) -> Result<(), String> {
     let last_dead_reason = state.last_dead_reason.clone();
 
-    let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
-    if let Some(existing) = guard.as_ref() {
-        if existing.is_alive() {
-            return Err("already connected".into());
+    {
+        let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
+        if let Some(existing) = guard.as_ref() {
+            if existing.is_alive() {
+                return Err("already connected".into());
+            }
+            if let Ok(mut s) = existing.stop.lock() { *s = true; }
+            *guard = None;
         }
-        if let Ok(mut s) = existing.stop.lock() { *s = true; }
-        *guard = None;
     }
 
-    let canonical = open(port.clone(), 115_200)
+    let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let open_port = port.clone();
+    let canonical = tauri::async_runtime::spawn_blocking(move || {
+        open(open_port, 115_200, generation)
+    }).await
+        .map_err(|e| format!("open worker: {e}"))?
         .map_err(|e| format!("open: {}", e))?;
 
     // Single I/O thread: reads incoming data, writes queued commands.
@@ -156,6 +187,19 @@ pub async fn connect(
     let sync_sent = Arc::new(Mutex::new(false));
     let sync_sent_for_thread = sync_sent.clone();
     let (sync_tx, sync_rx) = std::sync::mpsc::channel::<bool>();
+
+    // Publish the in-progress session before waiting for the handshake so
+    // disconnect() can cancel it. Generation fencing in Kotlin guarantees
+    // that a late JNI completion from this session cannot touch a successor.
+    {
+        let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
+        *guard = Some(SerialHandle {
+            path: canonical.clone(),
+            stop: stop.clone(),
+            alive: alive.clone(),
+            generation,
+        });
+    }
 
     thread::spawn(move || {
         eprintln!("[io] thread started");
@@ -207,7 +251,7 @@ pub async fn connect(
                 // call never returned; kept guarded here as a second line
                 // of defense).
                 let close_path = path.clone();
-                let close_result = call_with_timeout(IO_CALL_TIMEOUT, move || close(close_path));
+                let close_result = call_with_timeout(IO_CALL_TIMEOUT, move || close(close_path, generation));
                 if let Err(timeout_msg) = close_result {
                     eprintln!("[io] close hung: {}", timeout_msg);
                 }
@@ -239,7 +283,7 @@ pub async fn connect(
                                 let name_for_log = name.clone();
                                 let open_name = name.clone();
                                 let open_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                                    open(open_name, 115_200)
+                                    open(open_name, 115_200, generation)
                                 });
                                 match open_result {
                                     Ok(Ok(p)) => { path = p; reopened = true; break; }
@@ -288,17 +332,17 @@ pub async fn connect(
                 // reaches the instrumented main loop.
                 let ping_line_for_call = ping_line.clone();
                 let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                    write(ping_line_for_call, WRITE_TIMEOUT_MS)
+                    write(ping_line_for_call, WRITE_TIMEOUT_MS, generation)
                 });
                 if let Err(timeout_msg) = write_result {
                     eprintln!("[io] sentinel write hung: {}", timeout_msg);
                 }
                 let deadline = std::time::Instant::now() + Duration::from_secs(3);
                 while std::time::Instant::now() < deadline && !synced {
-                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, || read(100, 4096));
+                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || read(100, 4096, generation));
                     match read_result {
                         Ok(Ok(data)) if !data.is_empty() => {
-                            accum.extend_from_slice(data.as_bytes());
+                            append_bounded(&mut accum, data.as_bytes());
                             if marker_found(&accum, &sync_id) {
                                 synced = true;
                             }
@@ -326,7 +370,7 @@ pub async fn connect(
                     if line.is_empty() { continue; }
                     if let Ok(s) = std::str::from_utf8(&line) {
                         if let Ok(mut q) = inbox_for_thread.lock() {
-                            q.push_back(s.to_string());
+                            push_bounded(&mut q, s.to_string(), MAX_INBOX_LINES);
                             pushed += 1;
                         }
                     }
@@ -401,7 +445,7 @@ pub async fn connect(
                         if !line.ends_with('\n') { line.push('\n'); }
                         let line_for_retry = line.trim_end().to_string();
                         let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                            write(line, WRITE_TIMEOUT_MS)
+                            write(line, WRITE_TIMEOUT_MS, generation)
                         });
                         match write_result {
                             Ok(Ok(_)) => {
@@ -445,7 +489,7 @@ pub async fn connect(
                 let mut new_lines = 0;
                 let mut chunk_seq: u64 = 0;
                 loop {
-                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, || read(150, 4096));
+                    let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || read(150, 4096, generation));
                     let read_result = match read_result {
                         Ok(inner) => inner,
                         Err(timeout_msg) => {
@@ -465,7 +509,7 @@ pub async fn connect(
                             writes_since_last_read = 0;
                             chunk_seq += 1;
                             eprintln!("[chunk] #{} {} bytes", chunk_seq, data.len());
-                            accum.extend_from_slice(data.as_bytes());
+                            append_bounded(&mut accum, data.as_bytes());
                             while let Some(pos) = accum.iter().position(|b| *b == b'\n') {
                                 let mut line: Vec<u8> = accum.drain(..=pos).collect();
                                 while matches!(line.last(), Some(b'\n') | Some(b'\r')) { line.pop(); }
@@ -488,7 +532,7 @@ pub async fn connect(
                                         }
                                     }
                                     if let Ok(mut q) = inbox_for_thread.lock() {
-                                        q.push_back(s.to_string());
+                                        push_bounded(&mut q, s.to_string(), MAX_INBOX_LINES);
                                         new_lines += 1;
                                     }
                                 }
@@ -522,32 +566,57 @@ pub async fn connect(
     // thread retries the PING for up to 20 s while the firmware
     // reboots (DTR-triggered CP reset); refetchAll must not start
     // until the firmware has ACKed.
-    match sync_rx.recv_timeout(Duration::from_secs(25)) {
-        Ok(true) => {
-            *guard = Some(SerialHandle { path: canonical, stop, alive });
-            Ok(())
-        }
+    let sync_result = tauri::async_runtime::spawn_blocking(move || {
+        sync_rx.recv_timeout(Duration::from_secs(25))
+    }).await.map_err(|e| format!("sync worker: {e}"))?;
+    match sync_result {
+        Ok(true) if alive.load(Ordering::Acquire) => Ok(()),
+        Ok(true) => Err("connection cancelled".into()),
         Ok(false) | Err(_) => {
-            let _ = close(canonical);
+            if let Ok(mut s) = stop.lock() { *s = true; }
+            alive.store(false, Ordering::Release);
+            let _ = close(canonical, generation);
+            let owns_session = state.serial.lock().map(|mut current| {
+                if current.as_ref().is_some_and(|h| h.generation == generation) {
+                    *current = None;
+                    true
+                } else {
+                    false
+                }
+            }).unwrap_or(false);
+            if owns_session {
+                if let Ok(mut q) = state.inbox.lock() { q.clear(); }
+                if let Ok(mut q) = state.outbox.lock() { q.clear(); }
+            }
             Err("firmware did not respond to PING within 20s".into())
         }
     }
 }
 
 #[tauri::command]
-pub fn disconnect(state: State<AppState>, _app: AppHandle) -> Result<(), String> {
-    let mut guard = match state.serial.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(handle) = guard.as_ref() {
-        if let Ok(mut s) = handle.stop.lock() { *s = true; }
-        handle.alive.store(false, Ordering::Release);
-        let _ = close(handle.path.clone());
+pub async fn disconnect(state: State<'_, AppState>, _app: AppHandle) -> Result<(), String> {
+    if crate::tcp_serial::tcp_active() {
+        crate::tcp_serial::tcp_close();
     }
+    let closing = {
+        let mut guard = match state.serial.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let closing = guard.as_ref().map(|handle| {
+            if let Ok(mut s) = handle.stop.lock() { *s = true; }
+            handle.alive.store(false, Ordering::Release);
+            (handle.path.clone(), handle.generation)
+        });
+        *guard = None;
+        closing
+    };
     // Drain any pending outbox so the next connect starts clean.
     if let Ok(mut q) = state.outbox.lock() { q.clear(); }
-    *guard = None;
+    if let Ok(mut q) = state.inbox.lock() { q.clear(); }
+    if let Some((path, generation)) = closing {
+        let _ = tauri::async_runtime::spawn_blocking(move || close(path, generation)).await;
+    }
     Ok(())
 }
 
@@ -556,6 +625,9 @@ pub fn disconnect(state: State<AppState>, _app: AppHandle) -> Result<(), String>
 
 #[tauri::command]
 pub fn send_command(line: String, state: State<AppState>, _app: AppHandle) -> Result<(), String> {
+    if crate::tcp_serial::tcp_active() {
+        return crate::tcp_serial::tcp_send(&line);
+    }
     // Check that we're connected.
     {
         let guard = state.serial.lock().map_err(|_| "lock poisoned")?;
@@ -575,7 +647,7 @@ pub fn send_command(line: String, state: State<AppState>, _app: AppHandle) -> Re
     // and retries; if it fails fatally, the thread marks us dead and
     // we'll report that on the next command.
     if let Ok(mut q) = state.outbox.lock() {
-        q.push_back(line.clone());
+        push_bounded(&mut q, line.clone(), MAX_OUTBOX_LINES);
         let preview: String = line.chars().take(40).collect();
         eprintln!("[send] {} bytes: {}", line.len(), preview);
     }

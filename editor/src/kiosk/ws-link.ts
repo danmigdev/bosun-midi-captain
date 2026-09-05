@@ -26,6 +26,8 @@ function wsUrl(): string {
 
 class WsLink {
   private ws: WebSocket | null = null;
+  private socketGeneration = 0;
+  private reopenTimer: ReturnType<typeof setTimeout> | null = null;
   private inbox: string[] = [];
   private doorbell: (() => void) | null = null;
   private listeners = new Map<string, Set<Handler>>();
@@ -41,22 +43,29 @@ class WsLink {
   }
 
   private open(): void {
+    const generation = ++this.socketGeneration;
     let ws: WebSocket;
     try {
       ws = new WebSocket(wsUrl());
     } catch {
-      this.scheduleReopen();
+      this.scheduleReopen(generation);
       return;
     }
     this.ws = ws;
 
     ws.onopen = () => {
+      if (generation !== this.socketGeneration || this.ws !== ws) return;
       this.socketOpen = true;
       this.backoffStep = 0;
-      this.emit("firmware-reconnected");
+      // Opening the browser-to-hub socket does not mean the Captain link is
+      // ready. The hub always follows with an authoritative HUB up/down
+      // frame; only HUB up may trigger bootstrap traffic. Emitting here used
+      // to race commands ahead of that frame, where the hub correctly dropped
+      // them because no upstream link existed yet.
     };
 
     ws.onmessage = (ev) => {
+      if (generation !== this.socketGeneration || this.ws !== ws) return;
       const raw = typeof ev.data === "string" ? ev.data : "";
       for (const line of raw.split("\n")) {
         const s = line.trim();
@@ -68,27 +77,33 @@ class WsLink {
     };
 
     ws.onclose = () => {
+      if (generation !== this.socketGeneration || this.ws !== ws) return;
       this.socketOpen = false;
       this.linkUp = false;
       this.ws = null;
       if (this.wantOpen) {
         this.emit("firmware-disconnected");
-        this.scheduleReopen();
+        this.scheduleReopen(generation);
       }
     };
 
     ws.onerror = () => {
+      if (generation !== this.socketGeneration || this.ws !== ws) return;
       try { ws.close(); } catch { /* noop */ }
     };
   }
 
-  private scheduleReopen(): void {
+  private scheduleReopen(generation: number): void {
+    if (this.reopenTimer !== null) return;
     const delay = RECONNECT_BACKOFF_MS[
       Math.min(this.backoffStep, RECONNECT_BACKOFF_MS.length - 1)
     ];
     this.backoffStep += 1;
     this.emit("firmware-reconnecting");
-    setTimeout(() => { if (this.wantOpen) this.open(); }, delay);
+    this.reopenTimer = setTimeout(() => {
+      this.reopenTimer = null;
+      if (this.wantOpen && generation === this.socketGeneration) this.open();
+    }, delay);
   }
 
   /** Returns true if the line was a hub control frame (not a firmware line). */
@@ -100,7 +115,7 @@ class WsLink {
       const up = obj.link === "up";
       if (up !== this.linkUp) {
         this.linkUp = up;
-        this.emit(up ? "firmware-reconnected" : "firmware-reconnecting");
+        this.emit(up ? "firmware-reconnected" : "firmware-disconnected");
       }
       return true;
     } catch {
@@ -147,7 +162,17 @@ class WsLink {
    *  fresh one. Keeps the doorbell/listener registrations, which
    *  protocol.ts installs once per process. */
   __cycleSocketForTest(): void {
-    try { this.ws?.close(); } catch { /* noop */ }
+    ++this.socketGeneration;
+    if (this.reopenTimer !== null) clearTimeout(this.reopenTimer);
+    this.reopenTimer = null;
+    const old = this.ws;
+    if (old) {
+      old.onopen = null;
+      old.onclose = null;
+      old.onmessage = null;
+      old.onerror = null;
+      try { old.close(); } catch { /* noop */ }
+    }
     this.ws = null;
     this.inbox = [];
     this.socketOpen = false;

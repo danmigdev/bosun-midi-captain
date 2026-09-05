@@ -1,20 +1,31 @@
 [Unit]
 Description=Bosun Stage kiosk (cage + Chromium)
 After=bosun-hub.service seatd.service
-Wants=bosun-hub.service
+Wants=bosun-hub.service seatd.service
 
 [Service]
 Type=simple
 User=bosun
-PAMName=login
+# Do not open a PAM login session here. pam_systemd migrates cage and its
+# children out of this service cgroup into session/user scopes, defeating
+# deterministic stop/restart cleanup. seatd provides display/input access.
 TTYPath=/dev/tty7
 StandardInput=tty
 StandardOutput=journal
 StandardError=journal
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+RuntimeDirectory=bosun-kiosk
+RuntimeDirectoryMode=0700
+# Chromium refuses an unusable --user-data-dir and otherwise falls back to
+# the account's ~/.config. Have PID 1 create, own and retain the exact profile
+# directory before the unprivileged launcher runs.
+StateDirectory=bosun-hub/chromium
+StateDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/bosun-kiosk
 Environment=BOSUN_KIOSK_HEADLESS=1
 Environment=BOSUN_KIOSK_MODE=1920x440
 ExecStart=/opt/bosun-hub/kiosk/bosun-kiosk.sh
+KillMode=control-group
+TimeoutStopSec=10s
 Restart=always
 RestartSec=3
 # A kiosk crash must never touch MIDI - this unit is stand-alone.

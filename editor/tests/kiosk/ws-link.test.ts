@@ -63,14 +63,18 @@ afterEach(() => {
 describe("ws-link", () => {
   it("connects to ws://<host>:8081 and reports connected only after a HUB up frame", async () => {
     const link = await freshLink();
+    const reconnected = vi.fn();
+    link.on("firmware-reconnected", reconnected);
     link.start();
     expect(last().url).toBe("ws://pi.local:8081/");
 
     last()._open();
     expect(link.isConnected()).toBe(false); // socket open, hub link unknown
+    expect(reconnected).not.toHaveBeenCalled();
 
     last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
     expect(link.isConnected()).toBe(true);
+    expect(reconnected).toHaveBeenCalledTimes(1);
 
     last()._msg(JSON.stringify({ type: "HUB", link: "down" }));
     expect(link.isConnected()).toBe(false);
@@ -134,7 +138,31 @@ describe("ws-link", () => {
     vi.advanceTimersByTime(600); // first backoff step
     expect(FakeWebSocket.instances).toHaveLength(2);
     last()._open();
-    expect(reconnected).toHaveBeenCalled();
+    expect(reconnected).toHaveBeenCalledTimes(1);
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(reconnected).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores callbacks and reconnect timers left by an obsolete socket generation", async () => {
+    const link = await freshLink();
+    link.start();
+    const obsolete = last();
+    const lateClose = obsolete.onclose!;
+
+    link.__cycleSocketForTest();
+    link.start();
+    const current = last();
+    current._open();
+    current._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(link.isConnected()).toBe(true);
+
+    // Model an OS/browser close callback arriving after a replacement socket
+    // is already live. It must neither mark the new link down nor spawn a
+    // third socket later.
+    lateClose();
+    expect(link.isConnected()).toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
   it("honours a ?ws= override", async () => {

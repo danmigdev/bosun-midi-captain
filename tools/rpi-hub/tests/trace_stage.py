@@ -33,6 +33,9 @@ async def main() -> None:
         # what we are here to observe.
         for cmd in ("GET_DEVICE_INFO", "GET_CONTEXT"):
             await ws.send(json.dumps({"type": cmd, "id": cmd}))
+        if len(sys.argv) > 2 and sys.argv[2] == "clean":
+            await ws.send(json.dumps({"type": "GET_PATCH", "id": "inspect-clean",
+                                      "bank": 1, "slot": 2}))
 
         last_blocks: dict[str, str] = {}
         last_rig = None
@@ -68,9 +71,16 @@ async def main() -> None:
             elif t == "PATCH":
                 p = m.get("patch", {})
                 log(f"PATCH {m.get('bank')}/{m.get('slot')} name={p.get('name')} bindings={len(p.get('bindings', []))}")
+                for binding in p.get("bindings", []):
+                    targets = []
+                    for action in binding.get("actions", {}).values():
+                        for command in action.get("messages", []):
+                            if command.get("type") == "kemper_effect_toggle":
+                                targets.append(command.get("slot"))
+                    log(f"  binding sw={binding.get('switch')} label={binding.get('label')} mode={binding.get('mode')} latched_on={binding.get('latched_on')} blocks={targets}")
             elif t in ("HUB", "DEVICE_INFO", "MANIFEST"):
                 extra = f" link={m.get('link')}" if t == "HUB" else ""
-                log(f"{t}{extra} (len={len(raw)})")
+                log(f"{t}{extra} (len={len(raw)})" + (f" {m}" if t == "DEVICE_INFO" else ""))
 
 
 if __name__ == "__main__":

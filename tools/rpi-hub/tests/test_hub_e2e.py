@@ -11,13 +11,17 @@ asyncio.run. Run either way:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bosun_hub.hub import Hub  # noqa: E402
 from bosun_hub.link import UpstreamLink  # noqa: E402
+from bosun_hub import link as link_module  # noqa: E402
 from tests.fake_pedal import FakePedal  # noqa: E402
 
 
@@ -116,6 +120,98 @@ def test_link_reconnects_after_drop():
     _run(body())
 
 
+def test_link_drops_commands_sent_while_disconnected():
+    async def body():
+        pedal = FakePedal()
+        link = UpstreamLink(f"tcp://127.0.0.1:{pedal.port}", on_line=lambda line: None)
+        link.send('{"type":"EVENT","event":"stale"}')
+        link.start()
+        try:
+            assert await _wait(lambda: link.connected)
+            await asyncio.sleep(0.1)
+            assert not any('"stale"' in line for line in pedal.received)
+        finally:
+            link.stop()
+            pedal.close()
+
+    _run(body())
+
+
+def test_link_allows_bootstrap_burst_before_declaring_write_only_stall():
+    class SlowBootstrapPedal(FakePedal):
+        def _reply(self, msg):
+            if msg.get("type") == "PING":
+                return super()._reply(msg)
+            return None
+
+    async def body():
+        pedal = SlowBootstrapPedal()
+        link = UpstreamLink(f"tcp://127.0.0.1:{pedal.port}",
+                            on_line=lambda line: None)
+        link.start()
+        try:
+            assert await _wait(lambda: link.connected)
+            for i in range(link_module.WRITE_ONLY_STALL + 2):
+                link.send(json.dumps({"type": "GET_PATCH", "id": str(i),
+                                      "bank": 1, "slot": 1}))
+            await asyncio.sleep(0.5)
+            assert link.connected, "a fast bootstrap burst reset the healthy link"
+        finally:
+            link.stop()
+            pedal.close()
+
+    _run(body())
+
+
+def test_link_full_tx_queue_rejects_newest_without_evicting_accepted_order():
+    link = UpstreamLink(None, on_line=lambda line: None)
+    link._connected = True
+    accepted = [f'{{"type":"PING","id":"{i}"}}' for i in range(link._tx.maxsize)]
+    for line in accepted:
+        assert link.send(line) is True
+    assert link.send('{"type":"PING","id":"rejected"}') is False
+
+    queued = [link._tx.get_nowait().strip() for _ in accepted]
+    assert queued == accepted
+    assert link._tx.empty()
+
+
+def test_link_stop_interrupts_a_blocked_transport(monkeypatch):
+    """SIGTERM must not consume systemd's TimeoutStopSec when CDC wedges."""
+
+    class BlockedTransport:
+        name = "/dev/ttyACM-test"
+
+        def __init__(self):
+            self.entered_read = threading.Event()
+            self.closed = threading.Event()
+
+        def write(self, data):
+            pass
+
+        def read(self, n):
+            self.entered_read.set()
+            assert self.closed.wait(10), "test transport was never closed"
+            raise OSError("USB disconnected")
+
+        def close(self):
+            self.closed.set()
+
+    transport = BlockedTransport()
+    monkeypatch.setattr(link_module, "discover_candidates", lambda target: ["test"])
+    monkeypatch.setattr(link_module, "_open_transport", lambda target: transport)
+    link = UpstreamLink(None, on_line=lambda line: None)
+    link.start()
+    assert transport.entered_read.wait(1), "link did not enter blocked USB read"
+
+    started = time.monotonic()
+    link.stop()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5, f"shutdown took {elapsed:.3f}s"
+    assert link._thread is None
+
+
 # -- hub ----------------------------------------------------------------
 
 
@@ -146,9 +242,20 @@ def test_hub_fans_out_to_two_subscribers():
 
             a.send('{"type":"GET_DEVICE_INFO","id":"x1"}')
             assert await _wait(
-                lambda: any('"x1"' in r for r in pedal.received)
+                lambda: any(
+                    json.loads(r).get("type") == "GET_DEVICE_INFO"
+                    for r in pedal.received
+                )
             )
+            device_request = next(
+                json.loads(r) for r in pedal.received
+                if json.loads(r).get("type") == "GET_DEVICE_INFO"
+            )
+            assert device_request["id"] != "x1"
+            assert device_request["id"].startswith("__bosun_req_")
             assert await _wait(lambda: any('"DEVICE_INFO"' in l for l in got_a))
+            await asyncio.sleep(0.05)
+            assert not any('"DEVICE_INFO"' in line for line in got_b)
 
             ta.cancel()
             tb.cancel()
@@ -232,6 +339,151 @@ def test_hub_slow_subscriber_drops_not_blocks():
         finally:
             hub.stop()
             pedal.close()
+
+    _run(body())
+
+
+def test_get_patch_cache_replies_locally_with_callers_id():
+    class DeferredPatchPedal(FakePedal):
+        def _reply(self, msg):
+            if msg.get("type") == "GET_PATCH":
+                return None
+            return super()._reply(msg)
+
+    async def body():
+        pedal = DeferredPatchPedal()
+        hub = Hub(f"tcp://127.0.0.1:{pedal.port}")
+        hub.start()
+        try:
+            assert await _wait(lambda: hub.link.connected)
+            sub = hub.subscribe()
+            got: list[dict] = []
+
+            async def drain():
+                async for line in sub.lines():
+                    got.append(json.loads(line))
+
+            task = asyncio.create_task(drain())
+            sub.send(json.dumps({"type": "GET_PATCH", "id": "cold", "bank": 2, "slot": 4}))
+            def patch_requests():
+                return [json.loads(line) for line in pedal.received
+                        if json.loads(line).get("type") == "GET_PATCH"]
+
+            assert await _wait(lambda: len(patch_requests()) == 1)
+            pedal.push({"type": "PATCH", "id": patch_requests()[0]["id"],
+                        "bank": 2, "slot": 4,
+                        "profile": "", "patch": {"name": "Acoustic", "bindings": []}})
+            assert await _wait(lambda: any(m.get("id") == "cold" for m in got))
+
+            before = len(pedal.received)
+            sub.send(json.dumps({"type": "GET_PATCH", "id": "warm", "bank": 2, "slot": 4}))
+            assert await _wait(lambda: any(m.get("id") == "warm" for m in got))
+            warm = next(m for m in got if m.get("id") == "warm")
+            assert warm["patch"]["name"] == "Acoustic"
+            await asyncio.sleep(0.1)
+            assert len(pedal.received) == before, "cache hit leaked onto CDC"
+            task.cancel()
+        finally:
+            hub.stop()
+            pedal.close()
+
+    _run(body())
+
+
+def test_patch_mutations_and_disconnect_invalidate_cache():
+    async def body():
+        pedal = FakePedal()
+        hub = Hub(f"tcp://127.0.0.1:{pedal.port}")
+        hub.start()
+        try:
+            assert await _wait(lambda: hub.link.connected)
+            sub = hub.subscribe()
+
+            def seed(name="Old"):
+                hub._patch_cache[("", 1, 3)] = {
+                    "type": "PATCH", "bank": 1, "slot": 3,
+                    "profile": "", "patch": {"name": name},
+                }
+
+            def has_patch_request():
+                return any(
+                    json.loads(line).get("type") == "GET_PATCH"
+                    for line in pedal.received
+                )
+
+            for mutation in (
+                {"type": "PUT_PATCH", "patch": {"name": "New"}},
+                {"type": "PUT_BINDING", "binding": {"switch": "1"}},
+                {"type": "DELETE_PATCH"},
+                {"type": "DISCARD"},
+            ):
+                seed()
+                mutation.update({"id": "mut", "bank": 1, "slot": 3})
+                sub.send(json.dumps(mutation))
+                sub.send(json.dumps({"type": "GET_PATCH", "id": "probe", "bank": 1, "slot": 3}))
+                assert await _wait(has_patch_request)
+                pedal.received.clear()
+
+            seed()
+            hub._dispatch_status(hub._status_line(False))
+            sub.send(json.dumps({"type": "GET_PATCH", "id": "after-down", "bank": 1, "slot": 3}))
+            assert await _wait(has_patch_request)
+        finally:
+            hub.stop()
+            pedal.close()
+
+    _run(body())
+
+
+def test_patch_cache_is_profile_scoped_and_profile_switch_clears_it():
+    async def body():
+        hub = Hub(None)
+        sent: list[str] = []
+        hub.link.send = sent.append
+        hub.link._connected = True
+        sub = hub.subscribe()
+        hub._patch_cache[("clean", 1, 1)] = {
+            "type": "PATCH", "bank": 1, "slot": 1, "profile": "clean",
+            "patch": {"name": "Clean"},
+        }
+
+        sub.send(json.dumps({"type": "GET_PATCH", "id": "wrong", "bank": 1, "slot": 1,
+                             "profile": "heavy"}))
+        assert any(json.loads(line).get("profile") == "heavy" for line in sent)
+        sent.clear()
+
+        # Correct profile is warm and must stay off the upstream link.
+        sub.send(json.dumps({"type": "GET_PATCH", "id": "right", "bank": 1, "slot": 1,
+                             "profile": "clean"}))
+        reply = json.loads(await sub._queue.get())
+        assert reply["id"] == "right" and reply["patch"]["name"] == "Clean"
+        assert sent == []
+
+        sub.send(json.dumps({"type": "SWITCH_PROFILE", "id": "sw", "profile_id": "clean"}))
+        sent.clear()
+        sub.send(json.dumps({"type": "GET_PATCH", "id": "after", "bank": 1, "slot": 1,
+                             "profile": "clean"}))
+        assert any(json.loads(line).get("profile") == "clean" for line in sent)
+        sub.close()
+
+    _run(body())
+
+
+def test_slow_stage_subscriber_gets_forced_resync_after_overflow():
+    async def body():
+        hub = Hub(None)
+        sub = hub.subscribe(want_status=True)
+        # Consume the initial status, then overflow without a reader.
+        await sub._queue.get()
+        for i in range(513):
+            sub._offer(json.dumps({"type": "CONTEXT", "context": {"n": i}}))
+        first = json.loads(await sub._queue.get())
+        second = json.loads(await sub._queue.get())
+        newest = json.loads(await sub._queue.get())
+        assert first == {"type": "HUB", "link": "down"}
+        assert second == {"type": "HUB", "link": "up"}
+        assert newest["context"]["n"] == 512
+        sub.close()
 
     _run(body())
 

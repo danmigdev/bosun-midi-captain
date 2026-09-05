@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 
 import { compareVersions, evaluateUpdate, type FirmwareRelease } from "../src/lib/firmware-update";
-import { humanBytes } from "../src/lib/firmware-push";
+import { FIRMWARE_CHUNK_B64, humanBytes } from "../src/lib/firmware-push";
 
 describe("compareVersions", () => {
   it("orders by major, then minor, then patch", () => {
@@ -88,5 +88,14 @@ describe("humanBytes", () => {
   it("formats MiB with two decimals", () => {
     expect(humanBytes(1024 * 1024)).toBe("1.00 MB");
     expect(humanBytes(1024 * 1024 * 2.5)).toBe("2.50 MB");
+  });
+});
+
+describe("firmware upload memory budget", () => {
+  it("keeps every decoded OTA chunk at or below 96 bytes", () => {
+    // Base64 carries 3 raw bytes per 4 characters. Keeping this a multiple of
+    // four also means chunks never split a base64 quantum.
+    expect(FIRMWARE_CHUNK_B64 % 4).toBe(0);
+    expect((FIRMWARE_CHUNK_B64 / 4) * 3).toBeLessThanOrEqual(96);
   });
 });

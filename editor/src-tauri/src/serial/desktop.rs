@@ -23,6 +23,29 @@ pub struct AppState {
     pub inbox:  Arc<Mutex<VecDeque<String>>>,
 }
 
+pub(crate) const MAX_INBOX_LINES: usize = 4096;
+pub(crate) const MAX_ACCUM_BYTES: usize = 1024 * 1024;
+
+pub(crate) fn push_bounded(q: &mut VecDeque<String>, line: String) {
+    while q.len() >= MAX_INBOX_LINES {
+        q.pop_front();
+    }
+    q.push_back(line);
+}
+
+pub(crate) fn append_bounded(accum: &mut Vec<u8>, bytes: &[u8]) {
+    if bytes.len() >= MAX_ACCUM_BYTES {
+        accum.clear();
+        accum.extend_from_slice(&bytes[bytes.len() - MAX_ACCUM_BYTES..]);
+        return;
+    }
+    let overflow = accum.len().saturating_add(bytes.len()).saturating_sub(MAX_ACCUM_BYTES);
+    if overflow > 0 {
+        accum.drain(..overflow);
+    }
+    accum.extend_from_slice(bytes);
+}
+
 pub struct SerialHandle {
     // serial2's SerialPort impls Read+Write for &SerialPort (the OS
     // handle is sync-safe), so we can share one handle between the
@@ -30,9 +53,9 @@ pub struct SerialHandle {
     // This is the architectural fix that the serialport-rs build needed
     // a Mutex<Box<dyn ...>> for - serial2 gives it for free.
     pub port: Option<Arc<SerialPort>>,
-    pub path: String,
     pub stop: Arc<Mutex<bool>>,
     pub alive: Arc<AtomicBool>,
+    pub write_lock: Arc<Mutex<()>>,
 }
 
 impl SerialHandle {
@@ -132,8 +155,6 @@ pub async fn connect(
     (&*port_shared)
         .write_all(sentinel_cmd.as_bytes())
         .map_err(|e| format!("sentinel write: {}", e))?;
-    let sentinel_marker = format!("\"id\":\"{}\"", sentinel_id);
-    let sentinel_marker_spaced = format!("\"id\": \"{}\"", sentinel_id);
     {
         let mut drain_buf = Vec::<u8>::with_capacity(8192);
         let mut drain_chunk = [0u8; 4096];
@@ -143,12 +164,8 @@ pub async fn connect(
             match (&*port_shared).read(&mut drain_chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
-                    drain_buf.extend_from_slice(&drain_chunk[..n]);
-                    if drain_buf.windows(sentinel_marker.len())
-                        .any(|w| w == sentinel_marker.as_bytes())
-                        || drain_buf.windows(sentinel_marker_spaced.len())
-                        .any(|w| w == sentinel_marker_spaced.as_bytes())
-                    {
+                    append_bounded(&mut drain_buf, &drain_chunk[..n]);
+                    if crate::serial::marker_found(&drain_buf, &sentinel_id) {
                         seen_sentinel = true;
                     }
                 }
@@ -160,6 +177,13 @@ pub async fn connect(
         while std::time::Instant::now() < tail_deadline {
             let _ = (&*port_shared).read(&mut drain_chunk);
         }
+        if !seen_sentinel {
+            return Err("sentinel ACK not received".into());
+        }
+    }
+
+    if let Ok(mut inbox) = state.inbox.lock() {
+        inbox.clear();
     }
 
     let stop = Arc::new(Mutex::new(false));
@@ -181,7 +205,7 @@ pub async fn connect(
             match (&*port_for_thread).read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(n) => {
-                    accum.extend_from_slice(&chunk[..n]);
+                    append_bounded(&mut accum, &chunk[..n]);
                     let mut new_lines = 0;
                     while let Some(pos) = accum.iter().position(|b| *b == b'\n') {
                         let mut line: Vec<u8> = accum.drain(..=pos).collect();
@@ -193,7 +217,7 @@ pub async fn connect(
                         }
                         if let Ok(s) = std::str::from_utf8(&line) {
                             if let Ok(mut q) = inbox_for_thread.lock() {
-                                q.push_back(s.to_string());
+                                push_bounded(&mut q, s.to_string());
                                 new_lines += 1;
                             }
                         }
@@ -219,12 +243,15 @@ pub async fn connect(
         alive_for_thread.store(false, Ordering::Release);
     });
 
-    *guard = Some(SerialHandle { port: Some(port_shared), path: port.clone(), stop, alive });
+    *guard = Some(SerialHandle { port: Some(port_shared), stop, alive, write_lock: Arc::new(Mutex::new(())) });
     Ok(())
 }
 
 #[tauri::command]
 pub fn disconnect(state: State<AppState>) -> Result<(), String> {
+    if crate::tcp_serial::tcp_active() {
+        crate::tcp_serial::tcp_close();
+    }
     // Recover from poisoned lock so a disconnect always succeeds - the
     // editor should never end up unable to release the port because some
     // earlier panic poisoned the mutex.
@@ -239,6 +266,9 @@ pub fn disconnect(state: State<AppState>) -> Result<(), String> {
         handle.alive.store(false, Ordering::Release);
     }
     *guard = None;
+    if let Ok(mut inbox) = state.inbox.lock() {
+        inbox.clear();
+    }
     Ok(())
 }
 
@@ -247,14 +277,18 @@ pub fn disconnect(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn send_command(line: String, state: State<AppState>) -> Result<(), String> {
-    let port_arc = {
+    if crate::tcp_serial::tcp_active() {
+        return crate::tcp_serial::tcp_send(&line);
+    }
+    let (port_arc, write_lock) = {
         let guard = state.serial.lock().map_err(|_| "lock poisoned")?;
         let handle = guard.as_ref().ok_or("not connected")?;
         if !handle.is_alive() {
             return Err("not connected".into());
         }
-        handle.port.clone().ok_or("not connected")?
+        (handle.port.clone().ok_or("not connected")?, handle.write_lock.clone())
     };
+    let _write_guard = write_lock.lock().map_err(|_| "write lock poisoned")?;
     let write_result = (&*port_arc).write_all(line.as_bytes()).and_then(|_| {
         if !line.ends_with('\n') {
             (&*port_arc).write_all(b"\n")
@@ -273,6 +307,27 @@ pub fn send_command(line: String, state: State<AppState>) -> Result<(), String> 
         return Err(format!("write: {}", e));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_inbox_drops_oldest_lines() {
+        let mut q = VecDeque::new();
+        for i in 0..MAX_INBOX_LINES + 3 { push_bounded(&mut q, i.to_string()); }
+        assert_eq!(q.len(), MAX_INBOX_LINES);
+        assert_eq!(q.front().map(String::as_str), Some("3"));
+    }
+
+    #[test]
+    fn bounded_accumulator_keeps_only_latest_bytes() {
+        let mut acc = vec![b'a'; MAX_ACCUM_BYTES - 2];
+        append_bounded(&mut acc, b"WXYZ");
+        assert_eq!(acc.len(), MAX_ACCUM_BYTES);
+        assert_eq!(&acc[MAX_ACCUM_BYTES - 4..], b"WXYZ");
+    }
 }
 
 #[tauri::command]

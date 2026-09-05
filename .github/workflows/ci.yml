@@ -50,6 +50,40 @@ jobs:
         working-directory: editor
         run: npm test
 
+      - name: Production builds (desktop frontend + Stage kiosk)
+        working-directory: editor
+        run: |
+          npm run build
+          npm run build:stage
+
+  rust:
+    name: Desktop backend (Rust unit tests)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/src-tauri
+      - name: Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev libudev-dev pkg-config
+      - name: Prepare build-script inputs
+        run: |
+          mkdir -p editor/dist editor/src-tauri/resources/lib
+          printf '<!doctype html>\n' > editor/dist/index.html
+          : > editor/src-tauri/resources/circuitpython.uf2
+          python tools/sync_firmware_resources.py --repo-root .
+      - name: Run Rust backend tests
+        working-directory: editor/src-tauri
+        run: cargo test --locked
+
   firmware:
     name: Firmware (py_compile + offline tests)
     runs-on: ubuntu-latest
@@ -67,6 +101,17 @@ jobs:
         run: |
           python -m compileall -q firmware
 
+      # The deploy/installer prefers .mpy over its source sibling. A stale
+      # compiled file therefore shadows a correct .py and must fail CI.
+      - name: Verify reproducible CircuitPython bytecode artifacts
+        run: |
+          set -euo pipefail
+          curl -fL -o /tmp/mpy-cross \
+            https://adafruit-circuit-python.s3.amazonaws.com/bin/mpy-cross/linux-amd64/mpy-cross-linux-amd64-9.2.7.static
+          echo "3e5716e158ef977fb4f4f96e29500cdff6d85da34f507329fa7f6c2540d6faf8  /tmp/mpy-cross" | sha256sum -c -
+          chmod +x /tmp/mpy-cross
+          python tools/build_firmware_mpy.py --compiler /tmp/mpy-cross --check
+
       # Run the full offline battery via the aggregator (single source of
       # truth - keeps CI and `python tools/run_all_tests.py` in lockstep).
       # It runs every suite and exits non-zero if any one fails, including the
@@ -74,3 +119,54 @@ jobs:
       - name: Run firmware offline test battery
         run: |
           python tools/run_all_tests.py
+
+  hub:
+    name: Raspberry Pi hub (end-to-end)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r tools/rpi-hub/requirements.txt pytest
+      - run: python -m pytest -q
+        working-directory: tools/rpi-hub
+      - name: Stage deploy helper offline safety test
+        shell: pwsh
+        run: ./tools/rpi-hub/tests/test_deploy_stage.ps1
+      - name: Hub deploy helper offline safety and health-mock test
+        shell: pwsh
+        run: ./tools/rpi-hub/tests/test_deploy_hub.ps1
+
+  android-unit:
+    name: Android native unit tests and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editor/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 ndk;25.2.9519653 cmdline-tools;latest"
+      - name: Generate machine-local Tauri Android bindings
+        working-directory: editor
+        run: |
+          npm install --no-audit --no-fund
+          npx tauri android init --ci --skip-targets-install
+      - name: Kotlin unit tests and Android lint
+        working-directory: editor/src-tauri/gen/android
+        # Bare testDebugUnitTest/lintDebug select the Android library modules,
+        # but the app has ABI-flavoured task names.  Name its universal variant
+        # explicitly so our Kotlin bridge tests and sources cannot be skipped.
+        run: >-
+          ./gradlew verifyAndroidSdkCompatibility
+          :app:testUniversalDebugUnitTest :app:lintUniversalDebug
+          testDebugUnitTest lintDebug --stacktrace

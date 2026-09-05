@@ -22,7 +22,60 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editor/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev libudev-dev pkg-config
+      - name: Install dependencies
+        run: |
+          (cd editor && npm install --no-audit --no-fund)
+          python -m pip install -r tools/rpi-hub/requirements.txt pytest
+      - name: Verify reproducible CircuitPython bytecode artifacts
+        run: |
+          set -euo pipefail
+          curl -fL -o /tmp/mpy-cross \
+            https://adafruit-circuit-python.s3.amazonaws.com/bin/mpy-cross/linux-amd64/mpy-cross-linux-amd64-9.2.7.static
+          echo "3e5716e158ef977fb4f4f96e29500cdff6d85da34f507329fa7f6c2540d6faf8  /tmp/mpy-cross" | sha256sum -c -
+          chmod +x /tmp/mpy-cross
+          python tools/build_firmware_mpy.py --compiler /tmp/mpy-cross --check
+      - name: Test and build every portable layer
+        run: |
+          cd editor
+          npm run check
+          npm test
+          npm run build
+          npm run build:stage
+          cd ..
+          python -m compileall -q firmware
+          python tools/run_all_tests.py
+          cd tools/rpi-hub
+          python -m pytest -q
+          cd ../..
+          mkdir -p editor/src-tauri/resources/lib
+          : > editor/src-tauri/resources/circuitpython.uf2
+          python tools/sync_firmware_resources.py --repo-root .
+          cargo test --locked --manifest-path editor/src-tauri/Cargo.toml
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +110,10 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -66,38 +123,24 @@ jobs:
           workspaces: editor/src-tauri
 
       # The bundle assets (firmware tree, CircuitPython UF2, Adafruit libs) are
-      # gitignored, so recreate them here. Single bash step for all three OSes
-      # (every runner, including Windows, provides bash + curl + unzip).
+      # gitignored, so recreate them here. The same sync helper used by local
+      # builds derives both firmware trees after the downloaded assets exist.
+      # Single bash step for all three OSes (every runner provides bash).
       - name: Provision bundled resources
         shell: bash
-        # Authenticate the api.github.com call below: unauthenticated requests
-        # are rate-limited to 60/hour per IP, and shared macOS runner IPs hit
-        # that ceiling intermittently (a 403 that failed past releases).
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           RES=editor/src-tauri/resources
-          TMP=.assets_tmp
-          rm -rf "$TMP" "$RES/firmware" "$RES/lib"; mkdir -p "$TMP" "$RES/lib"
-          # 1. firmware tree
-          cp -r firmware "$RES/firmware"
-          find "$RES/firmware" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
-          # 2. CircuitPython UF2 (matches tools/download-assets.ps1 default)
+          rm -rf "$RES/firmware" "$RES/lib"; mkdir -p "$RES/lib"
+          # 1. CircuitPython UF2 (matches tools/download-assets.ps1 default)
           curl -fL -o "$RES/circuitpython.uf2" \
             "https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2"
-          # 3. Adafruit CircuitPython Bundle (9.x mpy) -> the four libs we import
-          BURL=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/adafruit/Adafruit_CircuitPython_Bundle/releases/latest \
-            | grep -oE 'https://[^"]*adafruit-circuitpython-bundle-9\.x-mpy-[0-9]+\.zip' | head -1)
-          curl -fL -o "$TMP/bundle.zip" "$BURL"
-          unzip -q "$TMP/bundle.zip" -d "$TMP/bundle"
-          BLIB=$(find "$TMP/bundle" -type d -name lib | head -1)
-          cp -r "$BLIB/adafruit_display_text" "$RES/lib/"
-          cp "$BLIB/adafruit_st7789.mpy" "$RES/lib/"
-          cp "$BLIB/neopixel.mpy" "$RES/lib/"
-          cp "$BLIB/adafruit_pixelbuf.mpy" "$RES/lib/"
-          rm -rf "$TMP"
+          # 2. Official Adafruit 9.x bundle pinned by tag + archive/file hashes.
+          python tools/provision_adafruit_bundle.py --destination "$RES/lib"
+          # 3. Canonical Bosun firmware -> verified/cache-free resources.
+          python tools/sync_firmware_resources.py --repo-root .
+          # Cargo does not fingerprint arbitrary resource contents reliably.
+          touch editor/src-tauri/build.rs
           echo "resources:"; ls -la "$RES"; echo "lib:"; ls -la "$RES/lib"
 
       - name: Install node deps
@@ -153,6 +196,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   android:
+    needs: verify
     runs-on: ubuntu-latest
     env:
       # Reproducible-builds match for the F-Droid submission (docs/fdroid-
@@ -178,6 +222,10 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Rust toolchain with Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -192,7 +240,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-34 build-tools;34.0.0 ndk;25.2.9519653 cmdline-tools;latest"
+          # The generated app compiles/targets API 36. Keep build-tools 34 as
+          # well because sign-android-release is explicitly pinned to it.
+          packages: "platforms;android-36 build-tools;36.0.0 build-tools;34.0.0 ndk;25.2.9519653 cmdline-tools;latest"
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -215,11 +265,13 @@ jobs:
         run: |
           set -euo pipefail
           RES=editor/src-tauri/resources
-          mkdir -p "$RES/firmware" "$RES/lib"
-          cp -r firmware "$RES/firmware"
-          find "$RES/firmware" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          rm -rf "$RES/firmware" "$RES/lib"
+          mkdir -p "$RES/lib"
           curl -fL -o "$RES/circuitpython.uf2" \
             "https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2"
+          python tools/provision_adafruit_bundle.py --destination "$RES/lib"
+          python tools/sync_firmware_resources.py --repo-root .
+          touch editor/src-tauri/build.rs
 
       - name: Set Android versionCode in tauri.conf.json
         # gen/android/app/tauri.properties gets fully regenerated by the
@@ -254,15 +306,9 @@ jobs:
         working-directory: editor
         run: npx tauri android init
 
-      - name: Build Android APK (debug)
-        working-directory: editor
-        run: npx tauri android build --apk --debug
-        continue-on-error: true
-
       - name: Build Android APK (release, unsigned)
         working-directory: editor
         run: npx tauri android build --apk
-        continue-on-error: true
 
       - name: Sign Release APK
         uses: r0adkll/sign-android-release@v1
@@ -285,25 +331,21 @@ jobs:
           # an unexpected input (2026-08-16 CI run). Match the version
           # actually installed above.
           BUILD_TOOLS_VERSION: "34.0.0"
-        continue-on-error: true
 
       - name: Prepare APK for release
         shell: bash
+        env:
+          SIGNED_APK: ${{ steps.sign_apk.outputs.signedReleaseFile }}
         run: |
+          set -euo pipefail
           mkdir -p release
-          # Prefer signed universal release, then unsigned release, then debug
-          if [ -f editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned-signed.apk ]; then
-            cp editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned-signed.apk release/bosun.apk
-            echo "Using signed release APK"
-          elif [ -f editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk ]; then
-            cp editor/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk release/bosun.apk
-            echo "Using unsigned release APK"
-          else
-            # Fall back to arm64 debug APK
-            cp editor/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk release/bosun.apk 2>/dev/null || \
-            cp $(find editor/src-tauri/gen/android -name "*.apk" -path "*/debug/*" | head -1) release/bosun.apk
-            echo "Using debug APK (installable, for testing)"
-          fi
+          test -n "$SIGNED_APK"
+          test -f "$SIGNED_APK"
+          cp "$SIGNED_APK" release/bosun.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs release/bosun.apk
+          python tools/verify_firmware_package.py \
+            --resources editor/src-tauri/resources \
+            --archive release/bosun.apk --prefix assets
           echo "APK ready: $(ls -lh release/bosun.apk)"
 
       - name: Upload APK to release

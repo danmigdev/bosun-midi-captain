@@ -7,10 +7,13 @@ The display state is the (context, layout) pair:
   - `layout` is a list of label specs read from the profile's device.json:
         [{"field": "patch_name", "x": 20, "y": 40, "size": 3,
           "color": "#ffffff", "prefix": "", "suffix": ""}, ...]
+    The special ``expression_mode`` field uses the same positioning/style
+    properties but renders a volume ramp or a side-view Wah pedal beside its
+    mode. The unknown ``---`` state has no icon.
 
-`render(context, layout)` rebuilds the displayio Group from scratch each frame.
-That's fine here - labels are cheap and we redraw on patch/scene change at
-human speeds, not at audio rates.
+The ordinary screen retains its labels across frames. System-font text uses
+the built-in glyph atlas directly, so changing rigs needs no per-glyph objects
+and never builds a second complete screen on top of the first.
 """
 import busio
 import displayio
@@ -20,7 +23,6 @@ import math
 import pwmio
 import terminalio
 
-from adafruit_display_text import label
 from adafruit_st7789 import ST7789
 
 from . import VERSION
@@ -72,6 +74,247 @@ _VALIGN = {"top":  0.0, "center": 0.5, "bottom": 1.0}
 # Screen size - used to compute the anchor's absolute pixel position.
 _SCREEN_W = 240
 _SCREEN_H = 240
+
+
+class _SystemLabel(displayio.Group):
+    """Fixed-capacity text using terminalio's shared ROM glyph atlas.
+
+    ASCII updates change tile indices only. Keep the same public positioning
+    surface as Label so custom fonts can still use Adafruit's implementation.
+    """
+    def __init__(self, font, text="", color=0xFFFFFF, scale=1, x=0, y=0,
+                 anchor_point=None, anchored_position=None):
+        super().__init__(scale=scale, x=x, y=y)
+        self._cell_w, self._cell_h = font.get_bounding_box()[:2]
+        self._font = font
+        self._palette = displayio.Palette(2)
+        self._palette.make_transparent(0)
+        self._palette[1] = color
+        self._capacity = max(64, len(text))
+        self._grid = self._new_grid(self._capacity)
+        self.append(self._grid)
+        self._text = ""
+        self._anchor_point = anchor_point
+        self._anchored_position = anchored_position
+        self.text = text
+
+    def _new_grid(self, capacity):
+        return displayio.TileGrid(
+            self._font.bitmap, pixel_shader=self._palette,
+            tile_width=self._cell_w, tile_height=self._cell_h,
+            width=capacity, height=1, default_tile=0,
+            y=-self._cell_h + self._cell_h // 2,
+        )
+
+    @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        value = str(value)
+        if value == self._text:
+            self.hidden = not value
+            return
+        grid = self._grid
+        # Allocate before touching the visible old text. A failure keeps all
+        # its glyphs intact and the caller can retry the pending frame later.
+        if len(value) > self._capacity:
+            grid = self._new_grid(len(value))
+        extras = None
+        for ch in value:
+            code = ord(ch)
+            if not 32 <= code <= 126:
+                if extras is None:
+                    extras = {}
+                if code not in extras:
+                    glyph = self._font.get_glyph(code)
+                    extras[code] = glyph.tile_index if glyph is not None else ord("?") - 32
+        for i in range(max(len(value), len(self._text))):
+            code = ord(value[i]) if i < len(value) else 32
+            if 32 <= code <= 126:
+                tile = code - 32
+            else:
+                tile = extras[code]
+            grid[i] = tile
+        if grid is not self._grid:
+            self[0] = grid
+            self._grid = grid
+            self._capacity = len(value)
+        self._text = value
+        self.hidden = not value
+        self._position()
+
+    @property
+    def bounding_box(self):
+        return (0, -self._cell_h + self._cell_h // 2,
+                len(self._text) * self._cell_w, self._cell_h)
+
+    @property
+    def color(self):
+        return self._palette[1]
+
+    @color.setter
+    def color(self, value):
+        self._palette[1] = value
+
+    @property
+    def anchor_point(self):
+        return self._anchor_point
+
+    @anchor_point.setter
+    def anchor_point(self, value):
+        self._anchor_point = value
+        self._position()
+
+    @property
+    def anchored_position(self):
+        return self._anchored_position
+
+    @anchored_position.setter
+    def anchored_position(self, value):
+        self._anchored_position = value
+        self._position()
+
+    def _position(self):
+        if self._anchor_point is not None and self._anchored_position is not None:
+            bx, by, w, h = self.bounding_box
+            self.x = self._anchored_position[0] - int((bx + w * self._anchor_point[0]) * self.scale)
+            self.y = self._anchored_position[1] - int((by + h * self._anchor_point[1]) * self.scale)
+
+
+def _make_label(font, **kwargs):
+    if font is terminalio.FONT and "\n" not in kwargs.get("text", ""):
+        return _SystemLabel(font, **kwargs)
+    # Custom BDF fonts and multiline text retain their existing renderer.
+    # Avoid loading its Python classes at all for the normal system-font TFT.
+    from adafruit_display_text import label
+    return label.Label(font, **kwargs)
+
+
+_EXPRESSION_ICON_W = 16
+_EXPRESSION_ICON_H = 12
+_EXPRESSION_GAP = 2
+
+
+class _ExpressionBadge(displayio.Group):
+    """Persistent pedal icon + text used by an ``expression_mode`` field.
+
+    Its positioning surface intentionally matches a regular label: ``size``
+    scales the complete badge, while anchor_point/anchored_position place its
+    complete bounds. Keeping the icon and the fixed-capacity system label in
+    one retained group means VOL/WAH changes only repaint the retained bitmap
+    and alter text tile indices.
+    """
+    def __init__(self, font, text="---", color=_DEFAULT_COLOR, scale=1,
+                 anchor_point=None, anchored_position=None):
+        super().__init__(scale=scale)
+        icon = displayio.Bitmap(_EXPRESSION_ICON_W, _EXPRESSION_ICON_H, 2)
+        self._icon_palette = displayio.Palette(2)
+        self._icon_palette.make_transparent(0)
+        self._icon_palette[1] = color
+        self._icon = displayio.TileGrid(
+            icon, pixel_shader=self._icon_palette,
+        )
+        self._mode = ""
+        self._icon.hidden = True
+        self.append(self._icon)
+        self._label = _make_label(font, text=str(text), color=color)
+        self.append(self._label)
+        self._text = str(text)
+        self._anchor_point = anchor_point
+        self._anchored_position = anchored_position
+        self._bounds = (0, 0, 0, 0)
+        self._layout_children()
+
+    def set_mode(self, value):
+        mode = value if value in ("VOL", "WAH") else ""
+        if mode == self._mode:
+            return
+        self._mode = mode
+        self._icon.hidden = not mode
+        if not mode:
+            return
+        bitmap = self._icon.bitmap
+        for y in range(_EXPRESSION_ICON_H):
+            for x in range(_EXPRESSION_ICON_W):
+                if mode == "VOL":
+                    # Classic crescendo triangle: low at left, high at right.
+                    on = (1 <= x <= 14 and 2 <= y <= 10
+                          and 13 * (10 - y) <= 8 * (x - 1))
+                else:
+                    # Side profile: tilted treadle, pivot and horizontal base.
+                    treadle = 6 - (x - 1) * 4 // 13
+                    on = (1 <= x <= 14 and (
+                        y == treadle or y == treadle + 1 or y in (9, 10)
+                        or (x in (7, 8) and 6 <= y <= 8)))
+                # Flat indices avoid allocating a coordinate tuple per pixel.
+                bitmap[y * _EXPRESSION_ICON_W + x] = 1 if on else 0
+
+    @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        value = str(value)
+        if self._label.text != value:
+            self._label.text = value
+        self._text = value
+        self.hidden = not value
+        self._layout_children()
+
+    @property
+    def bounding_box(self):
+        return self._bounds
+
+    @property
+    def color(self):
+        return self._icon_palette[1]
+
+    @color.setter
+    def color(self, value):
+        self._icon_palette[1] = value
+        self._label.color = value
+
+    @property
+    def anchor_point(self):
+        return self._anchor_point
+
+    @anchor_point.setter
+    def anchor_point(self, value):
+        self._anchor_point = value
+        self._position()
+
+    @property
+    def anchored_position(self):
+        return self._anchored_position
+
+    @anchored_position.setter
+    def anchored_position(self, value):
+        self._anchored_position = value
+        self._position()
+
+    def _layout_children(self):
+        _, _, text_w, text_h = self._label.bounding_box
+        height = max(_EXPRESSION_ICON_H, int(text_h))
+        self._icon.y = (height - _EXPRESSION_ICON_H) // 2
+        self._label.anchor_point = (0.0, 0.5)
+        self._label.anchored_position = (
+            _EXPRESSION_ICON_W + _EXPRESSION_GAP, height // 2,
+        )
+        self._bounds = (
+            0, 0, _EXPRESSION_ICON_W + _EXPRESSION_GAP + int(text_w), height,
+        )
+        self._position()
+
+    def _position(self):
+        if self._anchor_point is not None and self._anchored_position is not None:
+            _, _, width, height = self._bounds
+            self.x = self._anchored_position[0] - int(
+                width * self._anchor_point[0] * self.scale)
+            self.y = self._anchored_position[1] - int(
+                height * self._anchor_point[1] * self.scale)
 
 # ---- tuner splash geometry + colours (shared by build + in-place update) ----
 _TUNER_IN_TUNE  = 0x3ECB6E       # green when within the calibration window
@@ -192,7 +435,7 @@ def _logo_tilegrid():
 def _preview_badge():
     """Small 'PREVIEW' tag drawn over the layout while the preset-preview cursor
     is active, so the user knows the shown patch is not yet loaded."""
-    return label.Label(
+    return _make_label(
         terminalio.FONT, text="PREVIEW", color=_LOGO_COLOR, scale=2,
         anchor_point=(0.5, 1.0),
         anchored_position=(_SCREEN_W // 2, _SCREEN_H - 4),
@@ -224,7 +467,8 @@ def _anchor_pixels(spec):
 def _format_field(spec, context):
     """Resolve a layout entry into the text to draw. Returns "" when the
     field has no value yet - caller then skips drawing so labels with a
-    prefix don't render as orphan "SCENE " / "BANK " strings."""
+    prefix don't render as orphan "SCENE " / "BANK " strings. The explicit
+    expression-mode field instead renders ``---`` while its value is unknown."""
     field = spec.get("field")
     prefix = spec.get("prefix", "") or ""
     suffix = spec.get("suffix", "") or ""
@@ -234,6 +478,8 @@ def _format_field(spec, context):
         return prefix + str(spec.get("text", "")) + suffix
 
     value = context.get(field, "")
+    if field == "expression_mode":
+        value = value if value in ("VOL", "WAH") else "---"
     if value is None or value == "":
         return ""
     return prefix + str(value) + suffix
@@ -264,6 +510,32 @@ class Display:
         self._tuner_ind_pal = None
         self._tuner_footer = None
         self._tuner_last = None
+        self._layout_group = None
+        self._layout_specs = None
+        self._layout_labels = []
+        self._preview_label = None
+        self._suspended = False
+
+    def suspend(self):
+        """Lend the cached frame's RAM to a firmware upload."""
+        if self._suspended:
+            return
+        self._suspended = True
+        self.display.root_group = None
+        self._layout_group = self._layout_specs = self._preview_label = None
+        self._layout_labels = []
+        self._scroll = []
+        self._scroll_start_ms = self._last_scroll_ms = None
+        self._tuner_active = False
+        self._tuner_note_lbl = self._tuner_footer = self._tuner_ind = None
+        self._tuner_ind_pal = self._tuner_last = None
+        gc.collect()
+
+    def resume(self):
+        """Return whether the caller must schedule a fresh context render."""
+        suspended = self._suspended
+        self._suspended = False
+        return suspended
 
     def show_splash(self):
         self._scroll = []
@@ -274,11 +546,11 @@ class Display:
             group.append(_logo_tilegrid())
         except Exception as e:
             print("splash logo failed:", e)
-        group.append(label.Label(
+        group.append(_make_label(
             terminalio.FONT, text="Bosun", color=_LOGO_COLOR, scale=4,
             anchor_point=(0.5, 0.5), anchored_position=(_SCREEN_W // 2, 150),
         ))
-        group.append(label.Label(
+        group.append(_make_label(
             terminalio.FONT, text=VERSION, color=0x9AA1AD, scale=2,
             anchor_point=(0.5, 0.5), anchored_position=(_SCREEN_W // 2, 185),
         ))
@@ -294,97 +566,120 @@ class Display:
         looking at their guitar, not at preset names. Any plugin can drive the
         tuner by publishing `tuner` (and optionally `tuner_note` /
         `tuner_deviance`); the Kemper plugin also keeps its kemper_* aliases."""
-        # Drop any labels registered by the previous frame before we rebuild -
-        # those Label objects are about to be replaced and must not be animated.
-        self._scroll = []
-        self._scroll_start_ms = None
-
+        if self._suspended:
+            return
         if context.get("tuner") == "on" or context.get("kemper_tuner") == "on":
+            self._scroll = []
             self._render_tuner(context)
             return
-
-        # Leaving the tuner: the persistent tuner group is about to be replaced,
-        # so the next time the tuner turns on it must rebuild from scratch.
         self._tuner_active = False
-        # Compact the heap before we build the new Group. The old root_group is
-        # still referenced (freed only when we reassign root_group below), so
-        # the new Group's labels/bitmaps peak on top of it - roughly 2x. On the
-        # RP2040's tight heap a collect here maximises the contiguous space that
-        # peak needs and keeps a settings-save render (stacked on apply_global's
-        # reindex/expression churn) from fragmenting into a MemoryError.
-        gc.collect()
-        group = displayio.Group()
-
-        previewing = context.get("preview") == "on"
-
         if not layout:
-            name = context.get("patch_name") or "(unnamed)"
-            group.append(label.Label(terminalio.FONT, text=str(name), x=20, y=120))
-            if previewing:
-                group.append(_preview_badge())
-            self.display.root_group = group
-            return
+            layout = [{"field": "patch_name", "x": 20, "y": 113}]
 
-        for spec in layout:
-            try:
-                text = _format_field(spec, context)
-                if text == "":
-                    continue
-                color = _parse_color(spec.get("color"))
-                size = max(1, int(spec.get("size", 1)))
-                # `halign`/`valign` pick the corner of the screen
-                # AND the corresponding corner of the label. x/y are
-                # pixel offsets from that screen corner. Result: the
-                # label visually aligns the same way regardless of its
-                # text length or scale.
-                font = _load_font(spec.get("font"))
-                apx, apy = _anchor_point(spec)
-                ax, ay = _anchor_pixels(spec)
-                lbl = label.Label(
-                    font,
-                    text=text,
-                    color=color,
-                    scale=size,
-                    anchor_point=(apx, apy),
-                    anchored_position=(ax, ay),
-                )
-                # Marquee: if this label opts in and its text is wider than the
-                # usable width, re-anchor it to the left margin (keeping its
-                # vertical anchor) and register it for animation in tick().
-                if spec.get("scroll"):
+        changed = layout != self._layout_specs
+        rebuild = (self._layout_group is None
+                   or len(layout) != len(self._layout_labels))
+        if not rebuild:
+            for spec, old, lbl in zip(layout, self._layout_specs, self._layout_labels):
+                badge = isinstance(lbl, _ExpressionBadge)
+                text_label = lbl._label if badge else lbl
+                if ((spec.get("font") or "system") != (old.get("font") or "system")
+                        or (spec.get("field") == "expression_mode") != badge
+                        or (isinstance(text_label, _SystemLabel)
+                            and "\n" in _format_field(spec, context))):
+                    rebuild = True
+                    break
+        if rebuild:
+            gc.collect()
+            group = displayio.Group()
+            labels = []
+            specs = []
+            for spec in layout:
+                try:
+                    text = _format_field(spec, context)
+                    font = _load_font(spec.get("font"))
+                    label_type = (_ExpressionBadge
+                                  if spec.get("field") == "expression_mode"
+                                  else _make_label)
+                    lbl = label_type(
+                        font, text=text, color=_parse_color(spec.get("color")),
+                        scale=max(1, int(spec.get("size", 1))),
+                        anchor_point=_anchor_point(spec),
+                        anchored_position=_anchor_pixels(spec),
+                    )
+                    specs.append(dict(spec))
+                    labels.append(lbl)
+                    group.append(lbl)
+                except MemoryError:
+                    # Never publish an incomplete frame as a successful one.
+                    raise
+                except Exception as e:
+                    print("display: bad layout entry", spec, "->", e)
+            preview_label = _preview_badge()
+            preview_label.hidden = context.get("preview") != "on"
+            group.append(preview_label)
+            # All allocations succeeded; replace the cached screen together.
+            self._layout_group = group
+            self._layout_specs = specs
+            self._layout_labels = labels
+            self._preview_label = preview_label
+        elif changed:
+            # Presentation edits keep the native groups, glyph tiles and
+            # palettes. Snapshot only on edits, before touching the frame;
+            # publish after success so a failed update remains retryable.
+            gc.collect()
+            specs = [dict(spec) for spec in layout]
+        else:
+            specs = self._layout_specs
+
+        self._scroll = []
+        self._scroll_start_ms = None
+        for spec, lbl in zip(specs, self._layout_labels):
+            text = _format_field(spec, context)
+            size = max(1, int(spec.get("size", 1)))
+            avail = _SCREEN_W - 2 * _SCROLL_MARGIN
+            if lbl.text != text:
+                lbl.text = text
+            if isinstance(lbl, _ExpressionBadge):
+                # Read the raw mode so user prefixes/suffixes cannot select
+                # the wrong icon (e.g. a "WAH " prefix on a VOL field).
+                lbl.set_mode(context.get("expression_mode"))
+            lbl.scale = size
+            lbl.anchor_point = _anchor_point(spec)
+            lbl.anchored_position = _anchor_pixels(spec)
+            if spec.get("scroll"):
+                text_w = int(lbl.bounding_box[2]) * size
+                if text_w > avail:
+                    _, apy = _anchor_point(spec)
+                    _, ay = _anchor_pixels(spec)
+                    lbl.anchor_point = (0.0, apy)
+                    lbl.anchored_position = (_SCROLL_MARGIN, ay)
                     try:
-                        text_w = int(lbl.bounding_box[2]) * size
-                    except Exception:
-                        text_w = 0
-                    avail = _SCREEN_W - 2 * _SCROLL_MARGIN
-                    if text_w > avail:
-                        lbl.anchor_point = (0.0, apy)
-                        lbl.anchored_position = (_SCROLL_MARGIN, ay)
-                        try:
-                            speed = int(spec.get("scroll_speed"))
-                        except (TypeError, ValueError):
-                            speed = _SCROLL_SPEED_PX_S
-                        if speed <= 0:
-                            speed = _SCROLL_SPEED_PX_S
-                        # Capture the label's real home x AFTER anchoring: for
-                        # some BDF fonts the glyph bounding box origin isn't 0,
-                        # so lbl.x != _SCROLL_MARGIN. Animating from the actual
-                        # value avoids a one-frame jump at the start of a cycle.
-                        self._scroll.append({
-                            "label": lbl,
-                            "home": lbl.x,
-                            "span": text_w - avail,
-                            "speed": speed,
-                        })
-                group.append(lbl)
-            except Exception as e:
-                # Bad layout entry should never crash the display.
-                print("display: bad layout entry", spec, "->", e)
-
-        if previewing:
-            group.append(_preview_badge())
-
-        self.display.root_group = group
+                        speed = int(spec.get("scroll_speed"))
+                    except (TypeError, ValueError):
+                        speed = _SCROLL_SPEED_PX_S
+                    if speed <= 0:
+                        speed = _SCROLL_SPEED_PX_S
+                    self._scroll.append({"label": lbl, "home": lbl.x,
+                                         "span": text_w - avail, "speed": speed})
+        if changed and not rebuild:
+            # Parse every color before changing a palette. Keep the prior
+            # colors until all setters succeed, including badge icon/text.
+            colors = [_parse_color(spec.get("color")) for spec in specs]
+            previous = [lbl.color for lbl in self._layout_labels]
+            try:
+                for lbl, color in zip(self._layout_labels, colors):
+                    lbl.color = color
+            except Exception:
+                for lbl, color in zip(self._layout_labels, previous):
+                    lbl.color = color
+                raise
+        self._preview_label.hidden = context.get("preview") != "on"
+        self.display.root_group = self._layout_group
+        self._layout_specs = specs
+        # Release the inactive tuner's labels once the normal screen owns TFT.
+        self._tuner_note_lbl = self._tuner_footer = self._tuner_ind = None
+        self._tuner_ind_pal = self._tuner_last = None
 
     def tick(self, now_ms):
         """Advance the marquee animation. Cheap no-op when nothing scrolls.
@@ -473,7 +768,7 @@ class Display:
         ind_y = _TUNER_BAR_Y - (_TUNER_IND_H - _TUNER_BAR_H) // 2
         group = displayio.Group()
 
-        note_lbl = label.Label(
+        note_lbl = _make_label(
             terminalio.FONT, text=str(note),
             color=_TUNER_IN_TUNE if in_tune else _TUNER_NOTE_OFF,
             scale=8, anchor_point=(0.5, 0.5),
@@ -501,7 +796,7 @@ class Display:
         ind_tg = displayio.TileGrid(ind_bmp, pixel_shader=ind_pal, x=ind_x, y=ind_y)
         group.append(ind_tg)
 
-        footer = label.Label(
+        footer = _make_label(
             terminalio.FONT, text=self._footer_text(cents, direction),
             color=self._footer_color(in_tune), scale=2, anchor_point=(0.5, 0.5),
             anchored_position=(_SCREEN_W // 2, 200),
@@ -547,6 +842,6 @@ class Display:
         self._scroll_start_ms = None
         self._tuner_active = False
         group = displayio.Group()
-        group.append(label.Label(terminalio.FONT, text=name or "(unnamed)", x=20, y=120))
+        group.append(_make_label(terminalio.FONT, text=name or "(unnamed)", x=20, y=120))
         self.display.root_group = group
 

@@ -24,7 +24,8 @@ The thread:
     serial/desktop.rs and serial_tcp_bridge.py).
   - reads bytes, splits on newlines, hands each complete line to
     ``on_line``.
-  - drains a write queue, one command per iteration.
+  - drains a write queue in-order, retaining any non-blocking partial write
+    suffix while interleaving reads between fragments.
   - sends its own keepalive PING when the link has been idle, so a
     silent Stage feed (minutes can pass with no legitimate traffic) is
     not mistaken for a dead port. Replies to the hub's own ``__hub_*``
@@ -39,8 +40,10 @@ The thread:
 from __future__ import annotations
 
 import glob
+import errno
 import json
 import logging
+import os
 import queue
 import socket
 import threading
@@ -55,6 +58,7 @@ SYNC_TIMEOUT_TCP = 8.0
 KEEPALIVE_S = 6.0
 STALL_S = 20.0
 WRITE_ONLY_STALL = 5  # consecutive writes with zero reads in between -> reopen
+WRITE_ONLY_GRACE_S = 3.0  # a normal bootstrap can enqueue >5 commands at once
 REOPEN_BACKOFF = (0.5, 1.0, 2.0, 3.0, 5.0)
 READ_CHUNK = 4096
 RX_BUF_MAX = 1 << 20  # 1 MiB; matches the firmware's own overflow guard intent
@@ -79,6 +83,23 @@ class Transport:
     def write(self, data: bytes) -> None:
         raise NotImplementedError
 
+    def write_some(self, data: bytes) -> int:
+        """Write without requiring callers to replay an unknown prefix.
+
+        Stream transports which cannot expose partial progress may keep the
+        all-or-error :meth:`write` contract.  SerialTransport overrides this
+        with a genuinely non-blocking write so the pump can alternate USB TX
+        with RX while the Captain is producing a large response.
+        """
+
+        self.write(data)
+        return len(data)
+
+    def read_available(self, n: int) -> bytes:
+        """Return bytes already buffered by the OS, without waiting."""
+
+        return b""
+
     def close(self) -> None:
         raise NotImplementedError
 
@@ -88,11 +109,19 @@ class SerialTransport(Transport):
         import serial  # lazy: developing against tcp:// needs no pyserial
 
         self.name = path
+        self._close_lock = threading.Lock()
+        self._closed = False
         self._s = serial.Serial()
         self._s.port = path
         self._s.baudrate = BAUD
         self._s.timeout = 0.05
-        self._s.write_timeout = 1.0
+        # A timed pyserial write can accept a prefix and then raise without
+        # reporting how many bytes made it to the kernel. Retrying duplicates
+        # that prefix; reconnecting leaves a truncated JSON command. In
+        # non-blocking mode pyserial returns the exact accepted byte count,
+        # which lets UpstreamLink retain and resume the remaining suffix while
+        # continuing to drain the Captain's opposite-direction CDC traffic.
+        self._s.write_timeout = 0
         # CircuitPython's CDC needs DTR asserted to treat the host as
         # "connected"; the DTR edge also soft-resets the RP2040.
         self._s.dtr = True
@@ -104,17 +133,73 @@ class SerialTransport(Transport):
             pass
 
     def read(self, n: int) -> bytes:
-        return self._s.read(n)
+        if n <= 0:
+            return b""
+
+        # pyserial's ``read(size)`` waits until *size* bytes arrive or the
+        # timeout expires.  Asking for READ_CHUNK (4096) on every pass delays
+        # every short line and final partial chunk by up to 50 ms, and can
+        # unnecessarily leave the Captain's small CDC FIFO back-pressured.
+        # Drain everything the driver already has immediately; only use a
+        # one-byte blocking read when idle so disconnect/reconnect polling
+        # remains bounded by the configured timeout.
+        ready = self.read_available(n)
+        if ready:
+            return ready
+        return self._s.read(1)
+
+    def read_available(self, n: int) -> bytes:
+        if n <= 0:
+            return b""
+        waiting = self._s.in_waiting
+        if waiting <= 0:
+            return b""
+        return self._s.read(min(n, waiting))
 
     def write(self, data: bytes) -> None:
-        self._s.write(data)
-        self._s.flush()
+        written = self.write_some(data)
+        if written != len(data):
+            raise OSError(f"short serial write ({written}/{len(data)} bytes)")
+
+    def write_some(self, data: bytes) -> int:
+        if not data:
+            return 0
+        try:
+            # Do not use pyserial's Serial.write here. In pyserial 3.5's
+            # POSIX backend, write_timeout=0 combines with EAGAIN into an
+            # unbounded retry loop. The tty descriptor itself is O_NONBLOCK;
+            # one os.write therefore gives us either exact partial progress or
+            # a bounded would-block result.
+            written = os.write(self._s.fileno(), data)
+        except OSError as exc:
+            if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                return 0
+            raise
+        if not isinstance(written, int) or written < 0 or written > len(data):
+            raise OSError(f"invalid serial write result {written!r}")
+        return written
 
     def close(self) -> None:
-        try:
-            self._s.close()
-        except Exception:
-            pass
+        # pyserial's POSIX read/write loops provide explicit cancellation
+        # pipes.  Use them before closing the fd: merely closing a descriptor
+        # from another thread does not reliably wake a blocked syscall and can
+        # instead race it into ``os.read(None, ...)``.  The lock also makes the
+        # stop-thread/_run-finally double close harmless.
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            for method_name in ("cancel_read", "cancel_write"):
+                method = getattr(self._s, method_name, None)
+                if method is not None:
+                    try:
+                        method()
+                    except Exception:
+                        pass
+            try:
+                self._s.close()
+            except Exception:
+                pass
 
 
 class TcpTransport(Transport):
@@ -206,6 +291,15 @@ class UpstreamLink:
         self._thread: Optional[threading.Thread] = None
 
         self._transport: Optional[Transport] = None
+        # Includes transports which are still doing the sentinel handshake.
+        # stop() closes this handle to interrupt a wedged kernel/USB read; an
+        # Event alone cannot wake a blocking pyserial call.
+        self._transport_lock = threading.Lock()
+        # Serialise the connected flag with TX admission/teardown. Without
+        # this lock, send() could observe True, lose the race with the link
+        # thread's queue purge, and enqueue a command afterwards for replay on
+        # the next Captain session.
+        self._state_lock = threading.Lock()
         self._rx = bytearray()
         self._connected = False
 
@@ -221,31 +315,47 @@ class UpstreamLink:
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
+        with self._transport_lock:
+            transport = self._transport
+        if transport is not None:
+            transport.close()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=1.0)
+            if thread.is_alive():
+                log.error("link thread did not stop after transport close")
+            else:
+                self._thread = None
 
     @property
     def connected(self) -> bool:
-        return self._connected
+        with self._state_lock:
+            return self._connected
 
-    def send(self, line: str) -> None:
-        """Queue one protocol line for the pedal. Non-blocking; a full
-        queue means the pedal is not draining and the oldest command is
-        dropped rather than blocking a network handler."""
+    def send(self, line: str) -> bool:
+        """Queue one protocol line for the pedal without blocking.
 
+        Once accepted, a command is never evicted by a later command. This
+        ordering guarantee matters for mutation -> read sequences: dropping
+        the older mutation but retaining a later GET_PATCH could make the hub
+        cache pre-mutation state. A full/down link rejects the new command and
+        lets the Hub return a correlated error instead.
+        """
+
+        # Commands have no useful meaning across sessions. Replaying a rig
+        # change or one half of a momentary press/release after reconnect is
+        # actively dangerous during a performance.
         line = line.rstrip("\r\n") + "\n"
-        try:
-            self._tx.put_nowait(line)
-        except queue.Full:
-            try:
-                self._tx.get_nowait()
-            except queue.Empty:
-                pass
+        with self._state_lock:
+            if not self._connected:
+                log.debug("dropping command while upstream link is down")
+                return False
             try:
                 self._tx.put_nowait(line)
+                return True
             except queue.Full:
-                log.warning("tx queue full, dropping command")
+                log.warning("tx queue full, rejecting newest command")
+                return False
 
     # -- thread ----------------------------------------------------------
 
@@ -257,12 +367,23 @@ class UpstreamLink:
                     backoff = iter(REOPEN_BACKOFF)
                     self._pump()
             except Exception as exc:  # noqa: BLE001 - the loop must never die
-                log.warning("link error: %s", exc)
+                if self._stop.is_set():
+                    # close() deliberately interrupts an in-flight pyserial
+                    # operation.  Some drivers surface that cancellation as
+                    # OSError/TypeError; it is expected during shutdown.
+                    log.debug("link stopped while I/O was active: %s", exc)
+                else:
+                    log.warning("link error: %s", exc)
             finally:
-                self._set_state(False, "closed")
-                if self._transport is not None:
-                    self._transport.close()
+                # Mark down and purge atomically with respect to send(); a
+                # command admitted by the old session must never land just
+                # after the purge and be replayed following reconnect.
+                self._set_state(False, "closed", discard_tx=True)
+                with self._transport_lock:
+                    transport = self._transport
                     self._transport = None
+                if transport is not None:
+                    transport.close()
                 self._rx.clear()
             if self._stop.is_set():
                 break
@@ -287,12 +408,21 @@ class UpstreamLink:
             except Exception as exc:  # noqa: BLE001
                 log.debug("open %s failed: %s", target, exc)
                 continue
-            if self._sentinel_sync(transport):
+            if self._stop.is_set():
+                transport.close()
+                return False
+            # Publish before the potentially long sentinel sync so stop() can
+            # abort it even when the USB driver never returns from read().
+            with self._transport_lock:
                 self._transport = transport
+            if self._sentinel_sync(transport):
                 self._set_state(True, transport.name)
                 log.info("linked to %s", transport.name)
                 return True
             transport.close()
+            with self._transport_lock:
+                if self._transport is transport:
+                    self._transport = None
             log.debug("%s did not answer the protocol sentinel", target)
         return False
 
@@ -300,34 +430,73 @@ class UpstreamLink:
         """Send a uniquely-tagged PING and read until its ACK, discarding
         everything before it. Returns False if no ACK arrives in time."""
 
+        if self._stop.is_set():
+            return False
         marker = f"{_HUB_ID_PREFIX}sync_{int(time.time() * 1000)}"
         deadline = time.monotonic() + (
             SYNC_TIMEOUT_TCP
             if transport.name.startswith("tcp://")
             else SYNC_TIMEOUT_SERIAL
         )
-        try:
-            transport.write(b'\n{"type":"PING","id":"' + marker.encode() + b'"}\n')
-        except Exception as exc:  # noqa: BLE001
-            log.debug("sentinel write failed: %s", exc)
-            return False
-
+        pending = b'\n{"type":"PING","id":"' + marker.encode() + b'"}\n'
         buf = bytearray()
         while time.monotonic() < deadline and not self._stop.is_set():
+            written = 0
+            if pending:
+                try:
+                    write_some = getattr(transport, "write_some", None)
+                    if write_some is None:
+                        # Preserve the Transport protocol's historical
+                        # all-or-error duck type for third-party transports;
+                        # SerialTransport supplies exact partial progress.
+                        transport.write(pending)
+                        written = len(pending)
+                    else:
+                        written = write_some(pending)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("sentinel write failed: %s", exc)
+                    return False
+                if (not isinstance(written, int) or written < 0 or
+                        written > len(pending)):
+                    log.debug("invalid sentinel write progress: %r", written)
+                    return False
+                if written:
+                    pending = pending[written:]
             try:
                 chunk = transport.read(READ_CHUNK)
             except Exception as exc:  # noqa: BLE001
                 log.debug("sentinel read failed: %s", exc)
                 return False
             if not chunk:
+                if not written:
+                    # Transport.read normally supplies a bounded wait, but
+                    # the abstract contract also permits an immediate empty
+                    # result. Avoid spinning while sending or awaiting ACK.
+                    time.sleep(0.01)
                 continue
             buf.extend(chunk)
-            # Accept both compact and space-after-colon JSON, same as the
-            # Rust and Android sentinel matchers.
-            text = buf.decode("utf-8", "replace")
-            if marker in text and '"type":"ACK"' in text.replace('"type": "ACK"', '"type":"ACK"'):
-                return True
+            if len(buf) > RX_BUF_MAX:
+                return False
+            while b"\n" in buf:
+                raw, _, rest = buf.partition(b"\n")
+                buf = bytearray(rest)
+                try:
+                    obj = json.loads(raw.decode("utf-8", "strict").strip())
+                except (UnicodeDecodeError, ValueError):
+                    continue
+                # Do not accept a coincidentally matching stale frame until
+                # this session's entire sentinel has reached the transport.
+                if (not pending and isinstance(obj, dict) and
+                        obj.get("type") == "ACK" and obj.get("id") == marker):
+                    return True
         return False
+
+    def _discard_tx(self) -> None:
+        while True:
+            try:
+                self._tx.get_nowait()
+            except queue.Empty:
+                return
 
     def _pump(self) -> None:
         assert self._transport is not None
@@ -335,23 +504,43 @@ class UpstreamLink:
         last_rx = time.monotonic()
         last_tx = time.monotonic()
         writes_since_rx = 0
+        pending = b""
 
         while not self._stop.is_set():
             now = time.monotonic()
+            line = None
+            written = 0
+
+            # Drain bytes which are already in the host driver before trying
+            # USB TX. This is non-blocking and prevents a large Captain reply
+            # (notably MANIFEST) and a simultaneous host burst from filling
+            # both CDC directions before either side gets to read.
+            chunk = transport.read_available(READ_CHUNK)
+            if chunk:
+                last_rx = time.monotonic()
+                writes_since_rx = 0
+                self._feed_bytes(chunk)
 
             # -- write one queued command ---------------------------------
-            try:
-                line = self._tx.get_nowait()
-            except queue.Empty:
-                line = None
-            if line is None and now - max(last_rx, last_tx) >= KEEPALIVE_S:
-                line = '{"type":"PING","id":"%skeepalive"}\n' % _HUB_ID_PREFIX
-            if line is not None:
-                transport.write(line.encode("utf-8"))
-                last_tx = now
-                writes_since_rx += 1
-                if writes_since_rx >= WRITE_ONLY_STALL:
-                    raise ConnectionError("write-only stall (pedal not answering)")
+            if not pending:
+                try:
+                    line = self._tx.get_nowait()
+                except queue.Empty:
+                    line = None
+                if line is None and now - max(last_rx, last_tx) >= KEEPALIVE_S:
+                    line = '{"type":"PING","id":"%skeepalive"}\n' % _HUB_ID_PREFIX
+                if line is not None:
+                    pending = line.encode("utf-8")
+            if pending:
+                written = transport.write_some(pending)
+                if written:
+                    pending = pending[written:]
+                    last_tx = time.monotonic()
+                if not pending:
+                    writes_since_rx += 1
+                    if (writes_since_rx >= WRITE_ONLY_STALL
+                            and now - last_rx >= WRITE_ONLY_GRACE_S):
+                        raise ConnectionError("write-only stall (pedal not answering)")
 
             # -- read ---------------------------------------------------
             chunk = transport.read(READ_CHUNK)
@@ -362,7 +551,7 @@ class UpstreamLink:
             elif now - last_rx >= STALL_S:
                 raise ConnectionError(f"no data for {STALL_S:.0f}s")
 
-            if not chunk and line is None:
+            if not chunk and not written:
                 time.sleep(0.01)
 
     def _feed_bytes(self, chunk: bytes) -> None:
@@ -397,10 +586,15 @@ class UpstreamLink:
             return False
         return isinstance(obj, dict) and str(obj.get("id", "")).startswith(_HUB_ID_PREFIX)
 
-    def _set_state(self, up: bool, detail: str) -> None:
-        if up == self._connected:
+    def _set_state(self, up: bool, detail: str,
+                   discard_tx: bool = False) -> None:
+        with self._state_lock:
+            changed = up != self._connected
+            self._connected = up
+            if discard_tx:
+                self._discard_tx()
+        if not changed:
             return
-        self._connected = up
         try:
             self._on_state(up, detail)
         except Exception:  # noqa: BLE001
