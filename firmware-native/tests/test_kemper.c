@@ -525,12 +525,14 @@ static void bank_snapshot_fallback_is_bounded_and_scoped(void) {
         pc(&k, 7, start + 11);
         name(&k, "Deferred name", start + 20);
         bank_header(&k, start + 900); /* Repeated metadata cannot extend the deadline. */
-        bosun_kemper_tick(&k, start + 1009);
+        bosun_kemper_tick(&k, start + 2509);
         assert(k.state.rig == 9 && !k.state.external_rig_changes && !k.state.rig_name_fresh);
-        bosun_kemper_tick(&k, start + 1010);
+        bosun_kemper_tick(&k, start + 2510);
         assert(k.state.rig == 8 && k.state.external_rig_changes == 1 && !k.state.rig_name_fresh);
-        pc(&k, 8, start + 1011); /* A genuinely late local echo remains retired. */
-        assert(k.state.rig == 8 && k.state.external_rig_changes == 1);
+        assert(k.bank_snapshot_fallback && k.orphan_pc_count == 1);
+        pc(&k, 8, start + 2511); /* Fallback alone cannot quarantine the final target. */
+        assert(k.state.rig == 9 && k.state.external_rig_changes == 2);
+        assert(!k.bank_snapshot_fallback && !k.orphan_pc_count);
     }
 
     bosun_kemper k; wire w;
@@ -554,8 +556,57 @@ static void bank_snapshot_fallback_is_bounded_and_scoped(void) {
     bank_header(&k, 4110);
     pc(&k, 7, 4111); /* A known orphan never becomes a physical fallback. */
     assert(!k.deferred_bank_pc && !k.orphan_pc_count);
-    bosun_kemper_tick(&k, 5110);
+    bosun_kemper_tick(&k, 6610);
     assert(k.state.rig == 9 && !k.state.external_rig_changes);
+}
+
+static void bank_snapshot_late_final_and_supersession(void) {
+    const uint32_t delays[] = {1100, 2400};
+    for (unsigned i = 0; i < sizeof delays / sizeof *delays; ++i) {
+        bosun_kemper k; wire w;
+        ready(&k, &w);
+        assert(bosun_kemper_select_rig(&k, 2, 4, 2000));
+        bosun_kemper_tick(&k, 2005);
+        bank_header(&k, 2010);
+        uint32_t generation = k.generation, external = k.state.external_rig_changes;
+        pc(&k, 5, 2011); /* The ACOUSTIC slot is reported first in bank2. */
+        name(&k, "HEAVY", 2020);
+        bosun_kemper_tick(&k, 2010 + delays[i] - 1);
+        assert(k.state.rig == 9 && k.generation == generation && k.local_pc.valid);
+        assert(k.state.external_rig_changes == external && !k.state.rig_name_fresh);
+        pc(&k, 8, 2010 + delays[i]);
+        bosun_kemper_tick(&k, 2060 + delays[i]);
+        assert(k.state.rig == 9 && k.generation == generation && k.state.rig_name_fresh);
+        assert(k.state.external_rig_changes == external && !strcmp(k.last_name, "HEAVY"));
+    }
+
+    for (unsigned supersession = 0; supersession < 3; ++supersession) {
+        bosun_kemper k; wire w;
+        ready(&k, &w);
+        assert(bosun_kemper_select_rig(&k, 2, 4, 2000));
+        bosun_kemper_tick(&k, 2005);
+        bank_header(&k, 2010);
+        pc(&k, 5, 2011);
+        bosun_kemper_tick(&k, 4510);
+        assert(k.state.rig == 6 && k.bank_snapshot_fallback && k.orphan_pc_count == 1);
+        if (supersession == 0) {
+            /* A name arriving after fallback's settle is not a new selection. */
+            bosun_kemper_tick(&k, 5010);
+            name(&k, "HEAVY", 5020);
+            assert(k.bank_snapshot_fallback);
+            pc(&k, 8, 5030);
+            assert(k.state.rig == 9 && !k.bank_snapshot_fallback);
+        } else {
+            if (supersession == 1) {
+                assert(bosun_kemper_select_rig(&k, 1, 2, 4520));
+                bosun_kemper_tick(&k, 4525);
+            } else pc(&k, 1, 4520); /* Physical PC in another bank stays immediate. */
+            assert(k.state.rig == 2 && !k.bank_snapshot_fallback);
+            uint32_t generation = k.generation;
+            pc(&k, 8, 4530); /* Old final PC must not override this newer selection. */
+            assert(k.state.rig == 2 && k.generation == generation);
+        }
+    }
 }
 
 int main(void) {
@@ -571,6 +622,7 @@ int main(void) {
     selected_rig_recovers_missing_broadcast();
     bank_snapshot_intermediate_and_final_pc();
     bank_snapshot_fallback_is_bounded_and_scoped();
+    bank_snapshot_late_final_and_supersession();
     printf("Kemper: codecs, lease, tuner, PC echo, generations, names, 8-slot WAH, retries passed (%zu bytes state)\n", sizeof(bosun_kemper));
     return 0;
 }

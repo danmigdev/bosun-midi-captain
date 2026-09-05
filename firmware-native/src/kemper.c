@@ -9,6 +9,9 @@ static const uint8_t type_page[8] = {50,51,52,53,56,58,60,61};
 static const char *const note_names[12] = {
     "C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"
 };
+/* Real USB captures reached 936 ms from bank header to final PC under load.
+ * Leave room for slower snapshots while retaining a fixed physical fallback. */
+enum { BANK_SNAPSHOT_WINDOW_MS = 2500 };
 
 static bool due(uint32_t now, uint32_t deadline) {
     return (int32_t)(now - deadline) >= 0;
@@ -230,7 +233,7 @@ static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
     k->state.effect_known = 0;
     k->pending_name[0] = 0;
     k->pending_name_requested = k->name_query_active = false;
-    k->bank_snapshot_active = k->bank_snapshot_seen = false;
+    k->bank_snapshot_active = k->bank_snapshot_seen = k->bank_snapshot_fallback = false;
     k->deferred_bank_pc = 0;
     k->scheduled_pc = false;
     reset_reconcile(k, now, 500);
@@ -246,6 +249,10 @@ static void expire_bank_snapshot(bosun_kemper *k, uint32_t now) {
         /* A physical selection may have superseded the local request. Do
          * not suppress it indefinitely if the expected final echo is lost. */
         arm(k, rig, now);
+        /* Keep the retired token for any later superseding selection, but
+         * this fallback alone must not quarantine the expected final PC.
+         * arm() leaves local_pc's identity/expiry intact after retiring it. */
+        k->bank_snapshot_fallback = true;
         ++k->state.external_rig_changes;
     }
 }
@@ -370,7 +377,10 @@ static void receive_name(bosun_kemper *k, const uint8_t *data, size_t length,
         if ((k->last_name[0] && strcmp(name, k->last_name)) ||
             (k->last_name_rig && k->last_name_rig != k->state.rig) ||
             initial) {
+            bool fallback = k->bank_snapshot_fallback;
             arm(k, k->state.rig, now);
+            /* A refreshed name is not a new physical/local selection. */
+            k->bank_snapshot_fallback = fallback;
             /* Once its coordinates are established, the first name has no
              * previous rig identity to quarantine while effects settle. */
             if (initial) { accept_name(k, name); return; }
@@ -420,7 +430,7 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
          * changes report the old slot in the new bank before the final PC.
          * Only this observed bank snapshot opens a bounded echo window. */
         k->bank_snapshot_active = k->bank_snapshot_seen = true;
-        k->bank_snapshot_deadline_ms = now + 1000;
+        k->bank_snapshot_deadline_ms = now + BANK_SNAPSHOT_WINDOW_MS;
         return;
     }
     if (fn != 1 || length < 11) return;
@@ -523,12 +533,15 @@ static void receive_pc(bosun_kemper *k, uint8_t pc, uint32_t now) {
         }
         return;
     }
+    bool final_after_fallback = k->bank_snapshot_fallback && k->local_pc.rig == rig &&
+        !due(now, k->local_pc.expires_ms);
     for (unsigned i = 0; i < k->orphan_pc_count; ++i) {
         if (k->orphan_pc[i].rig != rig) continue;
         memmove(k->orphan_pc + i, k->orphan_pc + i + 1,
             (k->orphan_pc_count - i - 1) * sizeof(k->orphan_pc[0]));
         --k->orphan_pc_count;
-        return;
+        if (!final_after_fallback) return;
+        break;
     }
     if (k->bank_snapshot_active && k->local_pc.valid &&
         k->local_pc.generation == k->generation && (rig - 1) / 5 == (k->local_pc.rig - 1) / 5) {

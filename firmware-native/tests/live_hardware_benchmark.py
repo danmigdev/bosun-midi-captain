@@ -42,6 +42,8 @@ STARTUP_DISCARD_MAX_FRAMES = 4
 STARTUP_DISCARD_MAX_BYTES = 16 * 1024
 STARTUP_PREFIX_BYTES = 256
 MALFORMED_FRAMES_RETAINED = 4
+REQUEST_FAILURES_RETAINED = 8
+FAILED_PENDING_BYTES_RETAINED = 4096
 
 
 class Client:
@@ -84,7 +86,35 @@ class Client:
             record["elapsed_ms"] = (time.monotonic() - started) * 1000
 
     def request(self, kind, timeout, **fields):
-        return self._request(kind, timeout, **fields)
+        started = time.monotonic()
+        try:
+            return self._request(kind, timeout, **fields)
+        except (Exception, KeyboardInterrupt) as exc:
+            pending = bytes(self.pending[:FAILED_PENDING_BYTES_RETAINED])
+            failure = {"request_kind": kind, "request_id": "%s-%d" % (self.prefix, self.sequence),
+                       "fields": dict(fields), "timeout_s": timeout,
+                       "request_started_monotonic_s": started,
+                       "elapsed_ms": (time.monotonic() - started) * 1000,
+                       "failed_monotonic_s": time.monotonic(),
+                       "exception_type": type(exc).__name__, "error": str(exc),
+                       "pending_bytes": len(self.pending),
+                       "pending_fragment_truncated": len(pending) < len(self.pending),
+                       "latest_context": self.observations.get("latest_context"),
+                       "latest_rig_reply": self.observations.get("latest_rig_reply"),
+                       "latest_context_received_monotonic_s": self.observations.get("latest_context_received_monotonic_s"),
+                       "latest_rig_reply_received_monotonic_s": self.observations.get("latest_rig_reply_received_monotonic_s")}
+            try:
+                failure["pending_fragment_utf8"] = pending.decode("utf-8", "strict")
+            except UnicodeDecodeError:
+                failure["pending_fragment_hex"] = pending.hex()
+            self.observations["request_failure_count"] = self.observations.get("request_failure_count", 0) + 1
+            failures = self.observations.setdefault("request_failures", [])
+            failures.append(failure)
+            del failures[:-REQUEST_FAILURES_RETAINED]
+            # Keep the most recent states in every failure, independently of
+            # the first-N unsolicited-message examples and later cleanup.
+            self.observations["last_request_failure"] = failure
+            raise
 
     def _request(self, kind, timeout, startup=None, **fields):
         self.sequence += 1
@@ -153,6 +183,10 @@ class Client:
                     continue
                 if not isinstance(reply, dict):
                     raise ValueError("protocol reply is not an object")
+                if reply.get("type") in ("CONTEXT", "RIG_INFO"):
+                    key = "latest_context" if reply["type"] == "CONTEXT" else "latest_rig_reply"
+                    self.observations[key] = reply
+                    self.observations[key + "_received_monotonic_s"] = time.monotonic()
                 if reply.get("id") == ident:
                     if reply.get("type") != KINDS[kind]:
                         raise RuntimeError("%s: %s" % (kind, reply))

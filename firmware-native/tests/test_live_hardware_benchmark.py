@@ -123,6 +123,52 @@ class BenchmarkTests(unittest.TestCase):
             client.request("PING", .5)
         self.assertEqual(client.request("PING", .5)[0]["fw"], "new")
 
+    def test_timeout_retains_failed_command_and_latest_unsolicited_rig_state(self):
+        calls = []
+        timeout = TimeoutError("requested bank change ACK timed out")
+        initial = {"type": "CONTEXT", "id": None, "context": {"bank": 1, "slot": 3}}
+        latest = {"type": "CONTEXT", "id": None, "context": {"bank": 2, "slot": 3}}
+        rig = {"type": "RIG_INFO", "id": "unrelated", "rig": 8, "fresh": True}
+        fragment = b'{"type":"CONTEXT","context":{"bank":2'
+        def build(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return [line({"type": "ACK", "id": request["id"]})]
+            return [line(initial), line(latest) + line(rig) + fragment, timeout]
+        client = benchmark.Client(FakeSocket(build))
+        client.synchronize(.5)
+        with self.assertRaises(TimeoutError) as caught:
+            client.request("SWITCH_PATCH", .5, bank=2, slot=4)
+        self.assertIs(caught.exception, timeout)
+        failure = client.observations["last_request_failure"]
+        self.assertEqual(failure["request_kind"], "SWITCH_PATCH")
+        self.assertEqual(failure["request_id"], calls[-1]["id"])
+        self.assertEqual(failure["fields"], {"bank": 2, "slot": 4})
+        self.assertEqual(failure["timeout_s"], .5)
+        self.assertEqual(failure["pending_fragment_utf8"].encode(), fragment)
+        self.assertEqual(failure["pending_bytes"], len(fragment))
+        self.assertFalse(failure["pending_fragment_truncated"])
+        self.assertEqual(failure["latest_context"], latest)
+        self.assertEqual(failure["latest_rig_reply"], rig)
+        self.assertEqual(client.observations["request_failure_count"], 1)
+        self.assertEqual(client.observations["request_failures"], [failure])
+
+    def test_latest_correlated_states_advance_without_rewriting_prior_failure_evidence(self):
+        failure_state = {"type": "CONTEXT", "id": None, "context": {"bank": 2, "slot": 3}}
+        count = []
+        def build(request):
+            count.append(request)
+            if len(count) == 1:
+                return [line(failure_state), TimeoutError("first request timed out")]
+            return [line({"type": "CONTEXT", "id": request["id"], "context": {"bank": 2, "slot": 4}})]
+        client = benchmark.Client(FakeSocket(build))
+        with self.assertRaises(TimeoutError):
+            client.request("GET_CONTEXT", .5)
+        prior_failure = client.observations["last_request_failure"]
+        reply = client.request("GET_CONTEXT", .5)[0]
+        self.assertEqual(client.observations["latest_context"], reply)
+        self.assertEqual(prior_failure["latest_context"], failure_state)
+
     def test_wrong_response_type_and_malformed_json_fail(self):
         for build in (lambda req: [line({"type": "ERROR", "id": req["id"], "error": "busy"})],
                       lambda req: [b"{broken\n"]):

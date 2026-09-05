@@ -71,7 +71,7 @@ typedef struct {
     bool wah_retire_active;
     bool rig_identity_known, bootstrap_name_pending;
     bool name_query_active, name_query_retire_active, pending_name_requested;
-    bool bank_snapshot_active, bank_snapshot_seen;
+    bool bank_snapshot_active, bank_snapshot_seen, bank_snapshot_fallback;
 } bosun_kemper;
 
 void bosun_kemper_init(bosun_kemper *kemper, uint8_t channel,

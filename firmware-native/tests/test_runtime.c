@@ -357,11 +357,38 @@ static void test_kemper_bank_snapshot_follow(void) {
     tick(2000, 0); tick(2005, 0);
     bosun_runtime_feed_midi(&runtime, 0, header, sizeof header, 2010);
     bosun_runtime_feed_midi(&runtime, 0, to_first, 2, 2011);
-    tick(3009, 0);
+    tick(4509, 0);
     assert(config.slot == 2);
-    tick(3010, 0); /* Without a final PC, tick follows the deferred physical rig. */
+    tick(4510, 0); /* Without a final PC, tick follows the deferred physical rig. */
     assert(config.bank == 1 && config.slot == 4 && runtime.kemper.state.rig == 4);
     assert(!runtime.storage_errors && !runtime.queue_count && !runtime.kemper.state.rig_name_fresh);
+    bosun_runtime_feed_midi(&runtime, 0, to_first + sizeof to_first - 2, 2, 4520);
+    assert(config.bank == 1 && config.slot == 2 && runtime.kemper.state.rig == 2);
+    assert(!runtime.storage_errors && !runtime.kemper.bank_snapshot_fallback);
+}
+
+static void test_kemper_slow_bank_snapshot(void) {
+    const uint32_t delays[] = {1100, 2400};
+    for (unsigned i = 0; i < sizeof delays / sizeof *delays; ++i) {
+        fixture("{\"kemper\":{},\"midi_channel\":1}", "{\"name\":\"ACOUSTIC\"}");
+        patch(2, 4, "{\"name\":\"HEAVY\",\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":2,\"rig\":4}]}}");
+        assert(!bosun_config_has_patch(&config, 2, 1));
+        const uint8_t header[] = {0xf0,0,0x20,0x33,0,0,7,0,0,0,1,0,0,'B','a','n','k',0,0xf7};
+        const uint8_t interim[] = {0xc0,5,0xf0,0,0x20,0x33,0,0,3,0,0,1,'H','E','A','V','Y',0,0xf7};
+        const uint8_t final[] = {0xc0,8};
+        assert(bosun_runtime_switch_patch(&runtime, 2, 4, true) == BOSUN_STORE_OK);
+        tick(100, 0); tick(105, 0);
+        bosun_runtime_feed_midi(&runtime, 0, header, sizeof header, 110);
+        bosun_runtime_feed_midi(&runtime, 0, interim, sizeof interim, 111);
+        tick(110 + delays[i] - 1, 0);
+        assert(config.bank == 2 && config.slot == 4 && runtime.kemper.state.rig == 9);
+        assert(!runtime.storage_errors && !runtime.kemper.state.rig_name_fresh);
+        bosun_runtime_feed_midi(&runtime, 0, final, sizeof final, 110 + delays[i]);
+        tick(160 + delays[i], 0);
+        assert(config.bank == 2 && config.slot == 4 && runtime.kemper.last_name_rig == 9);
+        assert(runtime.kemper.state.rig_name_fresh && !strcmp(runtime.kemper.last_name, "HEAVY"));
+        assert(!runtime.storage_errors);
+    }
 }
 
 int main(void) {
@@ -370,6 +397,7 @@ int main(void) {
     test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_expression(); test_midi();
     test_kemper_context_and_follow();
     test_kemper_bank_snapshot_follow();
+    test_kemper_slow_bank_snapshot();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Runtime: atomic queue/patch macros, delays and rollover, switch bindings, preview/setlist, expression and MIDI monitor/learn/reconnect passed");
     return 0;
