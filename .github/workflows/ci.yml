@@ -138,6 +138,9 @@ jobs:
       - name: Hub deploy helper offline safety and health-mock test
         shell: pwsh
         run: ./tools/rpi-hub/tests/test_deploy_hub.ps1
+      - name: Captain deploy helper offline bootstrap and recovery test
+        shell: pwsh
+        run: ./tools/rpi-hub/tests/test_deploy_captain.ps1
 
   android-unit:
     name: Android native unit tests and lint
