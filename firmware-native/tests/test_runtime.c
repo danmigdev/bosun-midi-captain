@@ -318,11 +318,58 @@ static void test_kemper_context_and_follow(void) {
     assert(bosun_json_equal(&doc, bosun_json_get(&doc, 0, "hold_effect"), ""));
 }
 
+static void test_kemper_bank_snapshot_follow(void) {
+    fixture("{\"kemper\":{},\"midi_channel\":1}", "{\"name\":\"ACOUSTIC\"}");
+    patch(1, 2, "{\"name\":\"CLEAN\",\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":1,\"rig\":2}]}}");
+    patch(1, 3, "{\"name\":\"CRUNCH\"}");
+    patch(1, 4, "{\"name\":\"HEAVY\"}");
+    patch(2, 4, "{\"name\":\"HEAVY\",\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":2,\"rig\":4}]}}");
+    assert(!bosun_config_has_patch(&config, 2, 3));
+    const uint8_t initial[] = {0xc0,2};
+    const uint8_t header[] = {0xf0,0,0x20,0x33,0,0,7,0,0,0,1,0,0,'B','a','n','k',0,0xf7};
+    const uint8_t to_second[] = {0xc0,7,0xf0,0,0x20,0x33,0,0,3,0,0,1,'H','E','A','V','Y',0,0xf7,0xc0,8};
+    const uint8_t to_first[] = {0xc0,3,0xf0,0,0x20,0x33,0,0,3,0,0,1,'C','L','E','A','N',0,0xf7,0xc0,1};
+    bosun_runtime_feed_midi(&runtime, 0, initial, sizeof initial, 0);
+    assert(config.bank == 1 && config.slot == 3);
+    assert(bosun_runtime_switch_patch(&runtime, 2, 4, true) == BOSUN_STORE_OK);
+    tick(100, 0); tick(105, 0);
+    bosun_runtime_feed_midi(&runtime, 0, header, sizeof header, 110);
+    /* Split at the actual intermediate PC, before the name and final PC. */
+    bosun_runtime_feed_midi(&runtime, 0, to_second, 2, 111);
+    assert(config.bank == 2 && config.slot == 4 && runtime.kemper.state.rig == 9);
+    assert(!runtime.storage_errors);
+    bosun_runtime_feed_midi(&runtime, 0, to_second + 2, sizeof to_second - 2, 120);
+    tick(600, 0);
+    assert(runtime.kemper.state.rig_name_fresh && runtime.kemper.last_name_rig == 9);
+    assert(!runtime.storage_errors && config.bank == 2 && config.slot == 4);
+
+    assert(bosun_runtime_switch_patch(&runtime, 1, 2, true) == BOSUN_STORE_OK);
+    tick(700, 0); tick(705, 0);
+    bosun_runtime_feed_midi(&runtime, 0, header, sizeof header, 710);
+    bosun_runtime_feed_midi(&runtime, 0, to_first, 2, 711);
+    assert(config.bank == 1 && config.slot == 2 && runtime.kemper.state.rig == 2);
+    bosun_runtime_feed_midi(&runtime, 0, to_first + 2, sizeof to_first - 2, 720);
+    tick(1200, 0);
+    assert(runtime.kemper.state.rig_name_fresh && runtime.kemper.last_name_rig == 2);
+    assert(!strcmp(runtime.kemper.last_name, "CLEAN") && !runtime.storage_errors);
+
+    assert(bosun_runtime_switch_patch(&runtime, 1, 2, true) == BOSUN_STORE_OK);
+    tick(2000, 0); tick(2005, 0);
+    bosun_runtime_feed_midi(&runtime, 0, header, sizeof header, 2010);
+    bosun_runtime_feed_midi(&runtime, 0, to_first, 2, 2011);
+    tick(3009, 0);
+    assert(config.slot == 2);
+    tick(3010, 0); /* Without a final PC, tick follows the deferred physical rig. */
+    assert(config.bank == 1 && config.slot == 4 && runtime.kemper.state.rig == 4);
+    assert(!runtime.storage_errors && !runtime.queue_count && !runtime.kemper.state.rig_name_fresh);
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-runtime-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
     test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_expression(); test_midi();
     test_kemper_context_and_follow();
+    test_kemper_bank_snapshot_follow();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Runtime: atomic queue/patch macros, delays and rollover, switch bindings, preview/setlist, expression and MIDI monitor/learn/reconnect passed");
     return 0;

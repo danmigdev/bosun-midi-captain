@@ -610,6 +610,11 @@ static void sample_expression(bosun_runtime_t *rt, unsigned index, uint16_t raw)
     }
 }
 
+static void follow_kemper_change(bosun_runtime_t *rt, uint32_t previous) {
+    if (previous != rt->kemper.state.external_rig_changes)
+        (void)bosun_runtime_switch_patch(rt, rt->kemper.state.bank, rt->kemper.state.rig_in_bank, false);
+}
+
 void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_mask,
     uint16_t expression1, uint16_t expression2) {
     if (!rt || !rt->config) return;
@@ -617,9 +622,11 @@ void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_m
     if (rt->config_revision != rt->config->revision || rt->patch_revision != rt->config->patch_revision)
         bosun_runtime_config_changed(rt);
     if (rt->kemper_enabled) {
+        uint32_t changes = rt->kemper.state.external_rig_changes;
         uint8_t known = rt->kemper.state.effect_known, on = effects_on(rt);
         bosun_kemper_tick(&rt->kemper, now_ms);
         mirror_effects(rt, (uint8_t)((known ^ rt->kemper.state.effect_known) | (on ^ effects_on(rt))));
+        follow_kemper_change(rt, changes);
     }
     for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) {
         bosun_switch_result result = bosun_switch_poll(&rt->switches[i], now_ms,
@@ -671,8 +678,7 @@ static void receive(void *context, uint8_t channel, uint8_t status, const uint8_
     for (unsigned i = 0; i < 8; ++i)
         if (!!(on & (1u << i)) != rt->kemper.state.effects[i]) changed |= (uint8_t)(1u << i);
     mirror_effects(rt, changed);
-    if (changes != rt->kemper.state.external_rig_changes)
-        (void)bosun_runtime_switch_patch(rt, rt->kemper.state.bank, rt->kemper.state.rig_in_bank, false);
+    follow_kemper_change(rt, changes);
 }
 
 void bosun_runtime_feed_midi(bosun_runtime_t *rt, uint8_t port, const uint8_t *bytes,

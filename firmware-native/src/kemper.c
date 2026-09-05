@@ -50,7 +50,7 @@ bool bosun_kemper_query_blocks(bosun_kemper *k, uint8_t mask) {
 }
 
 bool bosun_kemper_transition_active(const bosun_kemper *k) {
-    return k && (k->settle_active || k->reconcile_pending != 0);
+    return k && (k->settle_active || k->reconcile_pending != 0 || k->bank_snapshot_active);
 }
 
 const char *bosun_kemper_expression_label(bosun_expression_mode mode) {
@@ -230,9 +230,24 @@ static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
     k->state.effect_known = 0;
     k->pending_name[0] = 0;
     k->pending_name_requested = k->name_query_active = false;
+    k->bank_snapshot_active = k->bank_snapshot_seen = false;
+    k->deferred_bank_pc = 0;
     k->scheduled_pc = false;
     reset_reconcile(k, now, 500);
     ++k->state.revision;
+}
+
+static void expire_bank_snapshot(bosun_kemper *k, uint32_t now) {
+    if (!k->bank_snapshot_active || !due(now, k->bank_snapshot_deadline_ms)) return;
+    uint8_t rig = k->deferred_bank_pc;
+    k->bank_snapshot_active = false;
+    k->deferred_bank_pc = 0;
+    if (rig) {
+        /* A physical selection may have superseded the local request. Do
+         * not suppress it indefinitely if the expected final echo is lost. */
+        arm(k, rig, now);
+        ++k->state.external_rig_changes;
+    }
 }
 
 bool bosun_kemper_begin_rig(bosun_kemper *k, uint8_t rig, uint32_t now) {
@@ -396,6 +411,18 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
         if (data[7] == 0 && data[8] == 1) receive_name(k, data + 9, length - 9, now);
         return;
     }
+    if (fn == 7 && length > 12 && data[7] == 0 && data[8] == 0 &&
+        data[9] == 1 && data[10] == 0 && data[11] == 0 && data[12] &&
+        !k->bank_snapshot_seen && k->local_pc.valid &&
+        k->local_pc.generation == k->generation && k->local_pc.rig == k->state.rig &&
+        !due(now, k->local_pc.expires_ms)) {
+        /* Player bank header, extended string address 0x00010000. Real bank
+         * changes report the old slot in the new bank before the final PC.
+         * Only this observed bank snapshot opens a bounded echo window. */
+        k->bank_snapshot_active = k->bank_snapshot_seen = true;
+        k->bank_snapshot_deadline_ms = now + 1000;
+        return;
+    }
     if (fn != 1 || length < 11) return;
     uint8_t page = data[7], address = data[8];
     uint16_t value = (uint16_t)((data[9] << 7) | data[10]);
@@ -480,10 +507,14 @@ static void receive_cc(bosun_kemper *k, uint8_t cc, uint8_t value, uint32_t now)
 static void receive_pc(bosun_kemper *k, uint8_t pc, uint32_t now) {
     if (pc >= 125) return;
     uint8_t rig = pc + 1;
+    expire_bank_snapshot(k, now);
     expire_orphans(k, now);
-    if (k->local_pc.valid && k->local_pc.generation == k->generation &&
+    if ((k->local_pc.valid || (k->bank_snapshot_seen && !due(now, k->bank_snapshot_deadline_ms))) &&
+        k->local_pc.generation == k->generation &&
         k->local_pc.rig == rig && k->state.rig == rig) {
         k->local_pc.valid = false;
+        k->bank_snapshot_active = false;
+        k->deferred_bank_pc = 0;
         if (k->settle_active) k->settle_until_ms = later(k->settle_until_ms, now + 50);
         else if (!(k->reconcile_pending && k->reconcile_attempt) &&
             (k->reconcile_pending || (k->reconcile_queried && !due(now, k->query_retire_ms)))) {
@@ -497,6 +528,11 @@ static void receive_pc(bosun_kemper *k, uint8_t pc, uint32_t now) {
         memmove(k->orphan_pc + i, k->orphan_pc + i + 1,
             (k->orphan_pc_count - i - 1) * sizeof(k->orphan_pc[0]));
         --k->orphan_pc_count;
+        return;
+    }
+    if (k->bank_snapshot_active && k->local_pc.valid &&
+        k->local_pc.generation == k->generation && (rig - 1) / 5 == (k->local_pc.rig - 1) / 5) {
+        k->deferred_bank_pc = rig;
         return;
     }
     k->rig_identity_known = true;
@@ -515,7 +551,7 @@ void bosun_kemper_handle(bosun_kemper *k, uint8_t channel, uint8_t status,
 }
 
 static void reconcile_round(bosun_kemper *k, uint32_t now) {
-    if (!k->reconcile_pending || k->orphan_blocks) return;
+    if (!k->reconcile_pending || k->orphan_blocks || k->bank_snapshot_active) return;
     ++k->reconcile_attempt;
     k->reconcile_queried |= k->reconcile_pending;
     k->query_retire_ms = now + 1200;
@@ -525,6 +561,7 @@ static void reconcile_round(bosun_kemper *k, uint32_t now) {
 
 void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
     if (!k) return;
+    expire_bank_snapshot(k, now);
     expire_orphans(k, now);
     if (k->scheduled_pc && due(now, k->scheduled_pc_ms)) {
         k->scheduled_pc = false;

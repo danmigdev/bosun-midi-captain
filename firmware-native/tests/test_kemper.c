@@ -47,6 +47,11 @@ static void cc(bosun_kemper *k, uint8_t controller, uint8_t value, uint32_t now)
     bosun_kemper_handle(k, 1, 0xb0, data, sizeof(data), now);
 }
 
+static void bank_header(bosun_kemper *k, uint32_t now) {
+    const uint8_t payload[] = {0,0x20,0x33,0,0,7,0,0,0,1,0,0,'B','a','n','k',0};
+    bosun_kemper_handle(k, 0, 0xf0, payload, sizeof(payload), now);
+}
+
 static size_t queries(const wire *w, uint8_t page, uint8_t address) {
     size_t count = 0;
     for (size_t i = 0; i < w->count; ++i)
@@ -454,6 +459,105 @@ static void selected_rig_recovers_missing_broadcast(void) {
     assert(k.state.rig_name_fresh && k.last_name_rig == 5 && !strcmp(k.last_name, "LEAD"));
 }
 
+static void bank_snapshot_intermediate_and_final_pc(void) {
+    bosun_kemper k; wire w;
+    ready(&k, &w);
+    uint32_t external = k.state.external_rig_changes;
+    assert(bosun_kemper_select_rig(&k, 2, 4, 2000));
+    bosun_kemper_tick(&k, 2005);
+    bank_header(&k, 2010);
+    uint32_t generation = k.generation;
+    pc(&k, 7, 2011); /* Captured old slot3 in the newly selected bank2. */
+    name(&k, "HEAVY", 2020);
+    bosun_kemper_tick(&k, 2500);
+    assert(k.state.rig == 9 && k.generation == generation && k.local_pc.valid);
+    assert(k.state.external_rig_changes == external && !k.state.rig_name_fresh);
+    pc(&k, 8, 2510); /* Final requested rig, still owned by this generation. */
+    bosun_kemper_tick(&k, 2560);
+    assert(k.state.rig == 9 && k.state.rig_name_fresh && !strcmp(k.last_name, "HEAVY"));
+    assert(k.generation == generation && k.state.external_rig_changes == external);
+
+    assert(bosun_kemper_select_rig(&k, 1, 2, 3000));
+    bosun_kemper_tick(&k, 3005);
+    bank_header(&k, 3010);
+    generation = k.generation;
+    pc(&k, 3, 3011); /* Return to bank1 first reports previous slot4. */
+    name(&k, "CLEAN", 3020);
+    pc(&k, 1, 3050);
+    bosun_kemper_tick(&k, 3500);
+    assert(k.state.rig == 2 && k.state.rig_name_fresh && !strcmp(k.last_name, "CLEAN"));
+    assert(k.generation == generation && k.state.external_rig_changes == external);
+
+    assert(bosun_kemper_select_rig(&k, 2, 2, 4000));
+    bosun_kemper_tick(&k, 4005);
+    bank_header(&k, 4010);
+    generation = k.generation;
+    pc(&k, 6, 4011); /* Same slot in both banks: two identical PC echoes. */
+    name(&k, "Other clean", 4020);
+    pc(&k, 6, 4050);
+    bosun_kemper_tick(&k, 4500);
+    assert(k.state.rig_name_fresh && k.generation == generation);
+    assert(k.state.external_rig_changes == external);
+
+    assert(bosun_kemper_select_rig(&k, 1, 2, 5000));
+    bosun_kemper_tick(&k, 5005);
+    bosun_kemper_tick(&k, 5500);
+    generation = k.generation;
+    bank_header(&k, 5510); /* Late bank snapshot, initial settle already ended. */
+    name(&k, "CLEAN", 5520); /* Name may precede the intermediate PC too. */
+    assert(k.generation == generation && k.local_pc.valid);
+    pc(&k, 2, 5530);
+    pc(&k, 1, 5540);
+    bosun_kemper_tick(&k, 5670);
+    assert(k.state.rig == 2 && k.state.rig_name_fresh && !strcmp(k.last_name, "CLEAN"));
+    assert(k.generation == generation && k.state.external_rig_changes == external);
+}
+
+static void bank_snapshot_fallback_is_bounded_and_scoped(void) {
+    const uint32_t starts[] = {2000, UINT32_MAX - 30};
+    for (unsigned i = 0; i < sizeof(starts) / sizeof(starts[0]); ++i) {
+        bosun_kemper k; wire w = {0};
+        uint32_t start = starts[i];
+        bosun_kemper_init(&k, 1, 0, send_packet, &w);
+        assert(bosun_kemper_select_rig(&k, 2, 4, start));
+        bosun_kemper_tick(&k, start + 5);
+        bank_header(&k, start + 10);
+        pc(&k, 7, start + 11);
+        name(&k, "Deferred name", start + 20);
+        bank_header(&k, start + 900); /* Repeated metadata cannot extend the deadline. */
+        bosun_kemper_tick(&k, start + 1009);
+        assert(k.state.rig == 9 && !k.state.external_rig_changes && !k.state.rig_name_fresh);
+        bosun_kemper_tick(&k, start + 1010);
+        assert(k.state.rig == 8 && k.state.external_rig_changes == 1 && !k.state.rig_name_fresh);
+        pc(&k, 8, start + 1011); /* A genuinely late local echo remains retired. */
+        assert(k.state.rig == 8 && k.state.external_rig_changes == 1);
+    }
+
+    bosun_kemper k; wire w;
+    ready(&k, &w);
+    assert(bosun_kemper_select_rig(&k, 2, 4, 2000));
+    bosun_kemper_tick(&k, 2005);
+    bank_header(&k, 2010);
+    uint32_t external = k.state.external_rig_changes;
+    pc(&k, 14, 2011); /* Another bank is an immediate physical selection. */
+    assert(k.state.rig == 15 && k.state.external_rig_changes == external + 1);
+    assert(bosun_kemper_select_rig(&k, 2, 4, 3000));
+    bosun_kemper_tick(&k, 3005);
+    pc(&k, 7, 3011); /* No bank-header marker: ordinary external PC unchanged. */
+    assert(k.state.rig == 8 && k.state.external_rig_changes == external + 2);
+
+    bosun_kemper_init(&k, 1, 0, send_packet, &w);
+    assert(bosun_kemper_select_rig(&k, 2, 3, 4000));
+    bosun_kemper_tick(&k, 4005);
+    assert(bosun_kemper_select_rig(&k, 2, 4, 4100));
+    bosun_kemper_tick(&k, 4105);
+    bank_header(&k, 4110);
+    pc(&k, 7, 4111); /* A known orphan never becomes a physical fallback. */
+    assert(!k.deferred_bank_pc && !k.orphan_pc_count);
+    bosun_kemper_tick(&k, 5110);
+    assert(k.state.rig == 9 && !k.state.external_rig_changes);
+}
+
 int main(void) {
     codecs_and_beacon(); tuner_and_defensive_input(); pc_echo_and_rig_names();
     generation_and_live_cc_fences(); crunch_wah_and_discovery();
@@ -465,6 +569,8 @@ int main(void) {
     duplicate_names_require_current_string_request();
     bootstrap_query_backpressure_and_wrap();
     selected_rig_recovers_missing_broadcast();
+    bank_snapshot_intermediate_and_final_pc();
+    bank_snapshot_fallback_is_bounded_and_scoped();
     printf("Kemper: codecs, lease, tuner, PC echo, generations, names, 8-slot WAH, retries passed (%zu bytes state)\n", sizeof(bosun_kemper));
     return 0;
 }

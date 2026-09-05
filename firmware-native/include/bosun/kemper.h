@@ -50,6 +50,7 @@ typedef struct {
     uint32_t reconcile_deadline_ms, query_retire_ms, orphan_until_ms;
     uint32_t pending_name_ms, pending_name_generation;
     uint32_t name_query_generation, name_query_retire_ms;
+    uint32_t bank_snapshot_deadline_ms;
     uint32_t block_generation[BOSUN_KEMPER_BLOCKS];
     uint32_t guard_until_ms[BOSUN_KEMPER_BLOCKS];
     uint32_t wah_query_generation, wah_retire_ms, wah_next_ms;
@@ -64,11 +65,13 @@ typedef struct {
     uint8_t wah_attempts, wah_types, wah_slots, wah_states, wah_on;
     uint8_t wah_target, wah_cursor, wah_queried_slots, scheduled_pc_rig;
     uint8_t scheduled_pc_channel;
+    uint8_t deferred_bank_pc;
     int8_t wah_fixed;
     bool init_sent, settle_active, wah_pending, wah_query_valid, scheduled_pc;
     bool wah_retire_active;
     bool rig_identity_known, bootstrap_name_pending;
     bool name_query_active, name_query_retire_active, pending_name_requested;
+    bool bank_snapshot_active, bank_snapshot_seen;
 } bosun_kemper;
 
 void bosun_kemper_init(bosun_kemper *kemper, uint8_t channel,
