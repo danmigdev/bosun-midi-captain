@@ -214,6 +214,15 @@ artifacts older than their source. Run its hardware-free regression test with:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\rpi-hub\tests\test_deploy_captain.ps1
 ```
 
+## Browser Stage
+
+![Browser Stage showing CLEAN and expression mode VOL](../../docs/ui-test-screenshots/44_stage.png)
+
+Stage is available at `http://<hub-host>:8080/` from a browser on the same network.
+This 1440 × 810 capture uses the production Stage bundle with simulated
+pedal/Kemper data: CLEAN (bank 1, rig 2), FLANG on, BOOST off, and expression
+mode VOL. The screenshot was captured without connected hardware.
+
 ## Captain TFT and expression indicator regression
 
 Stage viewport/border, title separator and expression indicator geometry are
