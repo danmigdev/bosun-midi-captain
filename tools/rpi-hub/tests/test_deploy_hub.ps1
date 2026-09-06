@@ -137,6 +137,9 @@ function Assert-PingVerifierCase {
         if ($Mode -eq 'transient_link' -and $requestCount -lt 2) {
             throw 'PING verifier did not retry the explicit transient link_down state'
         }
+        if ($Mode -eq 'unexpected' -and $requestCount -ne 1) {
+            throw 'PING verifier retried an unexpected correlated reply instead of failing immediately'
+        }
     } finally {
         if (-not $server.HasExited) {
             $server.Kill()
@@ -194,7 +197,8 @@ try {
     if ($parseErrors.Count -ne 0) {
         throw "Deploy helper has PowerShell parse errors: $($parseErrors -join '; ')"
     }
-    $source = [IO.File]::ReadAllText($deployScript)
+    # Match the deploy encoder's LF normalization on Windows CRLF checkouts.
+    $source = [IO.File]::ReadAllText($deployScript).Replace("`r`n", "`n")
 
     foreach ($forbidden in @(
         'apt-get',
@@ -589,6 +593,13 @@ try:
             connection.sendall(wire[3:])
             if mode == "success" or (mode == "transient_link" and requests >= 2):
                 break
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            # The timeout case intentionally reaches the verifier's deadline.
+            # Its last connection can close/abort while the mock is reading.
+            # Other cases must still deliver the complete ACK or ERROR; the
+            # outer assertions retain the error text, deadline and PING count.
+            if mode != "timeout":
+                raise
         finally:
             connection.close()
 finally:

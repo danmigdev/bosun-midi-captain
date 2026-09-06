@@ -102,6 +102,28 @@ const sw = (container: HTMLElement, id: string) =>
   )!;
 
 describe("kiosk integration", () => {
+  it("reloads bindings when firmware replaces the patch at the current coordinates", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(lastSent("GET_PATCH")).toBeTruthy());
+    const patch = (label: string) => ({
+      type: "PATCH", id: lastSent("GET_PATCH")!.id, bank: 1, slot: 1,
+      patch: { name: "CLEAN", bindings: [{
+        switch: "1", mode: "latched", label,
+        actions: { toggle_on: kToggle("X"), toggle_off: kToggle("X") },
+      }] },
+    });
+    reply(patch("OLD LABEL"));
+    await waitFor(() => expect(sw(container, "1")).toHaveTextContent("OLD LABEL"));
+    const before = sentCount("GET_PATCH");
+    reply({ type: "EVENT", event: "patch_switched", bank: 1, slot: 1, source: "editor" });
+    await waitFor(() => expect(sentCount("GET_PATCH")).toBeGreaterThan(before));
+    reply(patch("NEW LABEL"));
+    await waitFor(() => expect(sw(container, "1")).toHaveTextContent("NEW LABEL"));
+    expect(sw(container, "1")).not.toHaveTextContent("OLD LABEL");
+  });
+
   it("uses compact Screen colors and refreshes them after a save without fetching GLOBAL or polling", async () => {
     vi.useFakeTimers();
     const view = mountKiosk();

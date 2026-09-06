@@ -20,6 +20,13 @@ display and the editor.
 See `docs/plans/20260904_112618_rpi3_midi_hub_stage_display.md` for the
 full design.
 
+The upstream worker wakes when a client queues a command. A separate,
+nonblocking socket interrupts its serial/TCP readiness wait without adding
+bytes to the protocol stream or changing DTR. Receive draining, partial-write
+ordering, reconnect cleanup and the bounded backpressure wait still apply.
+See the [Pi 3 latency measurements](../../docs/rpi-hub-latency.md) for the
+before/after results and their scope.
+
 ## Run
 
 Auto-detect the Captain and serve the kiosk bundle:
@@ -97,6 +104,11 @@ port (pushable CONTEXT lines, forced disconnects), so link sync, backlog
 discard, keepalive, reconnect, fan-out and concurrent GET_CONTEXT/GET_PATCH
 single-flight routing, plus colliding TCP/WebSocket request ids and bounded
 cleanup, all run with no hardware.
+
+`tests/test_link_wakeup.py` also covers early and blocked-read notifications,
+simultaneous RX/TX, notification saturation, stale-session cleanup and shutdown.
+It exercises real sockets on both platforms and real pyserial with a POSIX
+pseudoterminal on Linux; the latter case is skipped on Windows.
 
 ## Deploy only the hub Python service
 

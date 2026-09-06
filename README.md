@@ -128,6 +128,8 @@ The header shows the current patch name and `BANK n · RIG n`, the tempo when av
 
 Stage also runs in a browser through the [Raspberry Pi hub](tools/rpi-hub/README.md), so another screen on the same network can follow the pedal without the desktop app.
 
+The experimental C firmware has a separate [hardware validation report](docs/native-firmware-hardware-validation.md), with measured USB response times, configuration recovery checks and a capture of Stage connected to the real devices.
+
 ### Patches
 
 ![Patches grid](docs/ui-test-screenshots/02_patches.png)

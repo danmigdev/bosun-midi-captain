@@ -553,7 +553,7 @@ def test_blocked_partial_tx_does_not_spin_cpu(monkeypatch):
     transport = BlockedTransport(link)
     link._transport = transport
     assert link.send('{"type":"PING","id":"blocked"}')
-    monkeypatch.setattr(link_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(link._activity, "wait", sleeps.append)
 
     link._pump()
 

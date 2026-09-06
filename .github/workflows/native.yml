@@ -1,0 +1,73 @@
+name: Native firmware (offline)
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - firmware-native/**
+      - tools/native-build.*
+      - tools/build_manifest_tail.py
+      - .github/workflows/native.yml
+      - .gitattributes
+      - firmware/lib/captain/**
+      - firmware/lib/plugins/**
+  pull_request:
+    paths:
+      - firmware-native/**
+      - tools/native-build.*
+      - tools/build_manifest_tail.py
+      - .github/workflows/native.yml
+      - .gitattributes
+      - firmware/lib/captain/**
+      - firmware/lib/plugins/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Native host (${{ matrix.compiler }}, ASan + UBSan)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    env:
+      CC: ${{ matrix.compiler }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install host build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcc clang python3
+      - name: Compile and test actual core and fake flash
+        run: bash tools/native-build.sh host --fetch-sdk
+      - name: Install hub integration dependencies
+        run: python -m pip install -r tools/rpi-hub/requirements.txt
+      - name: Exercise real native application through production TCP and WebSocket hub
+        run: python firmware-native/tests/test_hub_interop.py --emulator firmware-native/build-host/bosun_emulator
+
+  rp2040:
+    name: RP2040 SDK 2.3.0 (ELF + UF2 bounds)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ARM build tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y cmake ninja-build
+          gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          g++ python3
+      - name: Build firmware without accessing hardware
+        run: bash tools/native-build.sh rp2040 --fetch-sdk
+      - name: Preserve reviewed binaries and memory report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bosun-native-experimental-rp2040
+          path: |
+            firmware-native/build-rp2040/bosun_native.uf2
+            firmware-native/build-rp2040/bosun_native.elf
+            firmware-native/build-rp2040/bosun_native.elf.map
+            firmware-native/build-rp2040/bosun_native-memory.json
+          if-no-files-found: error

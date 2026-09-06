@@ -681,7 +681,7 @@ while time.monotonic() < deadline:
                     last_error = "Captain link is not ready"
                     retry_link = True
                     break
-                raise RuntimeError("PING returned unexpected reply: %r" % reply)
+                raise SystemExit("hub protocol PING failed: PING returned unexpected reply: %r" % reply)
             if retry_link:
                 break
         else:
