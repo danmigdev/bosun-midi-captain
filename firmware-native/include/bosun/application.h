@@ -32,6 +32,7 @@ typedef struct {
     size_t console_offset, console_length;
     bosun_store_result_t boot_result;
     bool connected, leds_dirty, led_started, reboot_pending, reboot_bootloader, startup_action_pending;
+    bool console_rx_pending;
 } bosun_application_t;
 
 /* Initializes board, mounts existing storage, loads configuration. A missing or

@@ -1,5 +1,6 @@
 #include "bosun/board.h"
 #include "cdc_session.h"
+#include "usb_rx_trace.h"
 #include "../usb_diagnostics.h"
 #include "tusb.h"
 
@@ -20,6 +21,7 @@ static void reset_session(bool next_connected) {
     connected = next_connected;
     ++generation;
     bosun_usb_diagnostics_reset(&diagnostics, generation);
+    bosun_usb_rx_trace_session(generation, next_connected);
     boundary_pending = next_connected;
     /* DTR does not reset TinyUSB's FIFOs. Discard both directions before
      * allowing a new session to inherit buffered requests or JSON tails. */

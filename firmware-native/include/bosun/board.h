@@ -38,6 +38,20 @@ typedef struct {
  * A previous session's already armed USB packet is excluded. Suspend retains
  * these values. This non-cryptographic diagnostic stores no message content. */
 void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *diagnostics);
+typedef struct {
+    uint32_t generation, arms, arm_failures;
+    uint32_t dcd_packets, dcd_bytes, dcd_fnv1a;
+    uint32_t cdc_packets, cdc_bytes, cdc_fnv1a;
+    uint32_t fifo_dropped_bytes, errors, sie_status, sys_hz, usb_hz;
+} bosun_board_usb_rx_diagnostics_t;
+/* Optional RP2040 EP04 receive trace. DCD hashes completed RAM buffers before
+ * the IRQ queues their events; CDC hashes them before insertion in its FIFO.
+ * Both count zero-length completions and use the same per-session FNV rules.
+ * A transfer armed before DTR may complete in the new session; arms therefore
+ * need not equal packets+1. Snapshots/reset exclude concurrent USB IRQ updates.
+ * SIE is a read-only sticky hardware status, not a count or endpoint attribution.
+ * False means this board has no low-level USB trace (e.g. the TCP emulator). */
+bool bosun_board_usb_rx_diagnostics(bosun_board_usb_rx_diagnostics_t *diagnostics);
 /* MIDI USB availability follows enumeration, independently of CDC DTR. */
 bool bosun_board_midi_connected(bosun_midi_port_t port);
 

@@ -1,5 +1,6 @@
 #include "bosun/board.h"
 #include "cdc_session.h"
+#include "usb_rx_trace.h"
 #include "tusb.h"
 #include <assert.h>
 #include <stdio.h>
@@ -11,6 +12,10 @@ static uint8_t tx[2048], rx[2048], endpoint[64], wire[8192];
 static size_t tx_length, rx_length, endpoint_length, wire_length;
 static uint32_t rx_clears, tx_clears, write_limit;
 static bool mounted, dtr, suspended;
+void bosun_usb_rx_trace_session(uint32_t generation, bool connected) {
+    assert(generation == bosun_board_usb_session_generation());
+    (void)connected; /* The low-level wrapper has a separate dedicated test. */
+}
 
 bool tud_mounted(void) { return mounted; }
 bool tud_suspended(void) { return suspended; }

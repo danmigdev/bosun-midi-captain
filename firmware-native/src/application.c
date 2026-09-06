@@ -224,7 +224,21 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
 }
 
 static void console_status(bosun_application_t *app, uint32_t now) {
-    if (!app->console_length && (uint32_t)(now - app->console_ms) >= 3000) {
+    if (!app->console_length && app->console_rx_pending) {
+        app->console_rx_pending = false;
+        bosun_board_usb_rx_diagnostics_t usb;
+        if (bosun_board_usb_rx_diagnostics(&usb)) {
+            int count = snprintf(app->console, sizeof app->console,
+                "Bosun usb_rx usb_session=%lu arms=%lu arm_fail=%lu dcd_packets=%lu dcd_bytes=%lu dcd_fnv=%08lx cdc_packets=%lu cdc_bytes=%lu cdc_fnv=%08lx fifo_drop=%lu diag_err=%lu sie=%08lx sys_hz=%lu usb_hz=%lu\r\n",
+                (unsigned long)usb.generation, (unsigned long)usb.arms, (unsigned long)usb.arm_failures,
+                (unsigned long)usb.dcd_packets, (unsigned long)usb.dcd_bytes, (unsigned long)usb.dcd_fnv1a,
+                (unsigned long)usb.cdc_packets, (unsigned long)usb.cdc_bytes, (unsigned long)usb.cdc_fnv1a,
+                (unsigned long)usb.fifo_dropped_bytes, (unsigned long)usb.errors, (unsigned long)usb.sie_status,
+                (unsigned long)usb.sys_hz, (unsigned long)usb.usb_hz);
+            if (count > 0) app->console_length = bounded((size_t)count, sizeof app->console - 1);
+            app->console_offset = 0;
+        }
+    } else if (!app->console_length && (uint32_t)(now - app->console_ms) >= 3000) {
         app->console_ms = now;
         bosun_board_usb_diagnostics_t usb;
         bosun_board_usb_diagnostics(&usb);
@@ -240,6 +254,9 @@ static void console_status(bosun_application_t *app, uint32_t now) {
             (unsigned long)usb.tx_bytes, (unsigned long)usb.tx_fnv1a);
         if (count > 0) app->console_length = bounded((size_t)count, sizeof app->console - 1);
         app->console_offset = 0;
+        /* Reuse the bounded buffer for a separate, immutable trace snapshot
+         * after this line drains; do not delay the application for console. */
+        app->console_rx_pending = true;
     }
     if (app->console_length) {
         size_t written = bosun_board_console_write((const uint8_t *)app->console + app->console_offset,

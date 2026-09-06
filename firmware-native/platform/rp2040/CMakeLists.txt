@@ -1,4 +1,4 @@
-add_library(bosun_board STATIC board.c cdc_session.c usb_descriptors.c)
+add_library(bosun_board STATIC board.c cdc_session.c usb_rx_trace.c usb_descriptors.c)
 target_include_directories(bosun_board PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/../../include" "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_definitions(bosun_board PUBLIC BOSUN_PLATFORM_RP2040=1)
@@ -35,6 +35,9 @@ function(bosun_configure_rp2040_target target)
     # Core 1 and scratch X are unavailable in this single-core application.
     target_compile_definitions(${target} PRIVATE PICO_STACK_SIZE=16384 PICO_HEAP_SIZE=0)
     target_link_options(${target} PRIVATE "LINKER:--print-memory-usage"
+        "LINKER:--wrap,dcd_edpt_xfer"
+        "LINKER:--wrap,dcd_event_handler"
+        "LINKER:--wrap,cdcd_xfer_cb"
         "LINKER:--defsym,RAM_LENGTH=253952"
         "LINKER:--defsym,SCRATCH_X_ORIGIN=0x2003e000"
         "LINKER:--defsym,SCRATCH_X_LENGTH=0"

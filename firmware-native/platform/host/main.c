@@ -60,6 +60,9 @@ uint32_t bosun_board_usb_session_generation(void) { return usb_session_generatio
 void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *result) {
     if (result) *result = usb_diagnostics;
 }
+bool bosun_board_usb_rx_diagnostics(bosun_board_usb_rx_diagnostics_t *result) {
+    (void)result; return false; /* TCP has no DCD/CDC FIFO stages. */
+}
 bool bosun_board_midi_connected(bosun_midi_port_t port) {
     return port == BOSUN_MIDI_USB || port == BOSUN_MIDI_DIN;
 }

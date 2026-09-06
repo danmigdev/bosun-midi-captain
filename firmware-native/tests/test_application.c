@@ -25,6 +25,8 @@ static uint32_t usb_session_generation;
 static bool observed_cdc;
 static bosun_board_usb_diagnostics_t usb_diagnostics;
 static bool capture_console;
+static bool capture_usb_rx;
+static bosun_board_usb_rx_diagnostics_t usb_rx_diagnostics;
 static uint8_t console_output[1024];
 static size_t console_length, console_limit;
 
@@ -38,6 +40,9 @@ bool bosun_board_usb_connected(void) { return cdc; }
 uint32_t bosun_board_usb_session_generation(void) { return usb_session_generation; }
 void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *result) {
     assert(result); *result = usb_diagnostics; result->generation = usb_session_generation;
+}
+bool bosun_board_usb_rx_diagnostics(bosun_board_usb_rx_diagnostics_t *result) {
+    assert(result); *result = usb_rx_diagnostics; return capture_usb_rx;
 }
 bool bosun_board_midi_connected(bosun_midi_port_t port) { return midi_up[port]; }
 size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
@@ -500,6 +505,21 @@ static void test_usb_diagnostics_console(void) {
     assert(strstr((char *)console_output, "usb_session=4294967295 requests=4294967295"));
     assert(strstr((char *)console_output, "cdc_rx_bytes=4294967295 cdc_rx_fnv=01234567"));
     assert(strstr((char *)console_output, "cdc_tx_bytes=4294967295 cdc_tx_fnv=ffffffff\r\n"));
+    capture_usb_rx = true;
+    memset(&usb_rx_diagnostics, 0xff, sizeof usb_rx_diagnostics);
+    console_length = 0; console_limit = 0; tick();
+    assert(app.console_length && !console_length);
+    expected = app.console_length;
+    assert(expected < sizeof app.console && app.console[expected - 1] == '\n');
+    memset(&usb_rx_diagnostics, 0, sizeof usb_rx_diagnostics);
+    console_limit = 17;
+    while (app.console_length) tick();
+    assert(console_length == expected && console_output[console_length - 1] == '\n');
+    assert(strstr((char *)console_output, "Bosun usb_rx usb_session=4294967295 arms=4294967295"));
+    assert(strstr((char *)console_output, "dcd_bytes=4294967295 dcd_fnv=ffffffff"));
+    assert(strstr((char *)console_output, "cdc_bytes=4294967295 cdc_fnv=ffffffff"));
+    assert(strstr((char *)console_output, "sys_hz=4294967295 usb_hz=4294967295\r\n"));
+    capture_usb_rx = false;
 }
 
 int main(void) {
