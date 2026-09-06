@@ -45,6 +45,7 @@ import json
 import logging
 import os
 import queue
+import select
 import socket
 import threading
 import time
@@ -64,6 +65,64 @@ READ_CHUNK = 4096
 RX_BUF_MAX = 1 << 20  # 1 MiB; matches the firmware's own overflow guard intent
 
 _HUB_ID_PREFIX = "__hub_"
+
+
+class _ReadWakeup:
+    """Interrupt a transport wait without touching its data stream or DTR."""
+
+    def __init__(self) -> None:
+        self._reader, self._writer = socket.socketpair()
+        self._reader.setblocking(False)
+        self._writer.setblocking(False)
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def notify(self) -> None:
+        # Unlike pyserial's POSIX cancel_read pipe, this writer cannot block
+        # the asyncio producer if many notifications arrive before a read.
+        # A full socket already contains a notification, so coalesce there.
+        with self._lock:
+            if self._closed:
+                return
+            try:
+                self._writer.send(b"\0")
+            except BlockingIOError:
+                pass
+
+    def wait(self, read_handle, timeout: float) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            reader = self._reader
+        try:
+            ready, _, _ = select.select([read_handle, reader], [], [], timeout)
+        except (OSError, ValueError):
+            with self._lock:
+                if self._closed:
+                    return False
+            raise
+        with self._lock:
+            if self._closed:
+                return False
+            if reader in ready:
+                while True:
+                    try:
+                        if not reader.recv(4096):
+                            break
+                    except BlockingIOError:
+                        break
+        # Both handles can be ready. Never discard RX just because an
+        # outgoing command woke the reader at the same time.
+        return read_handle in ready
+
+    def close(self) -> None:
+        self.notify()
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._reader.close()
+            self._writer.close()
 
 
 # --------------------------------------------------------------------------
@@ -100,6 +159,9 @@ class Transport:
 
         return b""
 
+    def wake_read(self) -> None:
+        """Wake an idle read after TX admission; optional for custom transports."""
+
     def close(self) -> None:
         raise NotImplementedError
 
@@ -128,6 +190,11 @@ class SerialTransport(Transport):
         self._s.rts = True
         self._s.open()
         try:
+            self._read_wakeup = _ReadWakeup()
+        except Exception:
+            self._s.close()
+            raise
+        try:
             self._s.reset_input_buffer()
         except Exception:
             pass
@@ -146,7 +213,18 @@ class SerialTransport(Transport):
         ready = self.read_available(n)
         if ready:
             return ready
+        wakeup = getattr(self, "_read_wakeup", None)
+        if wakeup is not None:
+            if not wakeup.wait(self._s.fileno(), 0.05):
+                return b""
+            # select has established readiness. A one-byte read detects
+            # hangup as well; subsequent passes drain all buffered bytes.
         return self._s.read(1)
+
+    def wake_read(self) -> None:
+        wakeup = getattr(self, "_read_wakeup", None)
+        if wakeup is not None:
+            wakeup.notify()
 
     def read_available(self, n: int) -> bytes:
         if n <= 0:
@@ -189,6 +267,7 @@ class SerialTransport(Transport):
             if self._closed:
                 return
             self._closed = True
+            self.wake_read()
             for method_name in ("cancel_read", "cancel_write"):
                 method = getattr(self._s, method_name, None)
                 if method is not None:
@@ -200,6 +279,10 @@ class SerialTransport(Transport):
                 self._s.close()
             except Exception:
                 pass
+            finally:
+                wakeup = getattr(self, "_read_wakeup", None)
+                if wakeup is not None:
+                    wakeup.close()
 
 
 class TcpTransport(Transport):
@@ -207,8 +290,18 @@ class TcpTransport(Transport):
         self.name = f"tcp://{host}:{port}"
         self._sock = socket.create_connection((host, port), timeout=5.0)
         self._sock.settimeout(0.05)
+        try:
+            self._read_wakeup = _ReadWakeup()
+        except Exception:
+            self._sock.close()
+            raise
 
     def read(self, n: int) -> bytes:
+        if not self._read_wakeup.wait(self._sock, 0.05):
+            return b""
+        return self._recv(n)
+
+    def _recv(self, n: int) -> bytes:
         try:
             data = self._sock.recv(n)
         except (socket.timeout, TimeoutError):
@@ -216,6 +309,13 @@ class TcpTransport(Transport):
         if data == b"":
             raise ConnectionError("peer closed the connection")
         return data
+
+    def read_available(self, n: int) -> bytes:
+        ready, _, _ = select.select([self._sock], [], [], 0)
+        return self._recv(n) if ready else b""
+
+    def wake_read(self) -> None:
+        self._read_wakeup.notify()
 
     def write(self, data: bytes) -> None:
         self._sock.settimeout(2.0)
@@ -225,10 +325,13 @@ class TcpTransport(Transport):
             self._sock.settimeout(0.05)
 
     def close(self) -> None:
+        self.wake_read()
         try:
             self._sock.close()
         except Exception:
             pass
+        finally:
+            self._read_wakeup.close()
 
 
 def _open_transport(target: str) -> Transport:
@@ -288,6 +391,7 @@ class UpstreamLink:
 
         self._tx: "queue.Queue[str]" = queue.Queue(maxsize=256)
         self._stop = threading.Event()
+        self._activity = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
         self._transport: Optional[Transport] = None
@@ -315,6 +419,7 @@ class UpstreamLink:
 
     def stop(self) -> None:
         self._stop.set()
+        self._activity.set()
         with self._transport_lock:
             transport = self._transport
         if transport is not None:
@@ -352,10 +457,22 @@ class UpstreamLink:
                 return False
             try:
                 self._tx.put_nowait(line)
-                return True
             except queue.Full:
                 log.warning("tx queue full, rejecting newest command")
                 return False
+            with self._transport_lock:
+                transport = self._transport
+        # Keep driver notification outside state/transport locks. A delayed
+        # notification targets only the admitted command's old transport;
+        # teardown still purges its queue atomically before a new session.
+        self._activity.set()
+        wake_read = getattr(transport, "wake_read", None)
+        if wake_read is not None:
+            try:
+                wake_read()
+            except OSError as exc:
+                log.debug("transport closed during TX wakeup: %s", exc)
+        return True
 
     # -- thread ----------------------------------------------------------
 
@@ -507,6 +624,9 @@ class UpstreamLink:
         pending = b""
 
         while not self._stop.is_set():
+            # Clear before inspecting TX. A send racing the next read or the
+            # short backpressure wait leaves both notifications pending.
+            self._activity.clear()
             now = time.monotonic()
             line = None
             written = 0
@@ -557,7 +677,7 @@ class UpstreamLink:
                     raise ConnectionError(f"no data for {STALL_S:.0f}s")
 
             if not chunk and not written:
-                time.sleep(0.01)
+                self._activity.wait(0.01)
 
     def _feed_bytes(self, chunk: bytes) -> None:
         self._rx.extend(chunk)

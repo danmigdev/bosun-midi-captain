@@ -194,7 +194,8 @@ try {
     if ($parseErrors.Count -ne 0) {
         throw "Deploy helper has PowerShell parse errors: $($parseErrors -join '; ')"
     }
-    $source = [IO.File]::ReadAllText($deployScript)
+    # Match the deploy encoder's LF normalization on Windows CRLF checkouts.
+    $source = [IO.File]::ReadAllText($deployScript).Replace("`r`n", "`n")
 
     foreach ($forbidden in @(
         'apt-get',
