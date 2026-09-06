@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_native_persistence as persistence
+from test_live_hardware_benchmark import FakeSocket, line
 
 
 def fixture():
@@ -46,6 +47,7 @@ class Device:
         self.ignore_first_reboot = self.fail_restore_write = False
         self.link_down_connections = 0
         self.corrupt_connections = set()
+        self.info_busy_per_write = self.info_busy_remaining = 0
 
     def connect(self, args, observations):
         owner = self
@@ -60,6 +62,10 @@ class Device:
                 owner.commands.append((number, kind, copy.deepcopy(fields)))
                 reply = {"type": persistence.benchmark.KINDS[kind], "id": "fake"}
                 if kind == "GET_DEVICE_INFO":
+                    if owner.info_busy_remaining:
+                        owner.info_busy_remaining -= 1
+                        raise persistence.benchmark.ProtocolReplyError(kind, {
+                            "type": "ERROR", "error": "background_busy", "of": kind, "id": "fake"})
                     if number in owner.corrupt_connections:
                         raise json.JSONDecodeError("corrupt live response", "{", 1)
                     if number < owner.link_down_connections:
@@ -83,6 +89,7 @@ class Device:
                     reply.update(rig=(owner.bank - 1) * 5 + owner.slot, fresh=True, name="Synthetic")
                 elif kind == "PUT_GLOBAL":
                     owner.writes += 1
+                    owner.info_busy_remaining = owner.info_busy_per_write
                     if owner.writes > 1 and owner.fail_restore_write:
                         raise TimeoutError("restore write not accepted")
                     owner.device = copy.deepcopy(fields["device"])
@@ -155,6 +162,106 @@ class NativePersistenceTests(unittest.TestCase):
         expected["tft"]["layout"][0]["color"] = "#fffffe"
         self.assertEqual(writes, [expected, self.snapshot["original"]])
         self.assertTrue(set(kind for _, kind, _ in device.commands).isdisjoint({"PUT_PATCH", "SAVE_NOW", "DELETE_PATCH", "DISCARD"}))
+
+    def test_hub_metadata_contention_after_each_write_preserves_persistence_proof(self):
+        device = Device(self.snapshot)
+        device.info_busy_per_write = 2
+        result = self.run_device(device, "--exercise-writes")
+        self.assertTrue(result["passed"], result["errors"])
+        self.assertTrue(result["checks"]["temporary_json_persisted"])
+        self.assertTrue(result["restoration"]["succeeded"])
+        self.assertEqual((device.writes, device.reboots), (2, 2))
+        self.assertEqual(device.persisted, self.snapshot["original"])
+        retries = [r for r in result["records"] if "retry" in r]
+        self.assertEqual([r["phase"] for r in retries],
+                         ["temporary_readback"] * 2 + ["restore_readback"] * 2)
+        self.assertTrue(all(r["response"]["error"] == "background_busy" for r in retries))
+
+    def test_real_decoder_finite_busy_retries_keep_session_ids_and_reply_evidence(self):
+        acceptance = persistence.Acceptance(self.args(), self.snapshot)
+        count = 0
+        def build(request):
+            nonlocal count
+            count += 1
+            reply = ({"type": "ERROR", "error": "background_busy", "of": request["type"]}
+                     if count <= 2 else {"type": "DEVICE_INFO", "fw": "0.1.0-native-experimental"})
+            data = line(dict(reply, id=request["id"]))
+            return [data[:9], data[9:]]
+        transport = FakeSocket(build)
+        acceptance.client = persistence.benchmark.Client(transport, observations=acceptance.result["observations"])
+        reply = acceptance.request("GET_DEVICE_INFO")
+        self.assertEqual(reply["type"], "DEVICE_INFO")
+        self.assertFalse(transport.closed)
+        self.assertEqual(len({r["id"] for r in transport.commands}), 3)
+        records = acceptance.result["records"]
+        self.assertEqual([r["attempt"] for r in records], [1, 2, 3])
+        self.assertEqual([r["response"]["type"] for r in records], ["ERROR", "ERROR", "DEVICE_INFO"])
+        self.assertTrue(all(r["retry"]["reason"] == "background_busy" for r in records[:2]))
+        self.assertEqual(acceptance.result["observations"]["request_failure_count"], 2)
+        self.assertNotIn("retry", records[-1])
+
+    def test_perpetual_busy_respects_one_deadline_and_passes_only_remaining_time(self):
+        class Clock:
+            now = 100.0
+            def monotonic(self):
+                return self.now
+            def sleep(self, delay):
+                self.now += delay
+        clock = Clock()
+        with patch.object(persistence.time, "monotonic", clock.monotonic), \
+             patch.object(persistence.time, "sleep", clock.sleep):
+            acceptance = persistence.Acceptance(self.args("--retry-interval", ".1", "--recovery-attempts", "60"), self.snapshot)
+            transport = FakeSocket(lambda request: [line({"type": "ERROR", "error": "background_busy",
+                                                          "of": request["type"], "id": request["id"]})])
+            acceptance.client = persistence.benchmark.Client(transport)
+            with self.assertRaisesRegex(persistence.AcceptanceError, "original request deadline"):
+                acceptance.request("GET_DEVICE_INFO", timeout=.25)
+            self.assertAlmostEqual(clock.now, 100.25)
+            self.assertEqual(len(transport.commands), 3)
+            self.assertEqual(len(acceptance.result["records"]), 3)
+            for actual, expected in zip([r["timeout_s"] for r in acceptance.result["records"]], [.25, .15, .05]):
+                self.assertAlmostEqual(actual, expected)
+            self.assertEqual(transport.timeouts, sorted(transport.timeouts, reverse=True))
+            self.assertAlmostEqual(transport.timeouts[-1], .05)
+            self.assertTrue(all("retry" in r for r in acceptance.result["records"]))
+
+    def test_zero_delay_perpetual_busy_stops_at_attempt_budget(self):
+        acceptance = persistence.Acceptance(self.args(), self.snapshot)
+        transport = FakeSocket(lambda request: [line({"type": "ERROR", "error": "background_busy",
+                                                      "of": request["type"], "id": request["id"]})])
+        acceptance.client = persistence.benchmark.Client(transport)
+        with self.assertRaisesRegex(persistence.AcceptanceError, "bounded read retry budget"):
+            acceptance.request("GET_DEVICE_INFO")
+        self.assertEqual(len(transport.commands), 3)
+        self.assertTrue(acceptance.result["records"][-1]["retry_exhausted"])
+
+    def test_other_errors_and_mutations_never_use_busy_retry(self):
+        cases = [
+            ("GET_DEVICE_INFO", {"type": "ERROR", "error": "storage_error", "of": "GET_DEVICE_INFO"}),
+            ("GET_DEVICE_INFO", {"type": "ERROR", "error": "background_busy", "of": "GET_GLOBAL"}),
+            ("GET_DEVICE_INFO", {"type": "ERROR", "error": "background_busy"}),
+            ("GET_DEVICE_INFO", {"type": "ACK", "error": "background_busy", "of": "GET_DEVICE_INFO"}),
+            ("GET_DEVICE_INFO", TimeoutError("USB response missing")),
+            ("GET_DEVICE_INFO", ConnectionError("USB disconnected")),
+            ("GET_DEVICE_INFO", b'{"type":"ERROR","error":"background_busy",broken}\n'),
+            ("PUT_GLOBAL", {"type": "ERROR", "error": "background_busy", "of": "PUT_GLOBAL"}),
+            ("REBOOT", {"type": "ERROR", "error": "background_busy", "of": "REBOOT"}),
+            ("SWITCH_PATCH", {"type": "ERROR", "error": "background_busy", "of": "SWITCH_PATCH"}),
+        ]
+        for kind, response in cases:
+            with self.subTest(kind=kind, response=response):
+                acceptance = persistence.Acceptance(self.args(), self.snapshot)
+                def build(request):
+                    return [line(dict(response, id=request["id"])) if isinstance(response, dict) else response]
+                transport = FakeSocket(build)
+                acceptance.client = persistence.benchmark.Client(transport)
+                with self.assertRaises((RuntimeError, ValueError, OSError)):
+                    acceptance.request(kind)
+                self.assertEqual(len(transport.commands), 1)
+                self.assertEqual(len(acceptance.result["records"]), 1)
+                self.assertNotIn("retry", acceptance.result["records"][0])
+        self.assertFalse(persistence.retryable_read_busy("GET_DEVICE_INFO", RuntimeError(
+            "GET_DEVICE_INFO: {'type': 'ERROR', 'error': 'background_busy', 'of': 'GET_DEVICE_INFO'}")))
 
     def test_circuitpython_identity_blocks_all_mutations(self):
         device = Device(self.snapshot)

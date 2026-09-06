@@ -46,6 +46,14 @@ REQUEST_FAILURES_RETAINED = 8
 FAILED_PENDING_BYTES_RETAINED = 4096
 
 
+class ProtocolReplyError(RuntimeError):
+    """A parsed, correlated reply has a different type than requested."""
+
+    def __init__(self, command, reply):
+        self.command, self.reply = command, dict(reply)
+        super().__init__("%s: %s" % (command, reply))
+
+
 class Client:
     """Correlated newline JSON without socket.makefile timeout poisoning."""
 
@@ -192,7 +200,7 @@ class Client:
                     self.observations[key + "_received_monotonic_s"] = time.monotonic()
                 if reply.get("id") == ident:
                     if reply.get("type") != KINDS[kind]:
-                        raise RuntimeError("%s: %s" % (kind, reply))
+                        raise ProtocolReplyError(kind, reply)
                     return reply, (time.monotonic() - started) * 1000, len(line) + 1
                 label = str(reply.get("type", "unknown"))
                 counts = self.observations["ignored_message_types"]
