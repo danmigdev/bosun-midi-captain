@@ -23,6 +23,10 @@ static bool reboot_bootloader, reboot_allowed;
 static uint16_t switches;
 static uint32_t usb_session_generation;
 static bool observed_cdc;
+static bosun_board_usb_diagnostics_t usb_diagnostics;
+static bool capture_console;
+static uint8_t console_output[1024];
+static size_t console_length, console_limit;
 
 bool bosun_board_init(const bosun_board_config_t *config) { assert(!config); return true; }
 void bosun_board_task(void) {
@@ -32,6 +36,9 @@ void bosun_board_task(void) {
 uint32_t bosun_board_millis(void) { return now; }
 bool bosun_board_usb_connected(void) { return cdc; }
 uint32_t bosun_board_usb_session_generation(void) { return usb_session_generation; }
+void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *result) {
+    assert(result); *result = usb_diagnostics; result->generation = usb_session_generation;
+}
 bool bosun_board_midi_connected(bosun_midi_port_t port) { return midi_up[port]; }
 size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
     now += data_stall_ms; data_stall_ms = 0;
@@ -45,7 +52,14 @@ size_t bosun_board_data_write(const uint8_t *data, size_t length) {
     memcpy(output + output_length, data, length); output_length += length; output[output_length] = 0;
     return length;
 }
-size_t bosun_board_console_write(const uint8_t *data, size_t length) { (void)data; return length; }
+size_t bosun_board_console_write(const uint8_t *data, size_t length) {
+    if (!capture_console) return length;
+    if (length > console_limit) length = console_limit;
+    assert(console_length + length < sizeof console_output);
+    memcpy(console_output + console_length, data, length); console_length += length;
+    console_output[console_length] = 0;
+    return length;
+}
 size_t bosun_board_midi_read(bosun_midi_port_t port, uint8_t *data, size_t capacity) {
     size_t length = midi_input_length[port];
     assert(length <= capacity); memcpy(data, midi_input[port], length); midi_input_length[port] = 0;
@@ -113,6 +127,8 @@ static void fixture(void) {
     reboots = 0; reboot_bootloader = reboot_allowed = false;
     switches = 0;
     usb_session_generation = 0; observed_cdc = false;
+    usb_diagnostics = (bosun_board_usb_diagnostics_t){.rx_fnv1a = UINT32_C(2166136261), .tx_fnv1a = UINT32_C(2166136261)};
+    capture_console = false; console_length = 0; console_limit = 17;
     cdc = led_busy = overrun_on_read = false;
     midi_up[0] = midi_up[1] = true;
     midi_limit[0] = midi_limit[1] = 256; data_limit = 256;
@@ -460,6 +476,32 @@ static void test_initial_patch_action(void) {
     }
 }
 
+static void test_usb_diagnostics_console(void) {
+    fixture();
+    /* Largest 32-bit fields must remain a complete line even with zero and
+     * partial console progress. A subsequent sample cannot splice this one. */
+    usb_session_generation = UINT32_MAX;
+    usb_diagnostics.rx_bytes = usb_diagnostics.tx_bytes = UINT32_MAX;
+    usb_diagnostics.rx_fnv1a = UINT32_C(0x01234567);
+    usb_diagnostics.tx_fnv1a = UINT32_MAX;
+    app.protocol.requests = UINT32_MAX;
+    app.runtime.midi_rx_count = app.runtime.midi_tx_count = UINT32_MAX;
+    app.midi_rejected = app.midi_abandoned = UINT32_MAX;
+    feeds = tasks = app.ticks = UINT32_MAX - 1;
+    capture_console = true; console_limit = 0; now = 3000;
+    tick();
+    assert(!console_length && app.console_length);
+    size_t expected = app.console_length;
+    assert(expected < sizeof app.console && app.console[expected - 1] == '\n');
+    usb_diagnostics.rx_bytes = usb_diagnostics.tx_bytes = 12;
+    console_limit = 17;
+    while (app.console_length) tick();
+    assert(console_length == expected && console_output[console_length - 1] == '\n');
+    assert(strstr((char *)console_output, "usb_session=4294967295 requests=4294967295"));
+    assert(strstr((char *)console_output, "cdc_rx_bytes=4294967295 cdc_rx_fnv=01234567"));
+    assert(strstr((char *)console_output, "cdc_tx_bytes=4294967295 cdc_tx_fnv=ffffffff\r\n"));
+}
+
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
@@ -467,6 +509,7 @@ int main(void) {
     test_unobserved_cdc_edges();
     test_hold_label_matches_context();
     test_initial_patch_action();
+    test_usb_diagnostics_console();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display and watchdog passed");
     return 0;

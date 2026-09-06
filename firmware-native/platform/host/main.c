@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "bosun/application.h"
+#include "../usb_diagnostics.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -23,6 +24,9 @@ static uint16_t framebuffer[BOSUN_DISPLAY_HEIGHT][BOSUN_DISPLAY_WIDTH];
 static uint32_t led_colors[BOSUN_LED_COUNT], display_rows, led_frames;
 static uint64_t midi_bytes[2];
 static uint32_t usb_session_generation;
+static bosun_board_usb_diagnostics_t usb_diagnostics = {
+    .rx_fnv1a = UINT32_C(2166136261), .tx_fnv1a = UINT32_C(2166136261),
+};
 static FILE *midi_log;
 
 static void stop(int signal_number) { (void)signal_number; stopping = 1; }
@@ -31,7 +35,10 @@ static bool nonblocking(int fd) {
     return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 static void disconnect(void) {
-    if (client >= 0) { close(client); client = -1; ++usb_session_generation; }
+    if (client >= 0) {
+        close(client); client = -1; ++usb_session_generation;
+        bosun_usb_diagnostics_reset(&usb_diagnostics, usb_session_generation);
+    }
 }
 
 bool bosun_board_init(const bosun_board_config_t *config) { (void)config; return true; }
@@ -40,6 +47,7 @@ void bosun_board_task(void) {
     if (incoming < 0) return;
     if (client >= 0 || !nonblocking(incoming)) { close(incoming); return; }
     client = incoming; ++usb_session_generation;
+    bosun_usb_diagnostics_reset(&usb_diagnostics, usb_session_generation);
 }
 uint32_t bosun_board_millis(void) {
     struct timespec now; (void)clock_gettime(CLOCK_MONOTONIC, &now);
@@ -49,6 +57,9 @@ uint32_t bosun_board_millis(void) {
 }
 bool bosun_board_usb_connected(void) { return client >= 0; }
 uint32_t bosun_board_usb_session_generation(void) { return usb_session_generation; }
+void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *result) {
+    if (result) *result = usb_diagnostics;
+}
 bool bosun_board_midi_connected(bosun_midi_port_t port) {
     return port == BOSUN_MIDI_USB || port == BOSUN_MIDI_DIN;
 }
@@ -56,7 +67,10 @@ size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
     if (client < 0) return 0;
     if (capacity > io_chunk) capacity = io_chunk;
     ssize_t count = recv(client, data, capacity, 0);
-    if (count > 0) return (size_t)count;
+    if (count > 0) {
+        bosun_usb_diagnostics_add(&usb_diagnostics.rx_bytes, &usb_diagnostics.rx_fnv1a, data, (size_t)count);
+        return (size_t)count;
+    }
     if (count == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) disconnect();
     return 0;
 }
@@ -64,7 +78,10 @@ size_t bosun_board_data_write(const uint8_t *data, size_t length) {
     if (client < 0) return 0;
     if (length > io_chunk) length = io_chunk;
     ssize_t count = send(client, data, length, 0);
-    if (count >= 0) return (size_t)count;
+    if (count >= 0) {
+        bosun_usb_diagnostics_add(&usb_diagnostics.tx_bytes, &usb_diagnostics.tx_fnv1a, data, (size_t)count);
+        return (size_t)count;
+    }
     if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) disconnect();
     return 0;
 }

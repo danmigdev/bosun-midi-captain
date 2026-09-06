@@ -40,6 +40,15 @@ endpoint (up to 64 bytes) from the new frames. This does not prevent the host's
 serial-open input flush from discarding bytes: clients should align to a complete
 line during bounded startup, then enforce strict JSON framing for the session.
 
+Periodic console diagnostics include the data-session generation, cumulative
+protocol request count, and CDC RX/TX byte counts with FNV-1a32 fingerprints.
+RX counts bytes returned to the application; TX counts bytes accepted by
+TinyUSB, including the initial newline. These counters do not establish physical
+USB delivery. Byte counts and fingerprints reset at a new data session and
+survive suspend; the protocol request count remains cumulative until reboot.
+Comparing them with a USB capture requires the capture to include the session's
+DTR opening. The fingerprints are non-cryptographic and retain no message text.
+
 USB suspend pauses bus activity without ending the data CDC session. Queued
 RX/TX data and the session generation are preserved across suspend/resume;
 actual DTR transitions or USB unmount still start a new session and discard

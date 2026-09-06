@@ -28,6 +28,16 @@ uint32_t bosun_board_millis(void);
 bool bosun_board_usb_connected(void);
 /* Advances on each data-session edge, including gaps missed by polling. */
 uint32_t bosun_board_usb_session_generation(void);
+typedef struct {
+    uint32_t generation, rx_bytes, rx_fnv1a, tx_bytes, tx_fnv1a;
+} bosun_board_usb_diagnostics_t;
+/* Per logical CDC data session. Counts wrap modulo 2^32; FNV-1a32 starts at
+ * 2166136261, XORs each byte, then multiplies by 16777619 modulo 2^32.
+ * RX covers bytes returned to the application; TX covers bytes accepted by
+ * TinyUSB, including the session-boundary newline, not physical delivery.
+ * A previous session's already armed USB packet is excluded. Suspend retains
+ * these values. This non-cryptographic diagnostic stores no message content. */
+void bosun_board_usb_diagnostics(bosun_board_usb_diagnostics_t *diagnostics);
 /* MIDI USB availability follows enumeration, independently of CDC DTR. */
 bool bosun_board_midi_connected(bosun_midi_port_t port);
 

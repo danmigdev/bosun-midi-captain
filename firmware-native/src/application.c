@@ -226,14 +226,18 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
 static void console_status(bosun_application_t *app, uint32_t now) {
     if (!app->console_length && (uint32_t)(now - app->console_ms) >= 3000) {
         app->console_ms = now;
+        bosun_board_usb_diagnostics_t usb;
+        bosun_board_usb_diagnostics(&usb);
         int count = snprintf(app->console, sizeof app->console,
-            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u usb_session=%lu\r\n",
+            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u usb_session=%lu requests=%lu cdc_rx_bytes=%lu cdc_rx_fnv=%08lx cdc_tx_bytes=%lu cdc_tx_fnv=%08lx\r\n",
             bosun_store_ready() ? "ready" : "unavailable", (unsigned)app->boot_result,
             (unsigned long)app->ticks, (unsigned long)app->runtime.midi_rx_count,
             (unsigned long)app->runtime.midi_tx_count, (unsigned long)app->midi_rejected,
             (unsigned long)app->midi_abandoned, app->display.status,
             (unsigned)app->midi[0].count, (unsigned)app->midi[1].count,
-            (unsigned long)app->usb_session_generation);
+            (unsigned long)usb.generation, (unsigned long)app->protocol.requests,
+            (unsigned long)usb.rx_bytes, (unsigned long)usb.rx_fnv1a,
+            (unsigned long)usb.tx_bytes, (unsigned long)usb.tx_fnv1a);
         if (count > 0) app->console_length = bounded((size_t)count, sizeof app->console - 1);
         app->console_offset = 0;
     }

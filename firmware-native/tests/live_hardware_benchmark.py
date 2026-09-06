@@ -101,8 +101,10 @@ class Client:
                        "pending_fragment_truncated": len(pending) < len(self.pending),
                        "latest_context": self.observations.get("latest_context"),
                        "latest_rig_reply": self.observations.get("latest_rig_reply"),
+                       "latest_error_reply": self.observations.get("latest_error_reply"),
                        "latest_context_received_monotonic_s": self.observations.get("latest_context_received_monotonic_s"),
-                       "latest_rig_reply_received_monotonic_s": self.observations.get("latest_rig_reply_received_monotonic_s")}
+                       "latest_rig_reply_received_monotonic_s": self.observations.get("latest_rig_reply_received_monotonic_s"),
+                       "latest_error_reply_received_monotonic_s": self.observations.get("latest_error_reply_received_monotonic_s")}
             try:
                 failure["pending_fragment_utf8"] = pending.decode("utf-8", "strict")
             except UnicodeDecodeError:
@@ -183,8 +185,9 @@ class Client:
                     continue
                 if not isinstance(reply, dict):
                     raise ValueError("protocol reply is not an object")
-                if reply.get("type") in ("CONTEXT", "RIG_INFO"):
-                    key = "latest_context" if reply["type"] == "CONTEXT" else "latest_rig_reply"
+                if reply.get("type") in ("CONTEXT", "RIG_INFO", "ERROR"):
+                    key = {"CONTEXT": "latest_context", "RIG_INFO": "latest_rig_reply",
+                           "ERROR": "latest_error_reply"}[reply["type"]]
                     self.observations[key] = reply
                     self.observations[key + "_received_monotonic_s"] = time.monotonic()
                 if reply.get("id") == ident:

@@ -28,7 +28,7 @@ typedef struct {
     uint32_t leds[BOSUN_LED_COUNT];
     uint32_t midi_rejected, midi_abandoned, din_dropped, ticks;
     uint32_t led_ms, console_ms, reboot_ms, usb_session_generation;
-    char console[256];
+    char console[384];
     size_t console_offset, console_length;
     bosun_store_result_t boot_result;
     bool connected, leds_dirty, led_started, reboot_pending, reboot_bootloader, startup_action_pending;

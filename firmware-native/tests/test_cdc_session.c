@@ -110,6 +110,11 @@ static void stale_fifos_and_inflight_packet(void) {
     drain();
     assert(wire_length == 64 + 1 + sizeof fresh - 1);
     assert(!memcmp(wire, old, 64) && wire[64] == '\n' && !memcmp(wire + 65, fresh, sizeof fresh - 1));
+    bosun_board_usb_diagnostics_t stats;
+    bosun_board_usb_diagnostics(&stats);
+    /* Old in-flight bytes cross the physical wire but belong to the retired
+     * session; the new counter includes only its delimiter and fresh JSON. */
+    assert(stats.generation == generation + 2 && stats.tx_bytes == sizeof fresh);
     memcpy(rx, request, sizeof request - 1); rx_length = sizeof request - 1;
     tud_cdc_rx_cb(1);
     assert(bosun_board_data_read(input, sizeof input) == sizeof request - 1);
@@ -174,11 +179,77 @@ static void suspend_preserves_session_and_queued_bytes(void) {
     mounted = false; bosun_cdc_task();
     assert(!bosun_board_usb_connected() && bosun_board_usb_session_generation() == generation + 3);
 }
+static void diagnostics_account_only_effective_io(void) {
+    fixture(); line_state(true);
+    bosun_board_usb_diagnostics_t stats, before;
+    bosun_board_usb_diagnostics(NULL); /* Optional snapshot is harmless. */
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.generation == bosun_board_usb_session_generation());
+    assert(!stats.rx_bytes && !stats.tx_bytes);
+    assert(stats.rx_fnv1a == UINT32_C(0x811c9dc5) && stats.tx_fnv1a == UINT32_C(0x811c9dc5));
+
+    static const uint8_t payload[] = "foobar";
+    memcpy(rx, payload, 6); rx_length = 6; tud_cdc_rx_cb(1);
+    uint8_t data[8];
+    assert(bosun_board_data_read(data, 2) == 2 && !memcmp(data, payload, 2));
+    assert(!bosun_board_data_read(data, 0));
+    assert(bosun_board_data_read(data + 2, sizeof data - 2) == 4 && !memcmp(data, payload, 6));
+    assert(!bosun_board_data_read(data, sizeof data));
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.rx_bytes == 6 && stats.rx_fnv1a == UINT32_C(0xbf9cf968));
+
+    /* A refused boundary counts nothing. Every later one-byte write counts
+     * only its accepted prefix, even while USB has not completed delivery. */
+    write_limit = 0;
+    assert(!bosun_board_data_write(payload, 6));
+    bosun_board_usb_diagnostics(&stats);
+    assert(!stats.tx_bytes && stats.tx_fnv1a == UINT32_C(0x811c9dc5));
+    for (size_t i = 0; i < 6; ++i) {
+        write_limit = 1;
+        assert(bosun_board_data_write(payload + i, 6 - i) == 1);
+        bosun_board_usb_diagnostics(&before);
+        assert(before.tx_bytes == i + 2); /* one boundary byte */
+        write_limit = 0;
+        assert(!bosun_board_data_write(payload + i, 6 - i));
+        bosun_board_usb_diagnostics(&stats);
+        assert(!memcmp(&before, &stats, sizeof stats));
+    }
+    assert(!wire_length && stats.tx_bytes == 7);
+    drain();
+    assert(wire_length == 7 && !memcmp(wire, "\nfoobar", 7));
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.tx_fnv1a == UINT32_C(0xf98f9bc0));
+    before = stats;
+    suspended = true; bosun_cdc_task();
+    assert(!bosun_board_data_read(data, sizeof data) && !bosun_board_data_write(payload, 6));
+    suspended = false; bosun_cdc_task();
+    bosun_board_usb_diagnostics(&stats);
+    assert(!memcmp(&before, &stats, sizeof stats));
+
+    line_state(false);
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.generation == before.generation + 1 && !stats.rx_bytes && !stats.tx_bytes);
+    assert(stats.rx_fnv1a == UINT32_C(0x811c9dc5) && stats.tx_fnv1a == UINT32_C(0x811c9dc5));
+    line_state(true); write_limit = UINT32_MAX; bosun_cdc_task();
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.generation == before.generation + 2 && !stats.rx_bytes && stats.tx_bytes == 1);
+    assert(stats.tx_fnv1a == UINT32_C(0x0f0c6cdd));
+    static const uint8_t binary[] = {0, 255, 128};
+    memcpy(rx, binary, sizeof binary); rx_length = sizeof binary;
+    assert(bosun_board_data_read(data, sizeof data) == sizeof binary);
+    bosun_board_usb_diagnostics(&stats);
+    assert(stats.rx_bytes == 3 && stats.rx_fnv1a == UINT32_C(0x728e7760));
+    tud_umount_cb();
+    bosun_board_usb_diagnostics(&stats);
+    assert(!stats.rx_bytes && !stats.tx_bytes && stats.generation == before.generation + 3);
+}
+
 int main(void) {
     normal_session_and_partial_writes();
     stale_fifos_and_inflight_packet();
     remount_and_disconnected_io();
     suspend_preserves_session_and_queued_bytes();
+    diagnostics_account_only_effective_io();
     puts("CDC sessions: DTR generations, stale RX/TX, full FIFO, in-flight packet delimiter, partial writes, remount and lossless suspend passed");
     return 0;
 }

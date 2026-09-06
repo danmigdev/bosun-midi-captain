@@ -169,6 +169,42 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(client.observations["latest_context"], reply)
         self.assertEqual(prior_failure["latest_context"], failure_state)
 
+    def test_timeout_retains_unsolicited_error_after_example_limit_and_cleanup_error(self):
+        error = {"type": "ERROR", "id": None, "error": "invalid_json"}
+        timeout = TimeoutError("bulk response never arrived")
+        calls = []
+        def build(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return [line({"type": "ACK", "id": request["id"]})]
+            if len(calls) == 2:
+                noise = line({"type": "HUB", "link": "up"}) * 20
+                return [noise + line(error), timeout]
+            return [line({"type": "ERROR", "id": request["id"], "error": "busy"})]
+        client = benchmark.Client(FakeSocket(build))
+        client.synchronize(.5)
+        with self.assertRaises(TimeoutError) as caught:
+            client.request("GET_GLOBAL", .5)
+        self.assertIs(caught.exception, timeout)
+        failure = client.observations["last_request_failure"]
+        self.assertEqual(failure["latest_error_reply"], error)
+        self.assertEqual(client.observations["latest_error_reply"], error)
+        received = failure["latest_error_reply_received_monotonic_s"]
+        self.assertGreaterEqual(received, failure["request_started_monotonic_s"])
+        self.assertLessEqual(received, failure["failed_monotonic_s"])
+        self.assertEqual(client.observations["latest_error_reply_received_monotonic_s"], received)
+        self.assertEqual(client.observations["ignored_message_types"]["ERROR"], 1)
+        self.assertNotIn(error, client.observations["ignored_examples"])
+
+        # A correlated cleanup error still fails, and does not rewrite the
+        # diagnostic attached to the request that originally timed out.
+        with self.assertRaisesRegex(RuntimeError, "busy"):
+            client.request("GET_CONTEXT", .5)
+        self.assertEqual(client.observations["latest_error_reply"]["error"], "busy")
+        self.assertEqual(client.observations["last_request_failure"]["latest_error_reply"]["error"], "busy")
+        self.assertEqual(failure["latest_error_reply"], error)
+        self.assertEqual(failure["latest_error_reply_received_monotonic_s"], received)
+
     def test_wrong_response_type_and_malformed_json_fail(self):
         for build in (lambda req: [line({"type": "ERROR", "id": req["id"], "error": "busy"})],
                       lambda req: [b"{broken\n"]):
