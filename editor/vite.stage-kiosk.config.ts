@@ -15,6 +15,7 @@ const kioskEvent = fileURLToPath(new URL("./src/kiosk/tauri-event.ts", import.me
 const outDir = fileURLToPath(new URL("./dist-stage/", import.meta.url));
 
 export default defineConfig({
+  publicDir: "kiosk-public",
   plugins: [
     svelte(),
     {

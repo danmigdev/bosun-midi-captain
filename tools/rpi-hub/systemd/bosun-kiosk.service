@@ -21,8 +21,8 @@ RuntimeDirectoryMode=0700
 StateDirectory=bosun-hub/chromium
 StateDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/bosun-kiosk
-Environment=BOSUN_KIOSK_HEADLESS=1
-Environment=BOSUN_KIOSK_MODE=1920x440
+Environment=BOSUN_KIOSK_HEADLESS=0
+Environment=BOSUN_KIOSK_VIRTUAL_FALLBACK=1
 ExecStart=/opt/bosun-hub/kiosk/bosun-kiosk.sh
 KillMode=control-group
 TimeoutStopSec=10s

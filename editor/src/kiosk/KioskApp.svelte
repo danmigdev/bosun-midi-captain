@@ -8,6 +8,7 @@
   import StageView from "../components/StageView.svelte";
   import {
     cmd,
+    sendAndAwait,
     isConnected,
     onFirmwareMessage,
     onDisconnected,
@@ -23,6 +24,7 @@
     bank: number;
     slot: number;
     profile?: string;
+    stage_input?: boolean;
   };
 
   let connected = $state(false);
@@ -38,6 +40,9 @@
   let deviceInfoRefreshPending = false;
   let globalRetry: ReturnType<typeof setTimeout> | null = null;
   let patchListRetry: ReturnType<typeof setTimeout> | null = null;
+  let patchListGeneration = 0;
+  let patchListRequest: { generation: number; started: number } | null = null;
+  let patchListProfile: string | undefined;
   const DEVICE_INFO_RETRY_MS = 1_500;
   const PATCH_LIST_RETRY_MS = 2_500;
   const GLOBAL_RETRY_MS = 10_000;
@@ -56,13 +61,70 @@
   }
 
   function requestPatchList(): void {
-    if (!hasPatchList && patchListRetry === null) {
-      cmd.listPatches();
-      patchListRetry = setTimeout(() => {
-        patchListRetry = null;
+    if (!connected || hasPatchList || patchListRequest || patchListRetry !== null) return;
+    const request = { generation: patchListGeneration, started: Date.now() };
+    patchListRequest = request;
+    // Own the response as well as its timeout. An older list may finish after
+    // a profile change or a mutation announced by another editor.
+    void sendAndAwait<FirmwareMessage & { profile?: string }>(
+      { type: "LIST_PATCHES" }, PATCH_LIST_RETRY_MS,
+    ).then((msg) => {
+      if (!connected || patchListRequest !== request) return;
+      patchListRequest = null;
+      if (request.generation !== patchListGeneration) {
         requestPatchList();
-      }, PATCH_LIST_RETRY_MS);
+        return;
+      }
+      const profile = typeof msg.profile === "string" && msg.profile ? msg.profile : undefined;
+      if (profile && deviceInfo?.profile && profile !== deviceInfo.profile) {
+        // A delayed DEVICE_INFO can still describe the previous profile.
+        // Reconcile with the compact identity, without fetching GLOBAL.
+        requestDeviceInfo();
+        retryPatchList(request.started);
+        return;
+      }
+      if (msg.type !== "PATCH_LIST" || !Array.isArray(msg.patches)
+          || !msg.patches.every((patch) => isRecord(patch)
+            && Number.isInteger(patch.bank) && Number(patch.bank) >= 1 && Number(patch.bank) <= 99
+            && Number.isInteger(patch.slot) && Number(patch.slot) >= 1 && Number(patch.slot) <= 10)) {
+        retryPatchList(request.started);
+        return;
+      }
+      patches = msg.patches;
+      patchListProfile = profile;
+      hasPatchList = true;
+    }).catch(() => {
+      if (!connected || patchListRequest !== request) return;
+      patchListRequest = null;
+      if (request.generation !== patchListGeneration) requestPatchList();
+      else retryPatchList(request.started);
+    });
+  }
+
+  function retryPatchList(started: number): void {
+    const remaining = PATCH_LIST_RETRY_MS - (Date.now() - started);
+    if (remaining <= 0) {
+      requestPatchList();
+      return;
     }
+    patchListRetry = setTimeout(() => {
+      patchListRetry = null;
+      requestPatchList();
+    }, remaining);
+  }
+
+  function invalidatePatchList(clear = false): void {
+    ++patchListGeneration;
+    hasPatchList = false;
+    if (clear) {
+      patches = [];
+      patchListProfile = undefined;
+      if (patchListRetry !== null) clearTimeout(patchListRetry);
+      patchListRetry = null;
+    }
+    // Coalesce changes while a list is in flight. Its completion starts one
+    // replacement read, and never publishes the older inventory.
+    requestPatchList();
   }
 
   function requestGlobalFallback(): void {
@@ -76,7 +138,8 @@
   }
 
   function resync(): void {
-    // Cheap re-sync on every (re)connect: just the current bank/slot.
+    // Re-sync current location and inventory on every (re)connect; patches
+    // may have been edited while this browser was disconnected.
     // StageView re-pulls CONTEXT + PATCH itself on the same transition.
     requestDeviceInfo();
 
@@ -84,7 +147,7 @@
     // immediately, independently of navigation config. New firmware carries
     // the tiny preset_navigation subtree in DEVICE_INFO; legacy firmware is
     // detected from that response and only then falls back to GET_GLOBAL.
-    requestPatchList();
+    invalidatePatchList(true);
     everBooted = true;
 
     // The manifest is deliberately NOT fetched. On the RP2040 it streams
@@ -124,15 +187,23 @@
     (async () => {
       keep(await onFirmwareMessage((msg: FirmwareMessage) => {
           switch (msg.type) {
-            case "DEVICE_INFO":
+            case "DEVICE_INFO": {
               if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
               deviceInfoRetry = null;
+              const rawProfile = (msg as typeof msg & { profile?: unknown }).profile;
+              const profile = typeof rawProfile === "string" && rawProfile ? rawProfile : undefined;
+              const profileChanged = profile !== undefined
+                && ((deviceInfo?.profile !== undefined && profile !== deviceInfo.profile)
+                    || (patchListProfile !== undefined && profile !== patchListProfile));
               deviceInfo = {
                 fw: msg.fw,
                 device: msg.device,
                 bank: msg.current?.bank ?? 1,
                 slot: msg.current?.slot ?? 1,
+                profile,
+                stage_input: msg.stage_input === true,
               };
+              if (profileChanged) invalidatePatchList(true);
               if (isRecord(msg.tft_colors)) {
                 globalDevice = { ...(globalDevice ?? {}), tft_colors: msg.tft_colors };
               }
@@ -159,6 +230,7 @@
                 requestDeviceInfo();
               }
               break;
+            }
             case "MANIFEST":
               manifest = msg as unknown as Manifest;
               break;
@@ -171,15 +243,6 @@
               hasGlobal = true;
               if (globalRetry) clearTimeout(globalRetry);
               globalRetry = null;
-              break;
-            case "PATCH_LIST":
-              // Do not let a truncated/corrupt response permanently disarm
-              // the watchdog while leaving the navigation row empty.
-              if (!Array.isArray(msg.patches)) break;
-              patches = msg.patches;
-              hasPatchList = true;
-              if (patchListRetry) clearTimeout(patchListRetry);
-              patchListRetry = null;
               break;
             case "CONTEXT": {
               const bank = Number(msg.context?.bank);
@@ -197,6 +260,12 @@
               break;
             }
             case "EVENT":
+              if (connected && (msg.event === "dirty_state_changed"
+                  || msg.event === "saved" || msg.event === "discarded")) {
+                // Both CP and native emit these for patch edits/creation,
+                // saving and discarding (including removal of dirty patches).
+                invalidatePatchList();
+              }
               if (msg.event === "global_changed" && connected) {
                 // A save may overtake an older DEVICE_INFO snapshot. Read
                 // once after that reply rather than keeping its old colors.
@@ -205,6 +274,10 @@
               } else if (msg.event === "patch_switched" && deviceInfo) {
                 const bank = Number(msg.bank ?? deviceInfo.bank);
                 const slot = Number(msg.slot ?? deviceInfo.slot);
+                if (connected && (msg.source === "editor"
+                    || !patches.some((patch) => patch.bank === bank && patch.slot === slot))) {
+                  invalidatePatchList();
+                }
                 announcedLocation = `${bank}/${slot}`;
                 announcedUntil = Date.now() + 2000;
                 deviceInfo = {
@@ -226,6 +299,7 @@
       }));
       keep(await onDisconnected(() => {
         connected = false;
+        if (deviceInfo) deviceInfo = { ...deviceInfo, stage_input: false };
         // Anything in flight on the old CDC session is gone; allow the next
         // link-up to retry immediately rather than waiting for the watchdog.
         if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
@@ -235,6 +309,8 @@
         deviceInfoRefreshPending = false;
         globalRetry = null;
         patchListRetry = null;
+        patchListRequest = null;
+        ++patchListGeneration;
       }));
       if (disposed) return;
       await sync();
@@ -251,6 +327,8 @@
       deviceInfoRetry = null;
       globalRetry = null;
       patchListRetry = null;
+      patchListRequest = null;
+      ++patchListGeneration;
     };
   });
 </script>

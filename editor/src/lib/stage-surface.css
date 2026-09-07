@@ -1,0 +1,20 @@
+/* Stage and its appearance panel are one dark instrument surface in every
+   host. These tokens shadow the editor theme without changing saved settings.
+   Keep the readout/control overrides in stage-theme and stage-controls. */
+.stage {
+  --bg: #14161b;
+  --bg-elevated: #181b21;
+  --border: #2a2e36;
+  --border-strong: #3a414c;
+  --text: #e4e6eb;
+  --text-soft: #c6cad2;
+  --accent: #6fd99b;
+  --overlay-bg: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+  font-feature-settings: normal;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: auto;
+  line-height: normal;
+  letter-spacing: normal;
+}

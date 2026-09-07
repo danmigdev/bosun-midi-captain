@@ -37,6 +37,11 @@ void bosun_switch_reset(bosun_switch_fsm *fsm);
 /* raw_high is the pull-up level: false means pressed. now_ms may wrap. */
 bosun_switch_result bosun_switch_poll(bosun_switch_fsm *fsm, uint32_t now_ms,
     bool raw_high, bosun_switch_mode mode);
+/* A complete short gesture on an idle switch, using the same mode state as
+ * physical edges. Raw/debounce state is untouched; double taps keep their
+ * normal deadline. Call on a copy until the resulting actions are admitted. */
+bool bosun_switch_tap(bosun_switch_fsm *fsm, uint32_t now_ms,
+    bosun_switch_mode mode, uint8_t *triggers);
 bool bosun_switch_momentary_active(const bosun_switch_fsm *fsm,
     uint32_t now_ms, bosun_switch_mode mode);
 

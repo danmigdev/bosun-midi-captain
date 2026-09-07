@@ -1,11 +1,7 @@
-# Continuous integration for Bosun: the Tauri/Svelte editor and the
-# CircuitPython firmware. Runs on every push and pull request.
-#
-# Two independent jobs so an editor break and a firmware break are reported
-# separately:
-#   - editor:   svelte-check type-check + vitest unit tests (Node 20)
-#   - firmware: py_compile every module + the offline tools/*_test.py suites
-#               (Python 3.12, no hardware / no CircuitPython runtime needed)
+# Continuous integration for the maintained editor, hub and Android app.
+# Native firmware builds and differential tests run in native.yml. The retired
+# CircuitPython runtime is frozen; legacy installation/recovery assets remain
+# required by existing bundle paths and are not rebuilt as a new firmware.
 name: CI
 
 on:
@@ -84,42 +80,22 @@ jobs:
         working-directory: editor/src-tauri
         run: cargo test --locked
 
-  firmware:
-    name: Firmware (py_compile + offline tests)
+  tooling:
+    name: Shared packaging and release tools
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      # Byte-compile every firmware module. This catches syntax errors on
-      # code paths the offline tests never import. Fails the job on any error.
-      - name: Compile all firmware modules
+      - name: Require PowerShell for version-bump smoke tests
+        run: command -v pwsh
+      - name: Verify release identities and retained packaging paths
         run: |
-          python -m compileall -q firmware
-
-      # The deploy/installer prefers .mpy over its source sibling. A stale
-      # compiled file therefore shadows a correct .py and must fail CI.
-      - name: Verify reproducible CircuitPython bytecode artifacts
-        run: |
-          set -euo pipefail
-          curl -fL -o /tmp/mpy-cross \
-            https://adafruit-circuit-python.s3.amazonaws.com/bin/mpy-cross/linux-amd64/mpy-cross-linux-amd64-9.2.7.static
-          echo "3e5716e158ef977fb4f4f96e29500cdff6d85da34f507329fa7f6c2540d6faf8  /tmp/mpy-cross" | sha256sum -c -
-          chmod +x /tmp/mpy-cross
-          python tools/build_firmware_mpy.py --compiler /tmp/mpy-cross --check
-
-      # Run the full offline battery via the aggregator (single source of
-      # truth - keeps CI and `python tools/run_all_tests.py` in lockstep).
-      # It runs every suite and exits non-zero if any one fails, including the
-      # endurance soak test that guards against leaks over hours of use.
-      - name: Run firmware offline test battery
-        run: |
-          python -m pip install pyserial==3.5
-          python tools/run_all_tests.py
+          python tools/verify_release_version_test.py
+          python tools/sync_firmware_resources_test.py
+          python tools/provision_adafruit_bundle_test.py
+          python tools/verify_firmware_package_test.py
 
   hub:
     name: Raspberry Pi hub (end-to-end)

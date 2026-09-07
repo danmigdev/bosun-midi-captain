@@ -175,6 +175,9 @@ try {
         -FirmwarePath $firmware `
         -Files 'lib/captain/protocol.mpy,lib/captain/manifest_dynamic.mpy' *>&1)
     $rendered = ($output | ForEach-Object { $_.ToString() }) -join "`n"
+    # Dry-run output retains checkout line endings; the production SSH path
+    # normalizes to LF. Match and exercise that same shell text on Windows.
+    $rendered = $rendered.Replace("`r`n", "`n")
     if ($rendered -notmatch 'DRY-RUN: no SSH connection' -or
         $rendered -notmatch 'Files: lib/captain/protocol\.mpy, lib/captain/manifest_dynamic\.mpy') {
         throw 'Dry-run did not render the validated partial-deploy selection'
@@ -302,7 +305,7 @@ wait_for_captain_ports() { printf 'MOCK_PORTS_OK\n'; }
 sleep() { :; }
 __PREPARE__
 printf 'MOCK_PING_CALLS=%s\n' "$ping_calls"
-'@.Replace('__MODE__', $mode).Replace('__PREPARE__', $prepareBlock)
+'@.Replace('__MODE__', $mode).Replace('__PREPARE__', $prepareBlock).Replace("`r`n", "`n")
             $encoded = [Convert]::ToBase64String(
                 [Text.UTF8Encoding]::new($false).GetBytes($probe)
             )

@@ -1,0 +1,17 @@
+[Unit]
+Description=Browser viewer for the Stage VNC mirror through SSH
+After=network.target
+
+[Service]
+Type=simple
+User=bosun
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

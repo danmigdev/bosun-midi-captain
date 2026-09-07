@@ -5,8 +5,9 @@
 #
 # Triggers on a v* tag push, or manually via workflow_dispatch with a tag input
 # (build/attach an existing release without moving its tag). The bundled
-# firmware/UF2/Adafruit assets are gitignored, so each job provisions them
-# before building (a cross-platform port of tools/download-assets.ps1).
+# legacy firmware/UF2/Adafruit assets are gitignored, so installer and recovery
+# bundles still provision the frozen resources. Only native firmware advances
+# with the release; CircuitPython is no longer compiled or maintained here.
 name: Release
 
 on:
@@ -25,6 +26,9 @@ jobs:
   verify:
     name: Release gate
     runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      firmware_version: ${{ steps.version.outputs.firmware_version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,6 +41,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Require matching tag, editor and firmware versions
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python tools/verify_release_version_test.py
+          python tools/verify-release-version.py --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install native test dependencies
         run: |
@@ -48,14 +59,6 @@ jobs:
         run: |
           (cd editor && npm install --no-audit --no-fund)
           python -m pip install -r tools/rpi-hub/requirements.txt pytest
-      - name: Verify reproducible CircuitPython bytecode artifacts
-        run: |
-          set -euo pipefail
-          curl -fL -o /tmp/mpy-cross \
-            https://adafruit-circuit-python.s3.amazonaws.com/bin/mpy-cross/linux-amd64/mpy-cross-linux-amd64-9.2.7.static
-          echo "3e5716e158ef977fb4f4f96e29500cdff6d85da34f507329fa7f6c2540d6faf8  /tmp/mpy-cross" | sha256sum -c -
-          chmod +x /tmp/mpy-cross
-          python tools/build_firmware_mpy.py --compiler /tmp/mpy-cross --check
       - name: Test and build every portable layer
         run: |
           cd editor
@@ -64,8 +67,6 @@ jobs:
           npm run build
           npm run build:stage
           cd ..
-          python -m compileall -q firmware
-          python tools/run_all_tests.py
           cd tools/rpi-hub
           python -m pytest -q
           cd ../..
@@ -74,8 +75,47 @@ jobs:
           python tools/sync_firmware_resources.py --repo-root .
           cargo test --locked --manifest-path editor/src-tauri/Cargo.toml
 
-  build:
+  native-package:
+    name: Verified native update package
     needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install native host and ARM build tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y cmake ninja-build
+          gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          gcc g++ python3
+      - name: Build and test native core with pinned SDK and TinyUSB
+        run: bash tools/native-build.sh all --fetch-sdk
+      - name: Create and verify this release's native package
+        env:
+          BOSUN_RELEASE: ${{ needs.verify.outputs.release }}
+          BOSUN_FIRMWARE_VERSION: ${{ needs.verify.outputs.firmware_version }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python tools/package-native-update.py \
+            --uf2 firmware-native/build-rp2040/bosun_native.uf2 \
+            --output editor/src-tauri/resources/update/bosun-update.zip \
+            --release "$BOSUN_RELEASE" --firmware-version "$BOSUN_FIRMWARE_VERSION"
+          python tools/verify-release-version.py --tag "$RELEASE_TAG" \
+            --package editor/src-tauri/resources/update/bosun-update.zip
+      - name: Share the required native package with desktop builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: bosun-native-update
+          path: editor/src-tauri/resources/update/bosun-update.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    needs: [verify, native-package]
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +186,21 @@ jobs:
       - name: Install node deps
         working-directory: editor
         run: npm install --no-audit --no-fund
+
+      - name: Download the required native update package
+        uses: actions/download-artifact@v4
+        with:
+          name: bosun-native-update
+          path: editor/src-tauri/resources/update
+
+      - name: Verify the native package before building Tauri
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          python tools/verify-release-version.py --tag "$RELEASE_TAG" \
+            --package editor/src-tauri/resources/update/bosun-update.zip
+          touch editor/src-tauri/build.rs
 
       - name: Compute release display name
         id: ver

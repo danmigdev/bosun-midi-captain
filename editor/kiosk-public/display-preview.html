@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Bosun — Display HDMI 11,3″</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #e4e6eb;
+        background: #0a1015;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 24px;
+        padding: 16px 24px;
+        border-bottom: 1px solid #344650;
+        background: #101920;
+      }
+      h1 { margin: 0; font-size: clamp(1rem, 2vw, 1.25rem); font-weight: 600; }
+      .details { margin: 5px 0 0; color: #a8b8c1; font-size: .875rem; }
+      .controls { display: flex; flex-wrap: wrap; gap: 6px; }
+      button {
+        min-height: 44px;
+        padding: 8px 14px;
+        border: 1px solid #344650;
+        border-radius: 3px;
+        background: #111b23;
+        color: #e4e6eb;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { background: #1d2b34; }
+      button[aria-pressed="true"] { border-color: #93eb66; color: #b2ff80; background: #233421; }
+      button:focus-visible { outline: 2px solid #b2ff80; outline-offset: 3px; }
+      button[hidden] { display: none; }
+      #display-workspace {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+      }
+      .display-canvas {
+        display: flex;
+        width: max-content;
+        min-width: 100%;
+        min-height: 100%;
+        padding: 28px;
+      }
+      #display-shell {
+        flex: none;
+        margin: auto;
+        padding: 10px;
+        border: 1px solid #38434a;
+        border-radius: 12px;
+        background: linear-gradient(145deg, #252c31, #0c1013 48%, #1e252b);
+        box-shadow: 0 18px 45px #0008, inset 0 1px #ffffff12;
+      }
+      #display-surface { position: relative; width: 1920px; height: 440px; overflow: hidden; background: #080c10; }
+      #stage-frame {
+        display: block;
+        width: 1920px;
+        height: 440px;
+        border: 0;
+        transform-origin: top left;
+        background: #14161b;
+      }
+      footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 8px 24px;
+        padding: 12px 24px;
+        color: #a8b8c1;
+        font-size: .8125rem;
+        border-top: 1px solid #26353e;
+      }
+      #scale-status { color: #b2ff80; font-variant-numeric: tabular-nums; }
+      @media (max-width: 600px) {
+        .toolbar { padding: 12px; }
+        .display-canvas { padding: 12px; }
+        #display-shell { padding: 6px; border-radius: 8px; }
+        footer { padding: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="toolbar">
+      <div>
+        <h1>Display HDMI · 11,3″</h1>
+        <p class="details">1920 × 440 · Area visibile circa 28,0 × 6,4 cm · Stage dal vivo</p>
+      </div>
+      <nav class="controls" aria-label="Visualizzazione del display">
+        <button id="fit-button" type="button" aria-pressed="true">Adatta</button>
+        <button id="native-button" type="button" aria-pressed="false">1:1</button>
+        <button id="fullscreen-button" type="button">Schermo intero</button>
+      </nav>
+    </header>
+    <main id="display-workspace" aria-label="Anteprima del display HDMI" tabindex="0">
+      <div class="display-canvas">
+        <div id="display-shell">
+          <div id="display-surface">
+            <iframe id="stage-frame" title="Stage dal vivo a 1920 × 440" allow="fullscreen"></iframe>
+          </div>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <span id="scale-status" role="status">Adattamento del display…</span>
+      <span>1:1 mostra i pixel del layout, non le dimensioni fisiche. I comandi Stage controllano i device collegati.</span>
+    </footer>
+    <script>
+      (() => {
+        const width = 1920;
+        const height = 440;
+        const workspace = document.getElementById("display-workspace");
+        const canvas = document.querySelector(".display-canvas");
+        const shell = document.getElementById("display-shell");
+        const surface = document.getElementById("display-surface");
+        const frame = document.getElementById("stage-frame");
+        const fitButton = document.getElementById("fit-button");
+        const nativeButton = document.getElementById("native-button");
+        const fullscreenButton = document.getElementById("fullscreen-button");
+        const status = document.getElementById("scale-status");
+        let fit = true;
+
+        // A real, fixed-size browsing viewport preserves Stage's viewport units,
+        // responsive breakpoints and modal geometry. Only its outer image scales.
+        const stageUrl = new URL("./", location.href);
+        const params = new URLSearchParams(location.search);
+        stageUrl.searchParams.set("v", params.get("v") || "hdmi-preview-20260907");
+        if (params.has("ws")) stageUrl.searchParams.set("ws", params.get("ws"));
+        frame.src = stageUrl.href;
+
+        function updateScale() {
+          const canvasStyle = getComputedStyle(canvas);
+          const shellStyle = getComputedStyle(shell);
+          const horizontal = parseFloat(canvasStyle.paddingLeft) + parseFloat(canvasStyle.paddingRight)
+            + parseFloat(shellStyle.paddingLeft) + parseFloat(shellStyle.paddingRight)
+            + parseFloat(shellStyle.borderLeftWidth) + parseFloat(shellStyle.borderRightWidth);
+          const vertical = parseFloat(canvasStyle.paddingTop) + parseFloat(canvasStyle.paddingBottom)
+            + parseFloat(shellStyle.paddingTop) + parseFloat(shellStyle.paddingBottom)
+            + parseFloat(shellStyle.borderTopWidth) + parseFloat(shellStyle.borderBottomWidth);
+          const scale = fit
+            ? Math.max(0.01, Math.min(1, (workspace.clientWidth - horizontal) / width, (workspace.clientHeight - vertical) / height))
+            : 1;
+          surface.style.width = `${width * scale}px`;
+          surface.style.height = `${height * scale}px`;
+          frame.style.transform = `scale(${scale})`;
+          status.textContent = `${fit ? "Adattato alla finestra" : "Pixel 1:1"} · Scala ${Math.round(scale * 100)}% · 1920 × 440`;
+        }
+
+        function setFit(value) {
+          fit = value;
+          fitButton.setAttribute("aria-pressed", String(fit));
+          nativeButton.setAttribute("aria-pressed", String(!fit));
+          updateScale();
+          workspace.scrollTo(0, 0);
+        }
+        fitButton.addEventListener("click", () => setFit(true));
+        nativeButton.addEventListener("click", () => setFit(false));
+        fullscreenButton.hidden = !document.fullscreenEnabled;
+        fullscreenButton.addEventListener("click", async () => {
+          try {
+            if (document.fullscreenElement) await document.exitFullscreen();
+            else await document.documentElement.requestFullscreen();
+          } catch {
+            status.textContent = "Schermo intero non disponibile: puoi usare F11 nel browser.";
+          }
+        });
+        document.addEventListener("fullscreenchange", () => {
+          fullscreenButton.textContent = document.fullscreenElement ? "Esci da schermo intero" : "Schermo intero";
+          updateScale();
+        });
+        new ResizeObserver(updateScale).observe(workspace);
+        updateScale();
+      })();
+    </script>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 [package]
 name = "bosun-editor"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 description = "Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more)."
 license = "GPL-3.0-or-later"
@@ -17,13 +17,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
 base64 = "0.22"
+sha2 = "0.10"
 dirs = "5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Platform-specific serial and MIDI dependencies.
-# Desktop: serial2 for CDC serial (the ONLY crate that correctly reads
-# multi-KB CDC data on Windows -- see docs/plans/20260615_084932). serialport
-# for USB VID/PID enumeration in installer.rs.
+# Desktop: serial2 for CDC serial and serialport for USB VID/PID enumeration.
 # Android: tauri-plugin-serialplugin v3 (pure Rust, uses nusb +
 # android-usb-serial, supports CDC-ACM). No firmware installer on mobile.
 

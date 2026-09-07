@@ -394,14 +394,23 @@ export type FirmwareMessage =
       size_check?: boolean; size?: number }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
   | { type: "ERROR"; id?: string; error: string; of?: string; detail?: string }
+  | { type: "HUB_UPDATE"; id?: string; job?: string; phase: string;
+      received?: number; size?: number; error?: string; detail?: string;
+      backup?: string; release?: string; firmware_version?: string;
+      sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string }
   | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number };
+      /** Native firmware uses a separate release line and does not accept Python file OTA. */
+      native_experimental?: boolean; firmware_ota?: boolean;
+      /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
+      stage_input?: boolean;
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
       preset_navigation?: Record<string, unknown>;
       tft_colors?: Record<string, unknown>;
       tft_labels?: Record<string, unknown> }
   | { type: "GLOBAL"; id?: string; device: Record<string, unknown> }
   | { type: "PATCH_LIST"; id?: string; patches: PatchSummary[] }
-  | { type: "PATCH"; id?: string; bank: number; slot: number; patch: Patch }
+  | { type: "PATCH"; id?: string; bank: number; slot: number; patch: Patch;
+      profile?: string; active_profile?: string }
   | { type: "SAVED"; id?: string; patches: Array<{ bank: number; slot: number }> }
   | { type: "DIRTY"; id?: string; patches: Array<{ bank: number; slot: number }> }
   | { type: "MIDI_LEARN"; id?: string; table: MidiLearnTable }
@@ -566,6 +575,8 @@ async function send(message: object): Promise<void> {
  *  the connection died, so the UI doesn't have to wait per-call timeouts
  *  before unblocking. Each resolver sees an ERROR and rejects its promise. */
 function _failPending(reason: string): void {
+  _connectionGeneration++;
+  _patchListRefresh = null;
   if (_pending.size === 0) return;
   for (const [id, cb] of _pending) {
     try {
@@ -591,6 +602,14 @@ function nextId(): string { return String(_nextId++); }
 type PendingResolver = (msg: FirmwareMessage) => void;
 const _pending = new Map<string, PendingResolver>();
 let _awaitListener: UnlistenFn | null = null;
+let _connectionGeneration = 0;
+const _internallyRetriedErrors = new WeakSet<object>();
+
+/** Only the exact correlated response whose read is being retried is quiet.
+ * It still reaches every subscriber and the raw log for diagnostics. */
+export function isInternallyRetriedFirmwareError(message: FirmwareMessage): boolean {
+  return _internallyRetriedErrors.has(message);
+}
 
 /** A request reached the transport but no correlated response arrived before
  * its deadline.  For append-only OTA chunks this is materially different
@@ -680,7 +699,25 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
   message: { type: string; id?: string; [k: string]: unknown },
   timeoutMs = 5000,
 ): Promise<T> {
+  return _sendAndAwait<T>(message, timeoutMs);
+}
+
+class FirmwareCommandResponseError extends Error {
+  constructor(readonly response: Extract<FirmwareMessage, { type: "ERROR" }>) {
+    super(`error: ${response.error ?? "unknown"}`);
+  }
+}
+
+async function _sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
+  message: { type: string; id?: string; [k: string]: unknown },
+  timeoutMs: number,
+  retryError?: (message: Extract<FirmwareMessage, { type: "ERROR" }>) => boolean,
+  expectedGeneration?: number,
+): Promise<T> {
   await _ensureAwaitListener();
+  if (expectedGeneration !== undefined && expectedGeneration !== _connectionGeneration) {
+    throw new Error("error: disconnected");
+  }
   if (!message.id) message.id = nextId();
   const id = message.id!;
   return new Promise<T>((resolve, reject) => {
@@ -691,7 +728,8 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
     _pending.set(id, (msg) => {
       clearTimeout(timer);
       if (msg.type === "ERROR") {
-        reject(new Error(`error: ${(msg as { error?: string }).error ?? "unknown"}`));
+        if (retryError?.(msg)) _internallyRetriedErrors.add(msg);
+        reject(new FirmwareCommandResponseError(msg));
       } else {
         resolve(msg as T);
       }
@@ -788,6 +826,71 @@ async function putGlobal(device: Record<string, unknown>): Promise<Extract<Firmw
   }
 }
 
+type PatchListRefresh = { generation: number; promise: Promise<void> };
+let _patchListRefresh: PatchListRefresh | null = null;
+let _patchListRevision = 0;
+
+function listPatches(): Promise<void> {
+  _patchListRevision++;
+  if (_patchListRefresh) return _patchListRefresh.promise;
+  const generation = _connectionGeneration;
+  const refresh: PatchListRefresh = { generation, promise: Promise.resolve() };
+  _patchListRefresh = refresh;
+  refresh.promise = refreshPatchList(refresh).catch(error => {
+    // Explicit ERROR replies already reach App's error handler. Local
+    // timeout/transport failures have no reply, but must also be visible.
+    if (!(error instanceof FirmwareCommandResponseError) && generation === _connectionGeneration) {
+      try { window.dispatchEvent(new CustomEvent("bosun-toast", { detail: {
+        level: "error", message: `The patch list could not be refreshed: ${String(error)}. Try Refresh list.`,
+      } })); } catch {}
+    }
+    throw error;
+  });
+  // Existing UI events also call this without awaiting it. Errors are already
+  // presented above/on the message bus; observing them prevents a second,
+  // unhandled rejection while awaited callers still receive the rejection.
+  void refresh.promise.catch(() => {});
+  return refresh.promise;
+}
+
+async function refreshPatchList(refresh: PatchListRefresh): Promise<void> {
+  const { generation } = refresh;
+  const deadline = Date.now() + 20000;
+  let busyDelay = 250;
+  try {
+    while (true) {
+      if (generation !== _connectionGeneration) throw new Error("error: disconnected");
+      const revision = _patchListRevision;
+      let retryDelay = 0;
+      try {
+        const response = await _sendAndAwait({ type: "LIST_PATCHES" }, Math.max(1, Math.min(10000, deadline - Date.now())), error => {
+          // The hub rejected this read before forwarding it to Captain. Retry
+          // only this explicit admission failure, never a save or lost reply.
+          if (error.error !== "background_busy" || (error.of && error.of !== "LIST_PATCHES") ||
+              generation !== _connectionGeneration || Date.now() + busyDelay >= deadline) return false;
+          retryDelay = busyDelay;
+          return true;
+        }, generation);
+        if (response.type !== "PATCH_LIST") throw new Error("Unexpected response to LIST_PATCHES");
+      } catch (error) {
+        if (!retryDelay) throw error;
+        await new Promise<void>(resolve => setTimeout(resolve, retryDelay));
+        busyDelay = Math.min(1000, busyDelay * 2);
+        continue;
+      }
+      if (generation !== _connectionGeneration) throw new Error("error: disconnected");
+      if (revision === _patchListRevision) return;
+      // A save/discard/refresh arrived while this read was in flight. Its
+      // snapshot may predate that mutation: one fresh, sequential read is due.
+      if (Date.now() >= deadline) throw new Error("Patch list refresh did not settle in time.");
+    }
+  } finally {
+    // Stop accepting coalesced requests before this promise settles. A new
+    // refresh in a settlement microtask must not join an already-finished run.
+    if (_patchListRefresh === refresh) _patchListRefresh = null;
+  }
+}
+
 
 export const cmd = {
   ping:           () => send({ type: "PING",            id: nextId() }),
@@ -810,8 +913,8 @@ export const cmd = {
   getManifestAwait: () => sendAndAwait<{ type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }>(
                     { type: "GET_MANIFEST" }, 10000),
   getContext:     () => send({ type: "GET_CONTEXT",    id: nextId() }),
-  listPatches:    () => send({ type: "LIST_PATCHES",    id: nextId() }),
-  getPatch:       (bank: number, slot: number) => send({ type: "GET_PATCH",       id: nextId(), bank, slot }),
+  listPatches,
+  getPatch:       (bank: number, slot: number) => send({ type: "GET_PATCH", id: nextId(), bank, slot }),
   switchPatch:    (bank: number, slot: number) => send({ type: "SWITCH_PATCH",    id: nextId(), bank, slot }),
   deletePatch:    (bank: number, slot: number) => send({ type: "DELETE_PATCH",    id: nextId(), bank, slot }),
   putBinding:     (bank: number, slot: number, binding: Binding) =>

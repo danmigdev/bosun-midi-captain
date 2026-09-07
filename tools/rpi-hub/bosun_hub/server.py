@@ -38,7 +38,9 @@ MAX_CLIENT_LINE = 64 * 1024
 
 
 async def _serve_tcp(hub: Hub, host: str, port: int) -> asyncio.AbstractServer:
+    clients: set[asyncio.StreamWriter] = set()
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        clients.add(writer)
         peer = writer.get_extra_info("peername")
         log.info("tcp client %s connected", peer)
         sub = hub.subscribe(want_status=False)
@@ -73,10 +75,17 @@ async def _serve_tcp(hub: Hub, host: str, port: int) -> asyncio.AbstractServer:
             down.cancel()
             await asyncio.gather(down, return_exceptions=True)
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            finally:
+                clients.discard(writer)
             log.info("tcp client %s disconnected", peer)
 
     server = await asyncio.start_server(handle, host, port)
+    def close_clients():
+        for writer in list(clients):
+            writer.close()
+    server._bosun_close_clients = close_clients
     log.info("raw TCP protocol on %s:%d", host, port)
     return server
 
@@ -202,7 +211,15 @@ async def run(
         if httpd is not None:
             httpd.shutdown()
             httpd.server_close()
+        hub.updates.stop()
+        await hub.updates.wait()
         hub.stop()
+        # Python 3.13's Server.wait_closed also waits for accepted clients.
+        # An idle desktop must not hold a service restart open indefinitely.
+        for s in servers:
+            close_clients = getattr(s, "_bosun_close_clients", None)
+            if close_clients is not None:
+                close_clients()
         await asyncio.gather(*(s.wait_closed() for s in servers), return_exceptions=True)
         if discovery is not None:
             await discovery.wait_closed()

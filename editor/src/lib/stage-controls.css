@@ -1,0 +1,86 @@
+/* One control palette and type scale for Stage and its dialogs. The saved
+   readout fonts remain independent from the controls used to configure them. */
+.stage {
+  --stage-control-font: var(--stage-font, "Inter", -apple-system, sans-serif);
+  --stage-control-row-height: var(--stage-action-height, max(36px, 2.25rem));
+  /* The longest menu label occupies 12em in the Monospace font stack.
+     Reserve the popup margins/padding/scrollbar so it stays on one row. */
+  --stage-control-font-size: min(clamp(1rem, 1.2vw, 1.25rem), calc((var(--stage-control-row-height) - 2px) / 1.3), calc((100vw - 64px) / 12));
+  --stage-control-min-height: var(--stage-control-row-height);
+  --stage-control-border: var(--stage-display-edge, #344752);
+  --stage-control-background: #111b23;
+  --stage-control-color: var(--stage-display-text, #edf5f7);
+  --stage-control-radius: 3px;
+  --stage-control-accent: var(--stage-display-accent, #baff3f);
+  --stage-control-padding: max(0px, min(0.5em, calc((var(--stage-control-row-height) - 1.3em - 2px) / 2))) clamp(8px, 0.75em, 12px);
+}
+
+.stage .stage-control-button,
+.stage .stage-control-icon {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--stage-control-border);
+  border-radius: var(--stage-control-radius);
+  background: var(--stage-control-background);
+  color: var(--stage-control-color);
+  font-family: var(--stage-control-font);
+  font-size: var(--stage-control-font-size);
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stage .stage-control-icon {
+  padding: 5px;
+}
+
+.stage .stage-control-button {
+  min-height: var(--stage-control-min-height);
+  padding: var(--stage-control-padding);
+}
+
+/* The dialog close action mirrors the live header action, including after
+   viewport or saved readout-font changes resize the header. */
+.stage .stage-control-icon--dialog {
+  flex: 0 0 auto;
+  width: var(--stage-action-width, clamp(48px, 3vw, 64px));
+  height: var(--stage-action-height, 36px);
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage .stage-control-icon svg {
+  width: clamp(24px, 1.8vw, 32px);
+  height: clamp(24px, 1.8vw, 32px);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.stage .stage-control-button:disabled,
+.stage .stage-control-icon:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .stage .stage-control-button:hover:not(:disabled),
+  .stage .stage-control-icon:hover:not(:disabled) {
+    border-color: var(--stage-control-accent);
+  }
+}
+
+.stage .stage-control-button:active:not(:disabled),
+.stage .stage-control-icon:active:not(:disabled) {
+  opacity: 0.6;
+}
+
+.stage .stage-control-button:focus-visible,
+.stage .stage-control-icon:focus-visible {
+  outline: 2px solid var(--stage-control-accent);
+  outline-offset: -4px;
+}

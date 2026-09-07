@@ -13,6 +13,8 @@ mod tcp_serial;
 
 #[cfg(not(target_os = "android"))]
 mod installer;
+#[cfg(not(target_os = "android"))]
+mod firmware_update;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -63,6 +65,8 @@ pub fn run() {
             installer::prepare_firmware_source,
             installer::list_firmware_files_at,
             installer::read_firmware_file_at_b64,
+            firmware_update::bundled_update_manifest,
+            firmware_update::read_bundled_update,
             export::pick_export_folder,
             export::write_export_file,
             export::default_backup_folder,

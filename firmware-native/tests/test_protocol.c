@@ -41,7 +41,75 @@ static void is_error(const char *value) {
         fprintf(stderr, "Expected error %s, received %s\n", value, output);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "error"), value));
 }
+static uint16_t physical_switch_mask;
+static uint16_t read_switches(void) { return physical_switch_mask; }
+static void activate_switch(void) {
+    const char device[] = "{}";
+    const char patch[] = "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}}]}";
+    assert(bosun_config_activate(&config, "test", false) == BOSUN_STORE_OK);
+    assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&config, "test", 1, 1, patch, sizeof patch - 1, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&config, 1, 1) == BOSUN_STORE_OK);
+    bosun_runtime_init(&runtime, &config, send_midi, NULL);
+    bosun_protocol_init(&protocol, &runtime); bosun_protocol_session(&protocol, true);
+    protocol.read_switches = read_switches;
+    sent = 0; physical_switch_mask = 0;
+    request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
+    assert(bosun_config_bool(&reply, 0, "stage_input", false));
+    static const char *const invalid[] = {
+        "\"switch\":1,\"bank\":1,\"slot\":1", "\"switch\":\"UP\",\"bank\":1,\"slot\":1",
+        "\"switch\":\"1\",\"bank\":true,\"slot\":1", "\"switch\":\"1\",\"bank\":1.5,\"slot\":1",
+        "\"switch\":\"1\",\"bank\":1,\"slot\":null", "\"switch\":\"1\",\"bank\":0,\"slot\":1",
+        "\"switch\":\"1\",\"bank\":1,\"slot\":11", "\"switch\":\"1\",\"bank\":999999999999,\"slot\":1",
+        "\"switch\":\"1\",\"bank\":1", "\"switch\":\"1\",\"bank\":1,\"slot\":1,\"profile\":false",
+        "\"switch\":\"1\\u0000\",\"bank\":1,\"slot\":1"
+    };
+    char command[240];
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"ACTIVATE_SWITCH\",%s}", invalid[i]);
+        request(command, "ERROR"); is_error("invalid_request");
+        assert(!sent && !runtime.queue_count && runtime.switches[0].stable);
+    }
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"switch\":\"2\",\"bank\":1,\"slot\":1}", "ERROR");
+    is_error("invalid_json");
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":2,\"slot\":1}", "ERROR"); is_error("stale_state");
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("stale_state");
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1,\"profile\":\"removed\"}", "ERROR"); is_error("stale_state");
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1,\"profile\":\"\"}", "ERROR"); is_error("stale_state");
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"2\",\"bank\":1,\"slot\":1}", "ERROR"); is_error("unbound");
+    physical_switch_mask = 4; /* GPIO changed before the next ordinary FSM poll. */
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ERROR"); is_error("busy");
+    assert(!sent && !runtime.queue_count);
+    physical_switch_mask = 0;
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"id\":\"tap\",\"switch\":\"1\",\"bank\":1,\"slot\":1,\"profile\":\"test\"}", "ACK");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "id"), "tap"));
+    assert(sent == 2 && !runtime.queue_count && runtime.switches[0].stable && !runtime.held_mask);
+    bosun_protocol_session(&protocol, false);
+    bosun_runtime_tick(&runtime, 1000, 0, 0, 0); assert(sent == 2);
+    bosun_protocol_session(&protocol, true);
+    request("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ACK");
+    assert(sent == 4 && !runtime.queue_count);
+    protocol.read_switches = NULL;
+}
 static uint32_t diagnostic_led(uint8_t index) { return ((uint32_t)index << 16) | 0x8000u | (255u - index); }
+static void active_patch_profile_and_draft(void) {
+    request("{\"type\":\"PUT_BINDING\",\"bank\":1,\"slot\":1,\"binding\":{\"switch\":\"1\",\"mode\":\"latched\",\"label\":\"Draft Stage binding\"}}", "ACK");
+    assert(bosun_config_dirty(&config, 1, 1));
+    request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":1}", "PATCH");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "profile"), ""));
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "active_profile"), "test"));
+    assert(strstr(output, "Draft Stage binding") && !strstr(output, "note_on"));
+    request("{\"type\":\"GET_PATCH\",\"profile\":\"\",\"bank\":1,\"slot\":1}", "PATCH");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "active_profile"), "test"));
+    assert(strstr(output, "Draft Stage binding"));
+    /* The same profile ID, requested explicitly, continues to mean saved
+     * bytes. Its reply must not masquerade as the active runtime binding. */
+    request("{\"type\":\"GET_PATCH\",\"profile\":\"test\",\"bank\":1,\"slot\":1}", "PATCH");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "profile"), "test"));
+    assert(bosun_json_get(&reply, 0, "active_profile") < 0);
+    assert(!strstr(output, "Draft Stage binding") && strstr(output, "note_on"));
+    assert(bosun_config_dirty(&config, 1, 1));
+}
 static void led_dump(void) {
     request("{\"type\":\"LED_DUMP\"}", "ERROR"); is_error("leds_unavailable");
     protocol.read_led = diagnostic_led;
@@ -502,7 +570,7 @@ int main(void) {
     assert(!protocol.tx_length && !protocol.rx_length);
     request("{\"type\":\"PING\"}", "ACK");
     assert(sent == 0);
-    monitor_and_learn(); rig_info(); ui_events();
+    monitor_and_learn(); rig_info(); ui_events(); activate_switch(); active_patch_profile_and_draft();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));

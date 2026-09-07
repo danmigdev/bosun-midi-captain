@@ -6,7 +6,7 @@
 // device.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, waitFor } from "@testing-library/svelte";
 import KioskApp from "../../src/kiosk/KioskApp.svelte";
 import { wsLink } from "../../src/kiosk/ws-link";
 
@@ -102,6 +102,101 @@ const sw = (container: HTMLElement, id: string) =>
   )!;
 
 describe("kiosk integration", () => {
+  it("passes Stage input capability and guarded taps through the real WebSocket path, retaining confirmed latch state after refresh", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    const deviceInfo = () => ({
+      type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.6.5-native", device: "MIDI Captain", current: { bank: 2, slot: 3 },
+      profile: "generic", stage_input: true, preset_navigation: {},
+    });
+    reply(deviceInfo());
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic", patches: [] });
+    await waitFor(() => expect(lastSent("GET_PATCH")).toBeTruthy());
+    const patch = () => ({
+      type: "PATCH", id: lastSent("GET_PATCH")!.id, bank: 2, slot: 3, profile: "", active_profile: "generic",
+      patch: { name: "Generic", bindings: [{ switch: "up", mode: "latched", label: "Delay", actions: {
+        toggle_on: { messages: [{ type: "cc", channel: 1, cc: 22, value: 127 }] },
+        toggle_off: { messages: [{ type: "cc", channel: 1, cc: 22, value: 0 }] },
+      } }] },
+    });
+    expect(lastSent("GET_PATCH")).toMatchObject({ bank: 2, slot: 3 });
+    expect(lastSent("GET_PATCH")).not.toHaveProperty("profile");
+    reply(patch());
+    await waitFor(() => expect(sw(container, "UP")).toBeEnabled());
+    const tile = sw(container, "UP");
+    const infos = sentCount("GET_DEVICE_INFO");
+    await fireEvent.click(tile.querySelector(".stage__switch-label")!);
+    await waitFor(() => expect(lastSent("ACTIVATE_SWITCH")).toBeTruthy());
+    const command = lastSent("ACTIVATE_SWITCH")!;
+    expect(command).toMatchObject({ switch: "up", bank: 2, slot: 3, profile: "generic" });
+    expect(sentCount("GET_DEVICE_INFO")).toBe(infos);
+    expect(tile).toBeDisabled();
+    expect(tile).toHaveAttribute("aria-pressed", "false");
+    await fireEvent.click(tile);
+    expect(sentCount("ACTIVATE_SWITCH")).toBe(1);
+    reply({ type: "EVENT", event: "binding_fired", switch: "up", action: "toggle_on" });
+    await waitFor(() => expect(tile).toHaveAttribute("aria-pressed", "true"));
+    reply({ type: "ACK", id: command.id });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBe(infos + 1));
+    const patches = sentCount("GET_PATCH");
+    reply(deviceInfo());
+    await waitFor(() => expect(sentCount("GET_PATCH")).toBeGreaterThan(patches));
+    reply(patch());
+    await waitFor(() => expect(tile).toBeEnabled());
+    expect(tile).toHaveAttribute("aria-pressed", "true");
+    expect(sentCount("ACTIVATE_SWITCH")).toBe(1);
+  });
+
+  it.each([undefined, false, "true"])("does not enable remote switches when DEVICE_INFO stage_input is %s", async stage_input => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    reply({ type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.6.5-native", device: "MIDI Captain", current: { bank: 1, slot: 1 },
+      profile: "generic", stage_input, preset_navigation: {} });
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic", patches: [] });
+    await waitFor(() => expect(lastSent("GET_PATCH")).toBeTruthy());
+    reply({ type: "PATCH", id: lastSent("GET_PATCH")!.id, bank: 1, slot: 1, profile: "generic",
+      patch: { name: "Generic", bindings: [{ switch: "1", mode: "tap", label: "Action", actions: {} }] } });
+    await waitFor(() => expect(sw(container, "1")).toHaveTextContent("Action"));
+    expect(sw(container, "1")).toBeDisabled();
+    await fireEvent.click(sw(container, "1"));
+    expect(sentCount("ACTIVATE_SWITCH")).toBe(0);
+    expect(container).toHaveTextContent("Update Captain firmware to control switches from Stage.");
+  });
+
+  it("keeps old switch bindings disabled across reconnect until the new device and patch replies arrive", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    const deviceInfo = () => ({ type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.6.5-native", device: "MIDI Captain", current: { bank: 1, slot: 1 },
+      profile: "generic", stage_input: true, preset_navigation: {} });
+    const patch = (label: string) => ({ type: "PATCH", id: lastSent("GET_PATCH")!.id,
+      bank: 1, slot: 1, profile: "", active_profile: "generic", patch: { name: "Generic", bindings: [
+        { switch: "1", mode: "tap", label, actions: {} },
+      ] } });
+    reply(deviceInfo());
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic", patches: [] });
+    await waitFor(() => expect(lastSent("GET_PATCH")).toBeTruthy());
+    reply(patch("Old action"));
+    await waitFor(() => expect(sw(container, "1")).toBeEnabled());
+    const infos = sentCount("GET_DEVICE_INFO");
+    reply({ type: "HUB", link: "down" });
+    await waitFor(() => expect(sw(container, "1")).toBeDisabled());
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBeGreaterThan(infos));
+    expect(sw(container, "1")).toBeDisabled();
+    reply(deviceInfo());
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic", patches: [] });
+    await waitFor(() => expect(lastSent("GET_PATCH")).toMatchObject({ bank: 1, slot: 1 }));
+    expect(lastSent("GET_PATCH")).not.toHaveProperty("profile");
+    expect(sw(container, "1")).toBeDisabled();
+    reply(patch("New action"));
+    await waitFor(() => expect(sw(container, "1")).toBeEnabled());
+    expect(sw(container, "1")).toHaveTextContent("New action");
+    expect(sentCount("ACTIVATE_SWITCH")).toBe(0);
+  });
+
   it("reloads bindings when firmware replaces the patch at the current coordinates", async () => {
     const { container } = mountKiosk();
     await bringLinkUp();
@@ -145,8 +240,8 @@ describe("kiosk integration", () => {
       expect(view.container.querySelector(".stage__bank-number")).toHaveStyle({ color: "#fedcba" });
       expect(view.container.querySelector(".stage__rig-number")).toHaveStyle({ color: "#12ab34" });
       expect(view.container.querySelector(".stage__expression")).toHaveStyle({ color: "#f0ab12" });
-      expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("· Bank 1 Tour");
-      expect(view.container.querySelector(".stage__rig-number")).toHaveTextContent("· Preset 3!");
+      expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("Bank 1 Tour");
+      expect(view.container.querySelector(".stage__rig-number")).toHaveTextContent("Preset 3!");
       const before = sentCount("GET_DEVICE_INFO");
       reply({ type: "EVENT", event: "global_changed" });
       await vi.advanceTimersByTimeAsync(0);
@@ -571,7 +666,7 @@ describe("kiosk integration", () => {
     const { container } = mountKiosk();
     await bringLinkUp();
     answerBootstrap(1, 1);
-    await waitFor(() => expect(container.querySelector(".stage__meta")).toHaveTextContent("RIG 1"));
+    await waitFor(() => expect(container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 1"));
 
     // CONTEXT is a full authoritative snapshot and carries the Captain's
     // current location. No EVENT:patch_switched is sent in this scenario.
@@ -581,7 +676,8 @@ describe("kiosk integration", () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector(".stage__meta")).toHaveTextContent("BANK 2 · RIG 4");
+      expect(container.querySelector(".stage__bank-readout .stage__bank-number")).toHaveTextContent("BANK 2");
+      expect(container.querySelector(".stage__rig-readout .stage__rig-number")).toHaveTextContent("RIG 4");
       const requested = [...sock().sent].reverse().find((line) =>
         line.includes('"type":"GET_PATCH"') && line.includes('"bank":2') && line.includes('"slot":4'),
       );
@@ -593,25 +689,25 @@ describe("kiosk integration", () => {
     const { container } = mountKiosk();
     await bringLinkUp();
     answerBootstrap(1, 1);
-    await waitFor(() => expect(container.querySelector(".stage__meta")).toHaveTextContent("RIG 1"));
+    await waitFor(() => expect(container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 1"));
 
     reply({ type: "EVENT", event: "patch_switched", bank: 1, slot: 2, source: "editor" });
-    await waitFor(() => expect(container.querySelector(".stage__meta")).toHaveTextContent("RIG 2"));
+    await waitFor(() => expect(container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 2"));
     reply({
       type: "CONTEXT", id: "old-poll",
       context: { bank: 1, slot: 1, kemper_block_Reverb: "on" },
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(container.querySelector(".stage__meta")).toHaveTextContent("RIG 2");
+    expect(container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 2");
   });
 
-  it("never requests GLOBAL or re-requests PATCH_LIST after fast bootstrap", async () => {
+  it("refreshes PATCH_LIST once per reconnect without requesting GLOBAL or MANIFEST", async () => {
     // The manifest streams for seconds on the firmware and starves the
     // data channel of CONTEXT pushes (the effect-block state the Stage
     // view lives on). A reconnect storm re-fetching it was why effect
-    // toggles stopped updating on the Pi. A reconnect must cost only a
-    // tiny GET_DEVICE_INFO.
+    // toggles stopped updating on the Pi. A reconnect needs only the compact
+    // DEVICE_INFO plus PATCH_LIST, which may have changed while disconnected.
     const { container } = mountKiosk();
     await bringLinkUp();
     answerBootstrap(1, 1);
@@ -639,7 +735,259 @@ describe("kiosk integration", () => {
           l.includes("GET_GLOBAL") ||
           l.includes("LIST_PATCHES"),
       );
-    expect(heavy).toHaveLength(1); // still just the first-boot LIST_PATCHES
+    expect(heavy).toHaveLength(4); // bootstrap plus one list for each reconnect
+    expect(heavy.every((line) => line.includes("LIST_PATCHES"))).toBe(true);
+  });
+
+  it("replaces the old inventory after reconnect and ignores a delayed old response", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      const info = () => ({
+        type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+        fw: "0.6.5-native", device: "Captain", profile: "live", current: { bank: 1, slot: 1 },
+        preset_navigation: { switches: { A: 1 } },
+      });
+      reply(info());
+      const oldId = lastSent("LIST_PATCHES")!.id;
+      reply({ type: "PATCH_LIST", id: oldId, profile: "live", patches: [{ bank: 1, slot: 1, name: "OLD" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("OLD");
+
+      reply({ type: "HUB", link: "down" });
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("LIST_PATCHES")).toBe(2);
+      expect(sw(view.container, "A")).not.toHaveTextContent("OLD");
+      reply(info());
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "live",
+        patches: [{ bank: 1, slot: 1, name: "NEW" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      reply({ type: "PATCH_LIST", id: oldId, profile: "live", patches: [{ bank: 1, slot: 1, name: "OLD" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("NEW");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sentCount("LIST_PATCHES")).toBe(2);
+      expect(sentCount("GET_GLOBAL")).toBe(0);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("keeps the DEVICE_INFO profile and rejects a list overtaken by a profile switch", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      const info = (profile: string) => ({
+        type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+        fw: "0.6.5-native", device: "Captain", profile, current: { bank: 1, slot: 1 },
+        preset_navigation: { switches: { A: 1 } },
+      });
+      reply(info("live"));
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "live",
+        patches: [{ bank: 1, slot: 1, name: "LIVE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("LIVE");
+
+      reply({ type: "EVENT", event: "dirty_state_changed", patches: [{ bank: 1, slot: 1 }] });
+      await vi.advanceTimersByTimeAsync(0);
+      const outdated = lastSent("LIST_PATCHES")!.id;
+      reply({ type: "EVENT", event: "global_changed" });
+      await vi.advanceTimersByTimeAsync(0);
+      reply(info("spare"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).not.toHaveTextContent("LIVE");
+      reply({ type: "PATCH_LIST", id: outdated, profile: "live",
+        patches: [{ bank: 1, slot: 1, name: "STALE LIVE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("LIST_PATCHES")).toBe(3);
+      expect(sw(view.container, "A")).not.toHaveTextContent("STALE LIVE");
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "spare",
+        patches: [{ bank: 1, slot: 1, name: "SPARE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("SPARE");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sentCount("LIST_PATCHES")).toBe(3);
+      expect(sentCount("GET_GLOBAL")).toBe(0);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("coalesces patch mutation events and refreshes the created and removed slots", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      reply({ type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+        fw: "0.6.5-native", device: "Captain", current: { bank: 1, slot: 1 },
+        preset_navigation: { switches: { A: 1, B: 2 } } });
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
+        patches: [{ bank: 1, slot: 1, name: "ORIGINAL" }] });
+      await vi.advanceTimersByTimeAsync(0);
+
+      reply({ type: "EVENT", event: "dirty_state_changed", patches: [{ bank: 1, slot: 2 }] });
+      await vi.advanceTimersByTimeAsync(0);
+      const older = lastSent("LIST_PATCHES")!.id;
+      reply({ type: "EVENT", event: "saved", patches: [{ bank: 1, slot: 2 }] });
+      reply({ type: "EVENT", event: "dirty_state_changed", patches: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("LIST_PATCHES")).toBe(2);
+      reply({ type: "PATCH_LIST", id: older, patches: [{ bank: 1, slot: 1, name: "STALE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("ORIGINAL");
+      expect(sentCount("LIST_PATCHES")).toBe(3);
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
+        patches: [{ bank: 1, slot: 1, name: "ORIGINAL" }, { bank: 1, slot: 2, name: "CREATED" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "B")).toHaveTextContent("CREATED");
+
+      // DISCARD may remove a newly created, still-unsaved patch. Both firmware
+      // families announce the resulting change with this existing event.
+      reply({ type: "EVENT", event: "discarded", patches: [{ bank: 1, slot: 2 }] });
+      await vi.advanceTimersByTimeAsync(0);
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
+        patches: [{ bank: 1, slot: 1, name: "ORIGINAL" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "B")).not.toHaveTextContent("CREATED");
+      expect(sw(view.container, "B")).not.toHaveClass("stage__switch--bound");
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(sentCount("LIST_PATCHES")).toBe(4);
+      expect(sentCount("GET_DEVICE_INFO")).toBe(1);
+      expect(sentCount("GET_GLOBAL")).toBe(0);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("does not refresh the inventory for a physical switch to an existing patch", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      reply({ type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+        fw: "0.6.5-native", device: "Captain", current: { bank: 1, slot: 1 },
+        preset_navigation: { switches: { A: 1, B: 2 } } });
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
+        patches: [{ bank: 1, slot: 1, name: "ONE" }, { bank: 1, slot: 2, name: "TWO" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      reply({ type: "EVENT", event: "patch_switched", bank: 1, slot: 2, source: "binding" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("LIST_PATCHES")).toBe(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sentCount("LIST_PATCHES")).toBe(1);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("reconciles a profile mismatch with DEVICE_INFO without accepting the wrong inventory", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      const info = (profile: string) => ({
+        type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+        fw: "0.6.5-native", device: "Captain", profile, current: { bank: 1, slot: 1 },
+        preset_navigation: { switches: { A: 1 } },
+      });
+      reply(info("live"));
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "spare",
+        patches: [{ bank: 1, slot: 1, name: "WRONG PROFILE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).not.toHaveTextContent("WRONG PROFILE");
+      expect(sentCount("GET_DEVICE_INFO")).toBe(2);
+      reply(info("spare"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("LIST_PATCHES")).toBe(2);
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "spare",
+        patches: [{ bank: 1, slot: 1, name: "FRESH SPARE" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("FRESH SPARE");
+      expect(sentCount("GET_GLOBAL")).toBe(0);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("confirms BANK+ over the kiosk transport while its inventory refresh is in flight", async () => {
+    vi.useFakeTimers();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      const info = (id: unknown, bank: number, slot: number) => ({
+        type: "DEVICE_INFO", id, fw: "0.6.5-native", device: "midi_captain_10",
+        profile: "kemper_player_buk4", current: { bank, slot },
+        preset_navigation: { switches: { A: 1, B: 2, C: 3, D: 4, E: 5 } },
+      });
+      const initialPatches = [
+        { bank: 1, slot: 1, name: "FIRST BANK" },
+        { bank: 2, slot: 4, name: "BEFORE EDIT" },
+      ];
+      const freshPatches = [initialPatches[0], { bank: 2, slot: 4, name: "NEW BANK RIG" }];
+      reply(info(lastSent("GET_DEVICE_INFO")!.id, 1, 1));
+      reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
+        profile: "kemper_player_buk4", patches: initialPatches });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "A")).toHaveTextContent("FIRST BANK");
+
+      // Another editor has changed a patch; the kiosk's own list remains in
+      // flight while Stage asks for a separate, fresh navigation snapshot.
+      reply({ type: "EVENT", event: "dirty_state_changed", patches: [{ bank: 2, slot: 4 }] });
+      await vi.advanceTimersByTimeAsync(0);
+      const kioskListId = lastSent("LIST_PATCHES")!.id;
+      const bankPlus = view.getByRole("button", { name: "Next bank", exact: true });
+      expect(bankPlus).toBeEnabled();
+      await fireEvent.click(bankPlus);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bankPlus).toBeDisabled();
+      expect(sentCount("GET_DEVICE_INFO")).toBe(2);
+      reply(info(lastSent("GET_DEVICE_INFO")!.id, 1, 1));
+      await vi.advanceTimersByTimeAsync(0);
+      const stageListId = lastSent("LIST_PATCHES")!.id;
+      expect(stageListId).not.toBe(kioskListId);
+      reply({ type: "PATCH_LIST", id: stageListId,
+        profile: "kemper_player_buk4", patches: freshPatches });
+      await vi.advanceTimersByTimeAsync(0);
+      const switchRequest = lastSent("SWITCH_PATCH")!;
+      expect(switchRequest).toMatchObject({ type: "SWITCH_PATCH", bank: 2, slot: 4 });
+      expect(sentCount("SWITCH_PATCH")).toBe(1);
+      expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("BANK 1");
+      expect(view.container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 1");
+
+      reply({ type: "ACK", id: switchRequest.id });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentCount("GET_DEVICE_INFO")).toBe(3);
+      // The ACK alone does not paint the target; confirmation also repairs
+      // the parent shell when the unsolicited patch_switched event was lost.
+      expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("BANK 1");
+      expect(bankPlus).toBeDisabled();
+      reply(info(lastSent("GET_DEVICE_INFO")!.id, 2, 4));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("BANK 2");
+      expect(view.container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 4");
+      expect(bankPlus).toBeEnabled();
+
+      reply({ type: "PATCH_LIST", id: kioskListId,
+        profile: "kemper_player_buk4", patches: freshPatches });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sw(view.container, "D")).toHaveTextContent("NEW BANK RIG");
+      expect(sw(view.container, "D")).toHaveClass("stage__switch--active");
+      expect(sw(view.container, "A")).not.toHaveTextContent("FIRST BANK");
+      expect(sentCount("LIST_PATCHES")).toBe(3);
+      expect(sentCount("GET_GLOBAL")).toBe(0);
+      expect(view.queryByText("Bank change not confirmed.")).not.toBeInTheDocument();
+    } finally { view.unmount(); vi.useRealTimers(); }
   });
 
   it("retries DEVICE_INFO and PATCH_LIST after reconnect when responses were lost", async () => {

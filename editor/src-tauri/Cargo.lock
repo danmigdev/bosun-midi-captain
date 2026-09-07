@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "bosun-editor"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
@@ -386,6 +386,7 @@ dependencies = [
  "serde_json",
  "serial2",
  "serialport",
+ "sha2",
  "sysinfo",
  "tauri",
  "tauri-build",

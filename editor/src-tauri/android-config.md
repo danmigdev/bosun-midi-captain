@@ -1,128 +1,64 @@
-# Android Configuration
+# Build and configure Bosun for Android
 
-This file documents the manual changes needed in the generated Android project
-after running `tauri android init`. These settings are not (yet) expressible in
-tauri.conf.json.
+The application requires Android 10 (API 29) or later. The Windows build script
+produces an ARM64 APK. For direct Captain USB access, the Android device needs
+USB host support and a suitable USB data/OTG connection.
 
-## 1. Orientation
+## Windows build requirements
 
-Add `android:screenOrientation="portrait"` to the main `<activity>` in
-`gen/android/app/src/main/AndroidManifest.xml` to lock the app to portrait
-on phones. For tablets, use `"fullSensor"` to allow both orientations.
+Complete the [editor source setup](../SETUP.md), then install Android Studio and
+these SDK components through its SDK Manager:
 
-```xml
-<activity
-    android:name=".MainActivity"
-    android:screenOrientation="portrait"
-    ...>
+- Android SDK Platform 36 and Platform-Tools.
+- Android SDK Build-Tools **35.0.0**.
+- Android NDK **30.0.15729638**.
+
+These are the versions used by `tools/build-android.ps1`. Configure paths for
+your installation in PowerShell, for example:
+
+```powershell
+$env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+rustup target add aarch64-linux-android
 ```
 
-## 2. Foreground Service (serial keep-alive)
+Open `editor/src-tauri/gen/android/` in Android Studio once to configure the SDK
+location in its local `local.properties`. The generated Android project is
+already included; do not rerun `tauri android init` for a normal build.
 
-Create `gen/android/app/src/main/java/com/bosun/app/BosunSerialService.kt`:
+The build script signs with the local Android development key. If no development
+key exists yet, build the project's debug variant once in Android Studio to
+create it automatically. Keep that key locally for subsequent APK updates.
 
-```kotlin
-package com.bosun.app
+## Build and install
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
-import android.content.Intent
-import android.os.Build
-import android.os.IBinder
+From the repository root:
 
-class BosunSerialService : Service() {
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onCreate() {
-        super.onCreate()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Serial Connection",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val tapIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-            .setContentTitle("Bosun")
-            .setContentText("Connected to MIDI Captain")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
-
-        startForeground(NOTIFICATION_ID, notification)
-        return START_STICKY
-    }
-
-    override fun onDestroy() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        super.onDestroy()
-    }
-
-    companion object {
-        const val CHANNEL_ID = "bosun_serial"
-        const val NOTIFICATION_ID = 1001
-    }
-}
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build-android.ps1
 ```
 
-Register the service in `AndroidManifest.xml` inside the `<application>` block:
+The result is `bosun-debug.apk` in the repository root. The script builds the
+frontend and Rust library, packages the resources, signs the APK and verifies
+its application identity and version. The output uses a development signing key.
 
-```xml
-<service
-    android:name=".BosunSerialService"
-    android:foregroundServiceType="dataSync"
-    android:exported="false" />
+Copy the APK to the Android device, open it and allow installation from that
+source. Alternatively, enable USB debugging and install to a chosen device:
+
+```powershell
+& "$env:ANDROID_HOME\platform-tools\adb.exe" devices
+& "$env:ANDROID_HOME\platform-tools\adb.exe" -s <device-serial> install -r bosun-debug.apk
 ```
 
-Add the foreground service permission:
+An APK signed with a different key cannot replace an installed release directly.
+Export any configuration you need before removing the existing application.
 
-```xml
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-```
+## Device configuration
 
-## 3. USB Host Permission
+Connect the Captain and accept Android's USB permission prompt, or select a
+Raspberry Pi network connection in Bosun. USB and network support are included;
+no source changes are needed to enable them.
 
-Add USB device intent filter so the app auto-opens when the pedal is plugged in:
-
-```xml
-<intent-filter>
-    <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
-</intent-filter>
-
-<meta-data
-    android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
-    android:resource="@xml/device_filter" />
-```
-
-Create `gen/android/app/src/main/res/xml/device_filter.xml`:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- MIDI Captain (PaintAudio) - CDC ACM class -->
-    <usb-device vendor-id="1209" product-id="0001" />
-    <!-- Raspberry Pi Pico (CircuitPython) - CDC ACM class -->
-    <usb-device vendor-id="0x2E8A" />
-</resources>
-```
+Android can display Stage and edit the connected pedal. The unified firmware
+installation and migration procedure currently runs from Bosun Desktop through
+a Raspberry Pi; see [firmware updates](../../docs/firmware-updates.md).

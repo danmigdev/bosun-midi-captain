@@ -44,6 +44,7 @@ import errno
 import json
 import logging
 import os
+from pathlib import Path
 import queue
 import select
 import socket
@@ -166,6 +167,21 @@ class Transport:
         raise NotImplementedError
 
 
+def _serial_usb_identity(path: str):
+    """Capture physical identity at open, before a tty name can be reassigned."""
+    try:
+        node = (Path("/sys/class/tty") / Path(path).name / "device").resolve(strict=True)
+        interface = None
+        for parent in (node, *node.parents):
+            if (parent / "bInterfaceNumber").is_file():
+                interface = (parent / "bInterfaceNumber").read_text().strip().lower()
+            if (parent / "idVendor").is_file() and (parent / "serial").is_file() and interface:
+                return (str(parent), (parent / "serial").read_text().strip().upper(), interface)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 class SerialTransport(Transport):
     def __init__(self, path: str) -> None:
         import serial  # lazy: developing against tcp:// needs no pyserial
@@ -188,7 +204,13 @@ class SerialTransport(Transport):
         # "connected"; the DTR edge also soft-resets the RP2040.
         self._s.dtr = True
         self._s.rts = True
+        identity = _serial_usb_identity(path)
         self._s.open()
+        after_open = _serial_usb_identity(path)
+        if identity != after_open:
+            self._s.close()
+            raise OSError("USB identity changed while opening the serial port")
+        self.usb_identity = identity
         try:
             self._read_wakeup = _ReadWakeup()
         except Exception:
@@ -436,6 +458,17 @@ class UpstreamLink:
     def connected(self) -> bool:
         with self._state_lock:
             return self._connected
+
+    @property
+    def port_name(self) -> Optional[str]:
+        """The owned transport, for maintenance that must pin the same USB unit."""
+        with self._transport_lock:
+            return self._transport.name if self._transport is not None else None
+
+    @property
+    def usb_identity(self):
+        with self._transport_lock:
+            return getattr(self._transport, "usb_identity", None)
 
     def send(self, line: str) -> bool:
         """Queue one protocol line for the pedal without blocking.

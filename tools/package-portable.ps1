@@ -107,6 +107,13 @@ Sync-FirmwareResources -DigestFile $resourceDigestBefore
 Invoke-NativeTool { & $pythonExe $vendorVerifyScript --destination (Join-Path $resources "lib") --check }
 if ($LASTEXITCODE -ne 0) { throw "Pinned Adafruit vendor verification failed" }
 $resourceDigest = (Get-Content -LiteralPath $resourceDigestBefore -Raw).Trim()
+$nativePackage = Join-Path $resources 'update/bosun-update.zip'
+$nativeDigest = $null
+if (Test-Path -LiteralPath $nativePackage) {
+    Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-native-update.py') --verify $nativePackage }
+    if ($LASTEXITCODE -ne 0) { throw 'Native update package validation failed' }
+    $nativeDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativePackage).Hash
+}
 
 # Version + product name come from tauri.conf.json (single source of truth).
 $conf    = Get-Content (Join-Path $tauriDir "tauri.conf.json") -Raw | ConvertFrom-Json
@@ -204,7 +211,7 @@ if (-not (Test-Path $uf2)) {
 Copy-Item $uf2 $stageDir
 Write-Host "[ok  ] circuitpython.uf2"
 
-foreach ($tree in @("firmware", "lib")) {
+foreach ($tree in @("firmware", "lib", "update")) {
     $src = Join-Path $resources $tree
     if (-not (Test-Path $src)) {
         throw "Missing resource '$tree' at $src. Run tools\download-assets.ps1 first."
@@ -238,6 +245,9 @@ Set-Content -Path (Join-Path $stageDir "README.txt") -Value $readme -Encoding ut
 # before spending time compressing. Bosun.exe and README.txt are intentionally
 # outside this resource-only inventory.
 Invoke-FirmwarePackageVerification -Directory $stageDir
+if ($nativeDigest -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $stageDir 'update/bosun-update.zip')).Hash -ne $nativeDigest) {
+    throw 'Native update package changed while building the portable app'
+}
 
 # ---------- 3. Zip it ----------
 
@@ -249,6 +259,23 @@ try {
     # Inspect the archive itself, not only its source directory: this catches
     # missing, duplicated or stale entries introduced during compression.
     Invoke-FirmwarePackageVerification -Archive $zipTemp -Prefix $stageName
+    if ($nativeDigest) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [IO.Compression.ZipFile]::OpenRead($zipTemp)
+        try {
+            $entries = @($archive.Entries | Where-Object { $_.FullName.Replace('\', '/') -ceq "$stageName/update/bosun-update.zip" })
+            if ($entries.Count -ne 1) { throw 'Portable archive is missing the unique native update package' }
+            $stream = $entries[0].Open()
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+                $actualNativeDigest = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '')
+            } finally { $sha.Dispose(); $stream.Dispose() }
+            if ($actualNativeDigest -ne $nativeDigest) { throw 'Portable archive native update package checksum mismatch' }
+        } finally { $archive.Dispose() }
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $nativePackage).Hash -ne $nativeDigest) {
+            throw 'Native update package changed during compression'
+        }
+    }
 
     # Do not replace a previous known-good archive if the firmware changed
     # while this package was being staged/compressed.

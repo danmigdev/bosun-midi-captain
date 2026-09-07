@@ -2,9 +2,8 @@
 # Launch the Stage kiosk: cage (a single-app wlroots compositor) running
 # Chromium fullscreen on the hub's local page.
 #
-# Runs headless when no HDMI panel is attached (so wayvnc can mirror it
-# for a remote look); when the Wisecoco panel is plugged in, drop
-# WLR_BACKENDS and it drives the panel directly.
+# Drives HDMI through DRM, including a panel connected after boot. The same
+# compositor also provides a virtual output for VNC while no panel is attached.
 set -u
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -25,34 +24,25 @@ if [[ "$CHROMIUM_PROFILE" != "$EXPECTED_CHROMIUM_PROFILE" ||
 fi
 umask 077
 
-# Headless output at the panel's native geometry so the layout is tested
-# at the real size. Override BOSUN_KIOSK_MODE / BOSUN_KIOSK_HEADLESS from
-# the unit's environment.
-: "${BOSUN_KIOSK_HEADLESS:=1}"
-: "${BOSUN_KIOSK_MODE:=1920x440}"
+# HDMI uses the panel's advertised preferred mode. kanshi owns output selection
+# and the virtual 1920x440 mode; do not force unverified HDMI timings here.
+: "${BOSUN_KIOSK_HEADLESS:=0}"
+: "${BOSUN_KIOSK_VIRTUAL_FALLBACK:=1}"
 : "${BOSUN_KIOSK_URL:=http://localhost:8080/}"
 
 if [[ "$BOSUN_KIOSK_HEADLESS" == "1" ]]; then
     export WLR_BACKENDS=headless
-    export WLR_LIBINPUT_NO_DEVICES=1
+else
+    if [[ "$BOSUN_KIOSK_VIRTUAL_FALLBACK" == "1" ]]; then
+        export WLR_BACKENDS=headless,drm,libinput
+    else
+        export WLR_BACKENDS=drm,libinput
+    fi
+    export LIBSEAT_BACKEND=seatd
 fi
-
-# Set the headless output mode once cage is up.
-if [[ "$BOSUN_KIOSK_HEADLESS" == "1" ]]; then
-    (
-        for _ in $(seq 1 30); do
-            sock=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' -printf '%f\n' 2>/dev/null | head -1)
-            [[ -n "$sock" ]] && break
-            sleep 0.3
-        done
-        [[ -z "${sock:-}" ]] && exit 0
-        export WAYLAND_DISPLAY="$sock"
-        out=$(wlr-randr --json 2>/dev/null | grep -oE '"name": *"[^"]+"' | head -1 | grep -oE '[^"]+$')
-        [[ -z "$out" ]] && out=HEADLESS-1
-        wlr-randr --output "$out" --custom-mode "${BOSUN_KIOSK_MODE}" 2>/dev/null \
-            || wlr-randr --output "$out" --mode "${BOSUN_KIOSK_MODE}" 2>/dev/null || true
-    ) &
-fi
+export WLR_HEADLESS_OUTPUTS=1
+# The HDMI bar panel need not have a keyboard, mouse or touch controller.
+export WLR_LIBINPUT_NO_DEVICES=1
 
 # Raspberry Pi OS injects --force-renderer-accessibility and extension UI
 # through /etc/chromium.d when /usr/bin/chromium is used.  Those desktop

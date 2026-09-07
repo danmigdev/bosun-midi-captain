@@ -220,12 +220,14 @@ systemctl() {{
             assert "mock failed status" in stderr
 
 
-def test_wayvnc_uses_the_same_ephemeral_private_runtime():
+def test_wayvnc_uses_but_cannot_remove_the_kiosk_private_runtime():
     lines = _active_lines(WAYVNC_UNIT)
-    assert _value(lines, "RuntimeDirectory") == "bosun-kiosk"
-    assert _value(lines, "RuntimeDirectoryMode") == "0700"
+    # Restarting the mirror must not delete Cage's live Wayland socket.
+    assert not any(line.startswith("RuntimeDirectory=") for line in lines)
     assert _value(lines, "Environment") == "XDG_RUNTIME_DIR=/run/bosun-kiosk"
     assert not any(line.startswith("RuntimeDirectoryPreserve=") for line in lines)
+    assert "bosun-kiosk.service" in _value(lines, "Requires").split()
+    assert _value(lines, "PartOf") == "bosun-kiosk.service"
 
 
 def test_installer_repairs_groups_for_new_and_existing_users():
@@ -237,6 +239,6 @@ def test_installer_repairs_groups_for_new_and_existing_users():
     )
     assert loop, "installer must reconcile appliance groups on every run"
     groups = set(loop.group("groups").split())
-    assert {"audio", "video", "input", "render", "plugdev", "seat"} <= groups
+    assert {"audio", "video", "input", "render", "plugdev", "seat", "dialout"} <= groups
     assert 'getent group "$group"' in loop.group("body")
     assert 'usermod --append --groups "$group" "$HUB_USER"' in loop.group("body")

@@ -1,0 +1,19 @@
+[Unit]
+Description=Bosun Stage HDMI and no-panel output policy
+After=bosun-kiosk.service
+Requires=bosun-kiosk.service
+PartOf=bosun-kiosk.service
+
+[Service]
+Type=simple
+User=bosun
+# The kiosk is the sole owner of /run/bosun-kiosk; do not recreate or remove it.
+Environment=XDG_RUNTIME_DIR=/run/bosun-kiosk
+ExecStart=/opt/bosun-hub/kiosk/bosun-outputs.sh
+KillMode=control-group
+TimeoutStopSec=10s
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=bosun-kiosk.service

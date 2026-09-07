@@ -90,3 +90,14 @@ bool bosun_switch_momentary_active(const bosun_switch_fsm *s, uint32_t now,
     return s && mode == BOSUN_SWITCH_LATCHED && s->config.auto_momentary_on_hold &&
         !s->stable && now - s->press_start_ms >= s->config.auto_momentary_ms;
 }
+
+bool bosun_switch_tap(bosun_switch_fsm *s, uint32_t now,
+                      bosun_switch_mode mode, uint8_t *triggers) {
+    if (!s || !triggers || !s->stable || !s->last_raw ||
+        (unsigned)mode > BOSUN_SWITCH_DOUBLE_TAP) return false;
+    /* Flush an expired first tap before starting another double-tap window. */
+    *triggers = bosun_switch_poll(s, now, true, mode).triggers;
+    *triggers |= press(s, now, mode);
+    *triggers |= release(s, now, mode);
+    return true;
+}

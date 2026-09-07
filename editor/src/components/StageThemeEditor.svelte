@@ -4,6 +4,7 @@
   // (StageView re-derives its CSS vars from `theme` on every change) and
   // are persisted by the caller via saveStageTheme.
   import ColorField from "./ColorField.svelte";
+  import StageSelect from "./StageSelect.svelte";
   import {
     STAGE_SECTIONS,
     FONT_STACKS,
@@ -22,6 +23,10 @@
     onclose: () => void;
   };
   let { theme, onchange, onclose }: Props = $props();
+
+  const fontOptions = Object.entries(FONT_STACKS).map(([label, value]) => ({ label, value }));
+  const globalFontOptions = [{ value: "", label: "Inter (default)" }, ...fontOptions];
+  const sectionFontOptions = [{ value: "", label: "Default" }, ...fontOptions];
 
   const SECTION_LABELS: Record<StageSection, string> = {
     rigName: "Rig name",
@@ -62,48 +67,55 @@
 </script>
 
 <div class="theme-panel" role="dialog" aria-label="Stage appearance">
+  <div class="theme-panel__sheet">
   <div class="theme-panel__header">
     <h2>Stage appearance</h2>
-    <button type="button" class="theme-panel__close" onclick={onclose} aria-label="Close appearance panel">✕</button>
+    <button type="button" class="theme-panel__close stage-control-icon stage-control-icon--dialog" onclick={onclose} aria-label="Close appearance panel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+    </button>
   </div>
 
-  <label class="theme-panel__global">
+  <div class="theme-panel__body">
+  <div class="theme-panel__global">
     <span>Default font</span>
-    <select value={theme.fontFamily ?? ""} onchange={(e) => setGlobalFont((e.target as HTMLSelectElement).value)}>
-      <option value="">Inter (default)</option>
-      {#each Object.entries(FONT_STACKS) as [name, stack]}
-        <option value={stack}>{name}</option>
-      {/each}
-    </select>
-  </label>
+    <div class="theme-panel__font-control">
+      <StageSelect id="stage-font-default" label="Default font"
+        value={theme.fontFamily ?? ""} options={globalFontOptions} onchange={setGlobalFont} />
+    </div>
+  </div>
 
   <div class="theme-panel__sections">
     {#each STAGE_SECTIONS as section (section)}
       {@const s = theme.sections[section] ?? {}}
-      <div class="theme-panel__row">
-        <span class="theme-panel__label">{SECTION_LABELS[section]}</span>
+      <div class="theme-panel__row" role="group" aria-label={`${SECTION_LABELS[section]} appearance`}>
+        <div class="theme-panel__row-header">
+          <h3 class="theme-panel__label">{SECTION_LABELS[section]}</h3>
+          <button type="button" class="theme-panel__reset stage-control-button" onclick={() => onchange(resetSection(theme, section))}>Reset</button>
+        </div>
 
-        <select
-          class="theme-panel__font"
-          value={s.fontFamily ?? ""}
-          onchange={(e) => {
-            const v = (e.target as HTMLSelectElement).value;
-            if (v) updateSection(section, { fontFamily: v });
-            else clearSectionFont(section);
-          }}
-        >
-          <option value="">Default</option>
-          {#each Object.entries(FONT_STACKS) as [name, stack]}
-            <option value={stack}>{name}</option>
-          {/each}
-        </select>
+        <div class="theme-panel__field">
+        <span>Font</span>
+        <div class="theme-panel__font-control">
+          <StageSelect id={`stage-font-${section}`} label={`${SECTION_LABELS[section]} font`}
+            value={s.fontFamily ?? ""} options={sectionFontOptions}
+            onchange={(value) => {
+              if (value) updateSection(section, { fontFamily: value });
+              else clearSectionFont(section);
+            }} />
+        </div>
+        </div>
 
+        <div class="theme-panel__color">
+        <span class="theme-panel__field-label">Color</span>
         <ColorField
           value={s.color ?? DEFAULT_SECTION_COLOR[section]}
           title={`${SECTION_LABELS[section]} color`}
           onchange={(hex) => updateSection(section, { color: hex })}
         />
+        </div>
 
+        <label class="theme-panel__field">
+        <span class="theme-panel__scale-label">Size <span class="theme-panel__scale-value">{Math.round((s.scale ?? 1) * 100)}%</span></span>
         <input
           type="range"
           class="theme-panel__scale"
@@ -114,99 +126,136 @@
           oninput={(e) => updateSection(section, { scale: clampSectionScale(parseFloat((e.target as HTMLInputElement).value)) })}
           aria-label={`${SECTION_LABELS[section]} size`}
         />
-        <span class="theme-panel__scale-value">{Math.round((s.scale ?? 1) * 100)}%</span>
-
-        <button type="button" class="theme-panel__reset" onclick={() => onchange(resetSection(theme, section))}>Reset</button>
+        </label>
       </div>
     {/each}
   </div>
+  </div>
 
   <div class="theme-panel__footer">
-    <button type="button" class="theme-panel__reset-all" onclick={() => onchange(resetAllStageTheme())}>Reset all</button>
+    <button type="button" class="theme-panel__reset-all stage-control-button" onclick={() => onchange(resetAllStageTheme())}>Reset all</button>
+  </div>
   </div>
 </div>
 
 <style>
   .theme-panel {
     position: absolute; inset: 0; z-index: 20;
-    background: var(--overlay-bg);
+    background: var(--overlay-bg, rgba(0, 0, 0, 0.55));
     display: flex; align-items: center; justify-content: center;
-    padding: 1rem;
-    font-family: "Inter", -apple-system, sans-serif;
+    padding: clamp(0.5rem, 2vw, 1.5rem);
+    box-sizing: border-box; overflow: hidden;
+    font-family: var(--stage-control-font, "Inter", -apple-system, sans-serif);
   }
-  .theme-panel__header, .theme-panel__global, .theme-panel__sections, .theme-panel__footer {
-    background: var(--bg-elevated);
-  }
-  .theme-panel > * {
-    width: 100%; max-width: 640px;
-  }
-  .theme-panel {
-    flex-direction: column;
-    gap: 0;
+  .theme-panel__sheet {
+    display: flex; flex-direction: column;
+    width: 100%; max-width: 960px; max-height: 100%; min-height: 0;
+    overflow: hidden;
+    background: var(--bg-elevated, #181b21);
+    border: 1px solid var(--stage-control-border, #344752); border-radius: var(--stage-control-radius, 3px);
+    box-shadow: 0 12px 48px #0005;
   }
   .theme-panel__header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0.9rem 1.1rem;
-    border: 1px solid var(--border); border-bottom: none;
-    border-radius: 10px 10px 0 0;
+    gap: 1rem; flex: 0 0 auto;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border, #2a2e36);
   }
-  .theme-panel__header h2 { margin: 0; font-size: 1rem; color: var(--text); }
-  .theme-panel__close {
-    background: none; border: none; color: var(--text-muted); cursor: pointer;
-    font-size: 1.1rem; line-height: 1; padding: 0.2rem 0.4rem;
+  .theme-panel__header h2 { margin: 0; font-size: 1.15rem; color: var(--text, #e4e6eb); }
+  .theme-panel__body {
+    min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: 1rem; scrollbar-gutter: stable;
   }
-  .theme-panel__close:hover { color: var(--text); }
-
   .theme-panel__global {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.7rem 1.1rem;
-    border: 1px solid var(--border); border-top: none;
-    color: var(--text-soft); font-size: 0.85rem;
+    display: grid; gap: 0.5rem; margin-bottom: 1.25rem;
+    color: var(--text, #e4e6eb); font-size: 1rem; font-weight: 600;
   }
-
   .theme-panel__sections {
-    border: 1px solid var(--border); border-top: none;
-    max-height: 55vh; overflow-y: auto;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem;
   }
   .theme-panel__row {
-    display: flex; align-items: center; gap: 0.6rem;
-    padding: 0.6rem 1.1rem;
-    border-top: 1px solid var(--border);
+    display: grid; align-content: start; gap: 1rem; min-width: 0;
+    padding: 1rem;
+    border: 1px solid var(--stage-control-border, #344752); border-radius: var(--stage-control-radius, 3px);
+    background: var(--bg, #14161b);
   }
-  .theme-panel__row:first-child { border-top: none; }
+  .theme-panel__row-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  }
   .theme-panel__label {
-    flex: 0 0 7rem;
-    color: var(--text); font-size: 0.85rem; font-weight: 600;
+    margin: 0; color: var(--text, #e4e6eb); font-size: 1rem; font-weight: 600;
   }
-  .theme-panel__font {
-    flex: 1 1 8rem; min-width: 0;
-    background: var(--bg-input); color: var(--text);
-    border: 1px solid var(--border-strong); border-radius: 6px;
-    padding: 0.3rem 0.4rem; font-size: 0.8rem;
+  .theme-panel__field, .theme-panel__color {
+    display: grid; gap: 0.5rem; min-width: 0;
+    color: var(--text-soft, #c6cad2); font-size: 0.9rem;
   }
-  .theme-panel__scale {
-    flex: 1 1 6rem; min-width: 3rem;
+  .theme-panel__font-control {
+    min-width: 0;
+  }
+  .theme-panel__scale-label {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
   }
   .theme-panel__scale-value {
-    flex: 0 0 3rem; text-align: right;
-    color: var(--text-muted); font-size: 0.78rem;
+    color: var(--text, #e4e6eb); font-size: 1rem; font-variant-numeric: tabular-nums;
+  }
+  .theme-panel__scale {
+    appearance: none; width: 100%; min-width: 0; height: 48px; margin: 0;
+    background: transparent; cursor: pointer; accent-color: var(--accent, #6fd99b);
+  }
+  .theme-panel__scale::-webkit-slider-runnable-track {
+    height: 8px; border-radius: 4px; background: var(--border-strong, #3a414c);
+  }
+  .theme-panel__scale::-webkit-slider-thumb {
+    appearance: none; width: 32px; height: 32px; margin-top: -12px;
+    border: 2px solid var(--text, #e4e6eb); border-radius: 50%; background: var(--accent, #6fd99b);
+  }
+  .theme-panel__scale::-moz-range-track {
+    height: 8px; border-radius: 4px; background: var(--border-strong, #3a414c);
+  }
+  .theme-panel__scale::-moz-range-thumb {
+    width: 28px; height: 28px; border: 2px solid var(--text, #e4e6eb);
+    border-radius: 50%; background: var(--accent, #6fd99b);
+  }
+  .theme-panel__color :global(.colorfield) {
+    display: grid; grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: start; gap: 0.75rem; min-width: 0;
+  }
+  .theme-panel__color :global(.swatches) {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(48px, 1fr)); gap: 8px;
+  }
+  .theme-panel__color :global(.swatch) {
+    width: 100%; min-width: 48px; height: 48px; border-radius: var(--stage-control-radius, 3px);
+    border-color: var(--stage-control-border, #344752);
+  }
+  .theme-panel__color :global(.swatch.sel) {
+    outline-color: var(--accent, #6fd99b);
+  }
+  .theme-panel__color :global(input[type="color"]) {
+    width: 48px; height: 48px; padding: 3px; box-sizing: border-box; border-radius: var(--stage-control-radius, 3px);
+    background: var(--stage-control-background, #111b23); border-color: var(--stage-control-border, #344752);
+  }
+  .theme-panel :global(button), .theme-panel input {
+    touch-action: manipulation;
+  }
+  .theme-panel input:focus-visible, .theme-panel__color :global(input:focus-visible) {
+    outline: 2px solid var(--stage-control-accent, #baff3f); outline-offset: -4px;
   }
   .theme-panel__reset {
-    flex: 0 0 auto;
-    background: none; border: 1px solid var(--border-strong); border-radius: 6px;
-    color: var(--text-muted); cursor: pointer;
-    padding: 0.25rem 0.55rem; font-size: 0.75rem;
+    flex: 0 0 auto; min-width: 4.5em;
   }
-  .theme-panel__reset:hover { color: var(--text); border-color: var(--border-stronger); }
-
   .theme-panel__footer {
-    display: flex; justify-content: flex-end;
-    padding: 0.7rem 1.1rem;
-    border: 1px solid var(--border); border-top: none;
-    border-radius: 0 0 10px 10px;
+    display: flex; justify-content: flex-end; flex: 0 0 auto;
+    padding: 0.75rem 1rem; border-top: 1px solid var(--border, #2a2e36);
   }
   .theme-panel__reset-all {
-    background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn-text);
-    border-radius: 6px; cursor: pointer; padding: 0.35rem 0.8rem; font-size: 0.8rem;
+    min-width: 6.25em;
+  }
+  @media (max-width: 680px) {
+    .theme-panel__sections { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 420px), (max-height: 420px) {
+    .theme-panel__header, .theme-panel__footer { padding: 0.5rem 0.75rem; }
+    .theme-panel__body { padding: 0.75rem; }
+    .theme-panel__row { padding: 0.75rem; }
   }
 </style>

@@ -107,6 +107,16 @@ bool bosun_runtime_dispatch(bosun_runtime_t *runtime, const bosun_json_doc_t *do
 bool bosun_runtime_action(bosun_runtime_t *runtime, const bosun_json_doc_t *doc,
     int action_token);
 bool bosun_runtime_supported(const char *message_type);
+typedef enum {
+    BOSUN_INPUT_OK, BOSUN_INPUT_INVALID, BOSUN_INPUT_STALE, BOSUN_INPUT_BUSY,
+    BOSUN_INPUT_UNBOUND
+} bosun_input_result_t;
+/* Admit one complete short gesture against the displayed profile/location.
+ * raw_pressed is sampled at admission, in addition to the physical FSM guard.
+ * No remote press is left held and no action is emitted on rejection. */
+bosun_input_result_t bosun_runtime_activate_switch(bosun_runtime_t *runtime,
+    const char *switch_name, unsigned bank, unsigned slot, const char *profile,
+    uint32_t now_ms, uint16_t raw_pressed);
 /* Board presence detection is external; absent jacks remain silent. */
 void bosun_runtime_expression_present(bosun_runtime_t *runtime, unsigned jack, bool present);
 

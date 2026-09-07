@@ -52,6 +52,9 @@ static bool submit(const char *json, bool action) {
 static void tick(uint32_t now, uint16_t pressed) { bosun_runtime_tick(&runtime, now, pressed, 0, 0); }
 static void edge(uint32_t now, uint16_t pressed) { tick(now, pressed); tick(now + 5, pressed); }
 static void expect(size_t index, uint8_t status, uint8_t a, uint8_t b, size_t length) {
+    if (index >= sent || packets[index].length != length)
+        fprintf(stderr, "Expected packet %zu/%zu: %02x %u %u (%zu bytes); actual length %zu\n",
+            index, sent, status, a, b, length, index < sent ? packets[index].length : 0);
     assert(index < sent && packets[index].length == length);
     assert(packets[index].data[0] == status && packets[index].data[1] == a);
     if (length == 3) assert(packets[index].data[2] == b);
@@ -391,6 +394,152 @@ static void test_kemper_slow_bank_snapshot(void) {
     }
 }
 
+static bosun_input_result_t activate(const char *name, uint32_t now) {
+    return bosun_runtime_activate_switch(&runtime, name, config.bank, config.slot, "test", now, 0);
+}
+
+static void test_remote_modes(void) {
+    fixture(NULL, "{\"bindings\":["
+        "{\"switch\":\"1\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":1}]}}},"
+        "{\"switch\":\"2\",\"mode\":\"latched\",\"actions\":{\"toggle_on\":{\"messages\":[{\"type\":\"cc\",\"cc\":2,\"value\":127}]},\"toggle_off\":{\"messages\":[{\"type\":\"cc\",\"cc\":2,\"value\":0}]}}},"
+        "{\"switch\":\"3\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}},"
+        "{\"switch\":\"4\",\"mode\":\"long_press_alt\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":4}]},\"long_press\":{\"messages\":[{\"type\":\"cc\",\"cc\":99}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_OK && sent == 0);
+    tick(10, 0); expect(0, 0xb0, 1, 0, 3);
+    assert(activate("2", 20) == BOSUN_INPUT_OK && runtime.switches[1].latched_on);
+    tick(20, 0); expect(1, 0xb0, 2, 127, 3);
+    edge(30, 2); assert(!runtime.switches[1].latched_on); expect(2, 0xb0, 2, 0, 3);
+    edge(40, 0);
+    assert(activate("2", 50) == BOSUN_INPUT_OK && runtime.switches[1].latched_on);
+    tick(50, 0); expect(3, 0xb0, 2, 127, 3);
+    assert(activate("3", 60) == BOSUN_INPUT_OK);
+    assert(sent == 6 && !runtime.queue_count && !runtime.waiting && !runtime.held_mask);
+    expect(4, 0x90, 60, 100, 3); expect(5, 0x80, 60, 64, 3);
+    assert(activate("4", 70) == BOSUN_INPUT_OK);
+    tick(70, 0); expect(6, 0xb0, 4, 0, 3);
+    tick(2000, 0); assert(sent == 7);
+    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i)
+        assert(runtime.switches[i].stable && runtime.switches[i].last_raw);
+}
+
+static void test_remote_guards(void) {
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"latched\",\"actions\":{\"toggle_on\":{\"messages\":[{\"type\":\"cc\"}]}}}]}");
+    assert(activate("unknown", 10) == BOSUN_INPUT_INVALID);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 0, 1, "test", 10, 0) == BOSUN_INPUT_INVALID);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 2, 1, "test", 10, 0) == BOSUN_INPUT_STALE);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 1, 2, "test", 10, 0) == BOSUN_INPUT_STALE);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 1, 1, "removed", 10, 0) == BOSUN_INPUT_STALE);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 1, 1, "", 10, 0) == BOSUN_INPUT_STALE);
+    assert(activate("2", 10) == BOSUN_INPUT_UNBOUND);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 1, 1, "test", 10, 4) == BOSUN_INPUT_BUSY);
+    tick(10, 4); assert(activate("1", 11) == BOSUN_INPUT_BUSY); /* Debouncing another pedal. */
+    tick(15, 4); assert(activate("1", 16) == BOSUN_INPUT_BUSY); /* Physically held. */
+    edge(20, 0);
+    runtime.preview_active = true; assert(activate("1", 30) == BOSUN_INPUT_BUSY); runtime.preview_active = false;
+    runtime.waiting = true; assert(activate("1", 30) == BOSUN_INPUT_BUSY); runtime.waiting = false;
+    runtime.switches[2].tap_pending = true;
+    assert(activate("1", 30) == BOSUN_INPUT_BUSY); runtime.switches[2].tap_pending = false;
+    assert(submit("{\"type\":\"cc\"}", false));
+    assert(activate("1", 30) == BOSUN_INPUT_BUSY);
+    assert(!runtime.switches[0].latched_on && !sent && runtime.queue_count == 1);
+    tick(30, 0);
+    assert(bosun_runtime_activate_switch(&runtime, "1", 1, 1, NULL, 40, 0) == BOSUN_INPUT_OK);
+    tick(40, 0); assert(runtime.switches[0].latched_on && sent == 2);
+    /* A missing toggle-off never flips the shared physical latch. */
+    assert(activate("1", 50) == BOSUN_INPUT_UNBOUND && runtime.switches[0].latched_on);
+    assert(!runtime.queue_count && sent == 2);
+}
+
+static void test_remote_momentary_atomic(void) {
+    static const char *const invalid_messages[] = {
+        "{\"type\":\"delay\",\"ms\":1}", "{\"type\":\"captain_patch\",\"bank\":1,\"slot\":2}",
+        "{\"type\":\"captain_bank_step\"}", "{\"type\":\"note_off\",\"note\":999}"
+    };
+    char json[14000];
+    for (unsigned i = 0; i < sizeof invalid_messages / sizeof *invalid_messages; ++i) {
+        snprintf(json, sizeof json, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{"
+            "\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},"
+            "\"release\":{\"messages\":[%s]}}}]}", invalid_messages[i]);
+        fixture(NULL, json);
+        assert(activate("1", 10) == BOSUN_INPUT_INVALID);
+        assert(!sent && !runtime.queue_count && runtime.switches[0].stable && !runtime.waiting);
+    }
+    size_t at = (size_t)snprintf(json, sizeof json, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[");
+    for (unsigned i = 0; i < BOSUN_RUNTIME_COMMANDS_PER_TICK + 1; ++i)
+        at += (size_t)snprintf(json + at, sizeof json - at, "%s{\"type\":\"cc\"}", i ? "," : "");
+    snprintf(json + at, sizeof json - at, "]}}}]}");
+    fixture(NULL, json); assert(activate("1", 10) == BOSUN_INPUT_INVALID && !sent && !runtime.queue_count);
+
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}}]}");
+    fail_send = true;
+    assert(activate("1", 10) == BOSUN_INPUT_OK && sent == 2 && runtime.midi_tx_failed == 2);
+    expect(1, 0x80, 60, 64, 3); assert(!runtime.queue_count && !runtime.waiting);
+    assert(bosun_config_create("other", "Other", "generic", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "other", false) == BOSUN_STORE_OK);
+    bosun_runtime_config_changed(&runtime); assert(sent == 2); /* Release already completed. */
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{\"release\":{\"messages\":[{\"type\":\"cc\",\"cc\":4}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_OK && sent == 1); expect(0, 0xb0, 4, 0, 3);
+}
+
+static void test_remote_double_tap(void) {
+    fixture("{\"double_tap_window_ms\":30}", "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"double_tap\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":1}]},\"double_tap\":{\"messages\":[{\"type\":\"cc\",\"cc\":2}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_OK && runtime.switches[0].tap_pending && !runtime.queue_count);
+    assert(activate("1", 30) == BOSUN_INPUT_OK && !runtime.switches[0].tap_pending);
+    tick(30, 0); expect(0, 0xb0, 2, 0, 3);
+    assert(activate("1", 50) == BOSUN_INPUT_OK);
+    tick(80, 0); assert(sent == 1); tick(81, 0); expect(1, 0xb0, 1, 0, 3);
+    assert(activate("1", 100) == BOSUN_INPUT_OK);
+    edge(110, 1); expect(2, 0xb0, 2, 0, 3); edge(120, 0);
+    edge(150, 1); edge(160, 0);
+    assert(activate("1", 175) == BOSUN_INPUT_OK); tick(175, 0); expect(3, 0xb0, 2, 0, 3);
+    /* Expired tap is retained when a new request arrives before the next tick. */
+    assert(activate("1", 200) == BOSUN_INPUT_OK);
+    assert(activate("1", 231) == BOSUN_INPUT_OK && runtime.switches[0].tap_pending);
+    tick(231, 0); expect(4, 0xb0, 1, 0, 3);
+    tick(262, 0); expect(5, 0xb0, 1, 0, 3);
+    assert(activate("1", UINT32_MAX - 10) == BOSUN_INPUT_OK);
+    assert(activate("1", 5) == BOSUN_INPUT_OK); tick(5, 0); expect(6, 0xb0, 2, 0, 3);
+}
+
+static void test_remote_navigation_tuner(void) {
+    fixture("{\"kemper\":{},\"long_press_actions\":{\"1\":[{\"type\":\"cc\",\"cc\":99}]},\"preset_navigation\":{\"switches\":{\"1\":2,\"2\":2,\"3\":3}}}",
+        "{\"bindings\":[{\"switch\":\"2\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":2}]}}}]}");
+    patch(1, 2, "{\"on_enter\":{\"messages\":[{\"type\":\"cc\",\"cc\":3}]}}");
+    bosun_runtime_config_changed(&runtime);
+    assert(activate("3", 10) == BOSUN_INPUT_UNBOUND);
+    assert(activate("2", 10) == BOSUN_INPUT_OK); tick(10, 0);
+    assert(config.slot == 1); expect(sent - 1, 0xb0, 2, 0, 3); /* Kemper may also poll its state. */
+    runtime.kemper.state.tuner_active = true;
+    assert(activate("1", 20) == BOSUN_INPUT_OK);
+    assert(runtime.commands[runtime.queue_head].type == BOSUN_COMMAND_KEMPER);
+    tick(20, 0); assert(config.slot == 2 && !runtime.kemper.state.tuner_active);
+    assert(runtime.switches[0].stable && runtime.switches[0].last_raw);
+    expect(sent - 1, 0xb0, 3, 0, 3);
+}
+
+static void test_remote_validation_and_kemper_latch(void) {
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"latched\",\"actions\":{\"toggle_on\":{\"messages\":[{\"type\":\"cc\"},{\"type\":\"not-supported\"}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_INVALID);
+    assert(!runtime.switches[0].latched_on && !runtime.queue_count && !sent);
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"double_tap\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":999}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_INVALID && !runtime.switches[0].tap_pending);
+    fixture(NULL, "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"long_press_alt\",\"actions\":{\"long_press\":{\"messages\":[{\"type\":\"cc\"}]}}}]}");
+    assert(activate("1", 10) == BOSUN_INPUT_UNBOUND && !runtime.queue_count && !sent);
+    fixture("{\"kemper\":{}}", "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"latched\",\"actions\":{\"toggle_on\":{\"messages\":[{\"type\":\"kemper_effect_toggle\",\"slot\":\"Reverb\",\"value\":\"on\"}]},\"toggle_off\":{\"messages\":[{\"type\":\"kemper_effect_toggle\",\"slot\":\"Reverb\",\"value\":\"off\"}]}}}]}");
+    const uint8_t effect_on[] = {0xb0,29,127}, effect_off[] = {0xb0,29,0};
+    bosun_runtime_feed_midi(&runtime, 0, effect_on, sizeof effect_on, 1);
+    assert(runtime.switches[0].latched_on);
+    assert(activate("1", 10) == BOSUN_INPUT_OK && !runtime.switches[0].latched_on);
+    tick(10, 0); expect(sent - 1, 0xb0, 29, 0, 3);
+    bosun_runtime_feed_midi(&runtime, 0, effect_off, sizeof effect_off, 15);
+    assert(!runtime.switches[0].latched_on);
+    assert(activate("1", 20) == BOSUN_INPUT_OK && runtime.switches[0].latched_on);
+    tick(20, 0); expect(sent - 1, 0xb0, 29, 127, 3);
+    bosun_runtime_feed_midi(&runtime, 0, effect_on, sizeof effect_on, 25);
+    assert(runtime.switches[0].latched_on);
+    edge(30, 1); assert(!runtime.switches[0].latched_on); expect(sent - 1, 0xb0, 29, 0, 3);
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-runtime-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -398,6 +547,9 @@ int main(void) {
     test_kemper_context_and_follow();
     test_kemper_bank_snapshot_follow();
     test_kemper_slow_bank_snapshot();
+    test_remote_modes(); test_remote_guards(); test_remote_momentary_atomic();
+    test_remote_double_tap(); test_remote_navigation_tuner();
+    test_remote_validation_and_kemper_latch();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Runtime: atomic queue/patch macros, delays and rollover, switch bindings, preview/setlist, expression and MIDI monitor/learn/reconnect passed");
     return 0;

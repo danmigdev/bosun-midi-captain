@@ -577,6 +577,106 @@ static void fire(bosun_runtime_t *rt, unsigned index, unsigned trigger) {
     if (admitted && rt->binding_fired) rt->binding_fired(rt->binding_context, (uint8_t)index, (uint8_t)trigger);
 }
 
+static bool collect_input(bosun_runtime_t *rt, unsigned index, unsigned trigger,
+    bosun_runtime_command_t *commands, unsigned *count) {
+    const bosun_runtime_binding_t *binding = &rt->bindings[index];
+    if (trigger == 0 && binding->preset_slot) {
+        if (*count == BOSUN_RUNTIME_COMMANDS) { ++rt->queue_overflows; return false; }
+        bosun_runtime_command_t command = {0};
+        command.type = BOSUN_COMMAND_PATCH; command.first = rt->config->bank;
+        command.second = binding->preset_slot;
+        commands[(*count)++] = command;
+        return true;
+    }
+    const bosun_json_doc_t *doc = &rt->config->patch_doc;
+    int action = field(doc, field(doc, binding->patch_token, "actions"), action_names[trigger]);
+    if (action < 0) return true;
+    if (!is_type(doc, action, BOSUN_JSON_OBJECT)) { ++rt->invalid_messages; return false; }
+    return collect(rt, doc, field(doc, action, "messages"), commands, count, BOSUN_RUNTIME_COMMANDS);
+}
+
+static bool immediate_input_command(const bosun_runtime_command_t *command) {
+    switch ((bosun_command_type_t)command->type) {
+    case BOSUN_COMMAND_CC: case BOSUN_COMMAND_PC: case BOSUN_COMMAND_NOTE_ON:
+    case BOSUN_COMMAND_NOTE_OFF: case BOSUN_COMMAND_BANK_PC: case BOSUN_COMMAND_KEMPER:
+    case BOSUN_COMMAND_KEMPER_QUERY: return true;
+    default: return false;
+    }
+}
+
+bosun_input_result_t bosun_runtime_activate_switch(bosun_runtime_t *rt,
+    const char *name, unsigned bank, unsigned slot, const char *profile,
+    uint32_t now_ms, uint16_t raw_pressed) {
+    if (!rt || !rt->config || !name || !bosun_config_coordinates(bank, slot)) return BOSUN_INPUT_INVALID;
+    unsigned index = 0;
+    while (index < BOSUN_RUNTIME_SWITCHES && strcmp(name, switch_names[index])) ++index;
+    if (index == BOSUN_RUNTIME_SWITCHES) return BOSUN_INPUT_INVALID;
+    if (bank != rt->config->bank || slot != rt->config->slot ||
+        (profile && strcmp(profile, rt->config->profile))) return BOSUN_INPUT_STALE;
+    if (rt->config_revision != rt->config->revision || rt->patch_revision != rt->config->patch_revision)
+        bosun_runtime_config_changed(rt);
+    if (raw_pressed || rt->queue_count || rt->waiting || rt->preview_active) return BOSUN_INPUT_BUSY;
+    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i)
+        if (!rt->switches[i].stable || !rt->switches[i].last_raw ||
+            (i != index && rt->switches[i].tap_pending)) return BOSUN_INPUT_BUSY;
+
+    bosun_switch_mode mode = (bosun_switch_mode)rt->bindings[index].mode;
+    bosun_switch_fsm next = rt->switches[index];
+    uint8_t triggers = 0, admitted_triggers = 0;
+    if (!bosun_switch_tap(&next, now_ms, mode, &triggers)) return BOSUN_INPUT_BUSY;
+    bosun_runtime_command_t commands[BOSUN_RUNTIME_COMMANDS];
+    unsigned count = 0;
+    uint32_t overflows = rt->queue_overflows;
+    /* The first double tap has no immediate action. Validate both possible
+     * outcomes before accepting its ordinary, firmware-owned tap deadline. */
+    if (mode == BOSUN_SWITCH_DOUBLE_TAP && next.tap_pending) {
+        bool bound = false;
+        for (unsigned trigger = 0; trigger <= 5; trigger += 5) {
+            count = 0;
+            if (!collect_input(rt, index, trigger, commands, &count))
+                return rt->queue_overflows != overflows ? BOSUN_INPUT_BUSY : BOSUN_INPUT_INVALID;
+            bound |= count != 0;
+        }
+        if (!bound) return BOSUN_INPUT_UNBOUND;
+        count = 0;
+    }
+    bool exit_tuner = rt->kemper_enabled && rt->kemper.state.tuner_active &&
+        bosun_config_bool(&rt->config->device_doc, 0, "tuner_exit_on_press", true);
+    if (exit_tuner) {
+        bosun_runtime_command_t command = {0};
+        command.type = BOSUN_COMMAND_KEMPER; command.index = BOSUN_KEMPER_TUNER;
+        command.channel = rt->kemper.channel;
+        commands[count++] = command;
+    }
+    unsigned initial_count = count;
+    for (unsigned trigger = 0; trigger < 6; ++trigger) {
+        if (!(triggers & (1u << trigger))) continue;
+        unsigned before = count;
+        if (!collect_input(rt, index, trigger, commands, &count))
+            return rt->queue_overflows != overflows ? BOSUN_INPUT_BUSY : BOSUN_INPUT_INVALID;
+        if (count != before) admitted_triggers |= (uint8_t)(1u << trigger);
+    }
+    if (count == initial_count && !(mode == BOSUN_SWITCH_DOUBLE_TAP && next.tap_pending))
+        return BOSUN_INPUT_UNBOUND;
+    if (mode == BOSUN_SWITCH_MOMENTARY) {
+        /* Profile changes cancel the ordinary queue. A remote momentary tap
+         * must finish both configured actions before another command can
+         * replace it; delay/navigation macros cannot meet that contract. */
+        if (count > BOSUN_RUNTIME_COMMANDS_PER_TICK) return BOSUN_INPUT_INVALID;
+        for (unsigned i = 0; i < count; ++i)
+            if (!immediate_input_command(&commands[i])) return BOSUN_INPUT_INVALID;
+    }
+    if (!enqueue(rt, commands, count, false)) return BOSUN_INPUT_BUSY;
+    rt->now_ms = now_ms;
+    rt->switches[index] = next;
+    ++rt->revision;
+    for (unsigned trigger = 0; trigger < 6; ++trigger)
+        if ((admitted_triggers & (1u << trigger)) && rt->binding_fired)
+            rt->binding_fired(rt->binding_context, (uint8_t)index, (uint8_t)trigger);
+    if (mode == BOSUN_SWITCH_MOMENTARY) drain(rt);
+    return BOSUN_INPUT_OK;
+}
+
 void bosun_runtime_expression_present(bosun_runtime_t *rt, unsigned jack, bool present) {
     if (rt && jack >= 1 && jack <= 2) rt->expression[jack - 1].present = present;
 }

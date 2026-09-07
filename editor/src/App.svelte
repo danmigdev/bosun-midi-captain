@@ -4,6 +4,7 @@
   import MidiLearn, { type PatchCapture } from "./components/MidiLearn.svelte";
   import Installer from "./components/Installer.svelte";
   import FirmwarePushOverlay from "./components/FirmwarePushOverlay.svelte";
+  import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
   import MaintenancePanel from "./components/MaintenancePanel.svelte";
   import MidiMonitor from "./components/MidiMonitor.svelte";
   import Dashboard from "./components/Dashboard.svelte";
@@ -32,6 +33,12 @@
   import SetlistView from "./components/SetlistView.svelte";
   import StageView from "./components/StageView.svelte";
   import { IS_ANDROID } from "./lib/platform";
+  import {
+    bundledUpdateManifest, hubSupportsUnifiedUpdate, isTerminalUpdate, readPendingUpdate,
+    unifiedUpdateAvailable, unifiedUpdateStatus,
+    type BundledUpdateManifest, type PendingUpdate,
+  } from "./lib/unified-update";
+  import { isNativeFirmware, supportsFirmwareFileOta, type FirmwareIdentity } from "./lib/firmware-capabilities";
   import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
   import type { SetlistItem } from "./lib/setlists";
   import {
@@ -41,6 +48,7 @@
     disconnect,
     fallbackManifest,
     isConnected,
+    isInternallyRetriedFirmwareError,
     listPorts,
     tcpConnect,
     midiBridgeStart,
@@ -138,6 +146,18 @@
   // false = closed; true = push the bundled firmware; a string = push from
   // that resolved firmware-root path (user-picked folder or extracted zip).
   let showFirmwarePush = $state<string | boolean>(false);
+  // Invalidate an accepted update when its connection or firmware changes.
+  // The overlay stays mounted through its own final reboot to report completion.
+  let firmwarePushSession = 0;
+  let isFirmwarePushAllowed = $state<() => boolean>(() => false);
+  function openFirmwarePush(source?: string) {
+    if (IS_ANDROID || !connected || hubUpdateOnly || !supportsFirmwareFileOta(deviceInfo) || showFirmwarePush
+      || showUnifiedUpdate || unifiedJob?.endpoint === connectedPortName) return;
+    const session = firmwarePushSession;
+    isFirmwarePushAllowed = () => !appDestroyed && connected
+      && session === firmwarePushSession && supportsFirmwareFileOta(deviceInfo);
+    showFirmwarePush = source || true;
+  }
   // First-launch wizard. Shown until the user explicitly dismisses it
   // (the flag is persisted in localStorage so we don't pester returning
   // users). The wizard is also useful as a "reset" if the user clears
@@ -243,7 +263,7 @@
   // an informational note below, since installing it would need a newer
   // editor build.)
   let updateAvailable = $derived.by<boolean>(() => {
-    if (!deviceInfo?.fw || !bundledVersion) return false;
+    if (!canUpdateFirmware || !deviceInfo?.fw || !bundledVersion) return false;
     return cmpVer(bundledVersion, deviceInfo.fw) > 0;
   });
   // A published release newer than what we bundle: a hint to ship a new
@@ -255,7 +275,54 @@
   // One-shot check on mount (fire-and-forget).
   $effect(() => { void checkForFirmwareUpdate(); });
 
-  let deviceInfo = $state<{ fw: string; device: string; bank: number; slot: number; profile?: string } | null>(null);
+  let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean }) | null>(null);
+  let hubUpdateOnly = $state(false);
+  let canUpdateFirmware = $derived(connected && !hubUpdateOnly && supportsFirmwareFileOta(deviceInfo));
+  let bundledUpdate = $state<BundledUpdateManifest | null>(null);
+  let hubCanUpdate = $state(false);
+  let unifiedJob = $state<PendingUpdate | null>(readPendingUpdate());
+  let showUnifiedUpdate = $state(false);
+  let unifiedEndpoint = $state("");
+  let canUseUnifiedUpdate = $derived(!IS_ANDROID && connected && !hubUpdateOnly && networkSession && hubCanUpdate && !!bundledUpdate);
+  let hasUnifiedUpdate = $derived(canUseUnifiedUpdate && unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate));
+  let canResumeUnifiedUpdate = $derived(!IS_ANDROID && connected && networkSession && unifiedJob?.endpoint === connectedPortName);
+  function openUnifiedUpdate() {
+    if ((!canUseUnifiedUpdate && !canResumeUnifiedUpdate) || showFirmwarePush || showUnifiedUpdate) return;
+    unifiedEndpoint = connectedPortName;
+    showUnifiedUpdate = true;
+  }
+  function unifiedUpdateCompleted() {
+    window.dispatchEvent(new CustomEvent("connection-resynced"));
+  }
+  function rememberUnifiedJob(pending: PendingUpdate | null) {
+    unifiedJob = pending;
+    if (pending?.endpoint === connectedPortName) hubUpdateOnly = true;
+    else if (!pending && hubUpdateOnly) {
+      hubUpdateOnly = false;
+      if (connected) void refetchAll();
+    }
+  }
+  $effect(() => {
+    if (!IS_ANDROID) void bundledUpdateManifest().then(value => { bundledUpdate = value; });
+  });
+  $effect(() => {
+    hubCanUpdate = false;
+    if (IS_ANDROID || !connected || !networkSession) return;
+    const endpoint = connectedPortName;
+    const pending = unifiedJob;
+    // A previously committed job remains resumable even if this editor no
+    // longer bundles its package or the pedal is temporarily in its bootloader.
+    if (pending?.endpoint === endpoint) {
+      unifiedEndpoint = endpoint;
+      showUnifiedUpdate = true;
+    }
+    if (!bundledUpdate) return;
+    let cancelled = false;
+    void hubSupportsUnifiedUpdate().then(supported => {
+      if (!cancelled) hubCanUpdate = supported;
+    });
+    return () => { cancelled = true; };
+  });
   // Active profile's plugin kind (e.g. "ampero_ii_stage" or "kemper_player").
   // Drives which plugin-specific UI sections are shown.
   let activeKind = $state<string>("");
@@ -337,6 +404,8 @@
     // diagnostic (this self-heal used to be invisible) rather than routing
     // changes, so they don't disturb whatever page is on screen.
     unsubReconnecting = await onReconnecting(() => {
+      firmwarePushSession++;
+      deviceInfo = null;
       showToast("info", "Pedal link recovering…");
     });
     unsubReconnected = await onReconnected(async () => {
@@ -387,6 +456,7 @@
       _switchingProfile = true;
       busy = true; error = "";
       // Clear UI immediately so user sees the transition happening
+      firmwarePushSession++;
       deviceInfo = null; manifest = null; currentPatch = null;
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
       globalDevice = null; activeKind = "";
@@ -439,6 +509,7 @@
       try {
         connected = await isConnected();
         if (connected) {
+          firmwarePushSession++;
           deviceInfo = null; manifest = null; currentPatch = null;
           patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
           globalDevice = null; activeKind = "";
@@ -455,7 +526,7 @@
     window.addEventListener("bosun-open-firmware-push", (e: Event) => {
       if (IS_ANDROID) return;
       const src = (e as CustomEvent<{ source?: string }>).detail?.source;
-      showFirmwarePush = src || true;
+      openFirmwarePush(src);
     }, appEventOptions);
 
     // Rust-level disconnect (firmware rebooted via OTA / manual reboot /
@@ -568,6 +639,7 @@
       busy = true;
     }
     connected = false; learning = false;
+    firmwarePushSession++;
     deviceInfo = null; manifest = null; currentPatch = null;
     patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
     globalDevice = null; activeKind = "";
@@ -602,6 +674,24 @@
       connected = false;
       networkBootstrapPending = (async () => {
         try {
+          hubUpdateOnly = false;
+          const pending = !IS_ANDROID ? readPendingUpdate() : null;
+          if (pending?.endpoint === connectedPortName) {
+            // During installation or recovery the hub is reachable while the
+            // Captain may be in BOOTSEL. Attach to its saved job first; normal
+            // bootstrap would receive maintenance_busy and close this link.
+            let needsUpdateSession = true;
+            try {
+              const status = await unifiedUpdateStatus(pending.job);
+              needsUpdateSession = !isTerminalUpdate(status) || status.phase === "recovery-required";
+            } catch { /* the update window reports status errors and can retry */ }
+            if (needsUpdateSession) {
+              hubUpdateOnly = true;
+              connected = await isConnected();
+              error = connected ? "" : "Reconnect to the Raspberry Pi to check the saved update.";
+              return;
+            }
+          }
           const result = await readNetworkBootstrap();
           activeProfile = result.profiles.find(profile => profile.active) ?? null;
           activeKind = activeProfile?.kind ?? "";
@@ -618,6 +708,7 @@
       })();
       return networkBootstrapPending;
     }
+    hubUpdateOnly = false;
     try {
       await cmd.getDeviceInfo();
       // The plugin manifest is GLOBAL (not per-profile): it lists the available
@@ -698,7 +789,7 @@
   $effect(() => {
     // The manifest is global (works with no profile), so retry it regardless -
     // it's needed to populate plugin kinds/fields even before a profile exists.
-    if (!connected || manifest || manifestGaveUp) {
+    if (!connected || hubUpdateOnly || manifest || manifestGaveUp) {
       if (_manifestTimer !== undefined) { clearTimeout(_manifestTimer); _manifestTimer = undefined; }
       return;
     }
@@ -742,7 +833,7 @@
   // virgin pedal prompts again. Avoids the dead-end "firmware: not_found" state.
   let _onboardingForced = false;
   $effect(() => {
-    if (connected && deviceInfo && !hasActiveProfile && !showOnboarding && !_onboardingForced) {
+    if (connected && !hubUpdateOnly && deviceInfo && !hasActiveProfile && !showOnboarding && !_onboardingForced) {
       _onboardingForced = true;
       showOnboarding = true;
     }
@@ -898,6 +989,7 @@
       await disconnect();
       // Drop the MIDI relay too - the pedal is going away.
       if (!networkSession) await stopBridge();
+      firmwarePushSession++;
       connected = false; deviceInfo = null; manifest = null;
       currentPatch = null; learning = false; captures = [];
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
@@ -1108,7 +1200,7 @@
   // preset-nav switch despite a correct, saved mapping (2026-08-14).
   let settingsRequested = $state(false);
   $effect(() => {
-    if ((page === "settings" || page === "stage") && connected && !globalDevice && !settingsRequested) {
+    if ((page === "settings" || page === "stage") && connected && !hubUpdateOnly && !globalDevice && !settingsRequested) {
       settingsRequested = true;
       cmd.getGlobal().catch(() => {});
     }
@@ -1169,10 +1261,15 @@
     if (!isLogNoise(msg)) pushLog(msg);
     switch (msg.type) {
       case "DEVICE_INFO":
+        if (deviceInfo && (deviceInfo.fw !== msg.fw || deviceInfo.device !== msg.device
+          || deviceInfo.native_experimental !== msg.native_experimental
+          || deviceInfo.firmware_ota !== msg.firmware_ota)) firmwarePushSession++;
         deviceInfo = {
           fw: msg.fw, device: msg.device,
+          native_experimental: msg.native_experimental, firmware_ota: msg.firmware_ota,
           bank: msg.current.bank, slot: msg.current.slot,
           profile: (msg as { profile?: string }).profile ?? "",
+          stage_input: msg.stage_input === true,
         };
         // NOTE: do NOT auto-fetch the current Captain patch on connect.
         // currentPatch stays null until the user explicitly opens one
@@ -1214,12 +1311,17 @@
         midiLearnTable = msg.table?.pc_to_patch ? msg.table : { pc_to_patch: [] };
         break;
       case "ERROR": {
+        if (isInternallyRetriedFirmwareError(msg)) break;
         const err = (msg as { error?: string }).error || "unknown";
         const of  = (msg as { of?: string }).of;
         const detail = (msg as { detail?: string }).detail;
         // A profile-less (freshly-installed) pedal answers "not_found" to
         // manifest/patch queries. That's expected, not a fault - don't toast it.
         if (err === "not_found" && !deviceInfo?.profile) { break; }
+        if (err === "background_busy" && of === "LIST_PATCHES") {
+          flashFirmwareError("The Raspberry Pi is busy: the patch list could not be refreshed. Try Refresh list.");
+          break;
+        }
         flashFirmwareError(
           `firmware: ${err}${of ? ` (handling ${of})` : ""}${detail ? ` - ${detail}` : ""}`,
         );
@@ -1414,7 +1516,7 @@
 
 </script>
 
-<div class="app" class:mobile={isMobile} class:stage={page === "stage"}>
+<div class="app" class:mobile={isMobile} class:app--stage={page === "stage"}>
   {#if page !== "stage"}
   <header class="topbar">
     <!-- Mobile hamburger button -->
@@ -1466,11 +1568,22 @@
       <!-- Firmware update: desktop-only (needs the bundled UF2 + firmware
            tree shipped as Tauri resources, which don't exist on Android). -->
       {#if !IS_ANDROID}
-        {#if updateStatus.kind === "checking"}
+        {#if canResumeUnifiedUpdate}
+          <button class="topbtn primary" onclick={openUnifiedUpdate}>Check Bosun update</button>
+        {:else if hasUnifiedUpdate}
+          <button class="topbtn primary" onclick={openUnifiedUpdate}
+                  title="Updates Bosun through the Raspberry Pi and preserves your profiles automatically.">
+            Update Bosun ({deviceInfo?.fw} -> {bundledUpdate?.release})
+          </button>
+        {:else if isNativeFirmware(deviceInfo)}
+          <span class="fwstatus muted" title="Native firmware uses UF2 updates. CircuitPython file updates are unavailable.">Native firmware · v{deviceInfo?.fw}</span>
+        {:else if !canUpdateFirmware}
+          <span class="fwstatus muted" title="CircuitPython file updates are unavailable for this device.">{deviceInfo?.fw ? `Firmware v${deviceInfo.fw}` : "Reading firmware information…"}</span>
+        {:else if updateStatus.kind === "checking"}
           <span class="fwstatus muted">Checking for updates…</span>
         {:else if updateAvailable}
           <button class="topbtn primary"
-                  onclick={() => showFirmwarePush = true}
+                  onclick={() => openFirmwarePush()}
                   title={onlineNewer
                     ? `Installs the bundled firmware v${bundledVersion}. A newer release (v${onlineNewer}) is available online - update the editor to ship it.`
                     : `Installs the bundled firmware v${bundledVersion}`}>
@@ -1561,6 +1674,15 @@
             <button class="linkbtn" onclick={() => showInstaller = true} disabled={busy}>Install firmware →</button>
           </p>
         {/if}
+      </div>
+    </main>
+  {:else if hubUpdateOnly}
+    <main class="welcome">
+      <div class="card">
+        <h1>Bosun update on Raspberry Pi</h1>
+        <p>The Raspberry Pi is managing the saved update. Check its status before using the pedal editor.</p>
+        <button class="big" onclick={openUnifiedUpdate}>Check Bosun update</button>
+        <button class="linkbtn" onclick={doDisconnect}>Disconnect</button>
       </div>
     </main>
   {:else}
@@ -1757,15 +1879,16 @@
               <p>Plugin manifest didn't arrive after {MANIFEST_MAX_RETRIES} retries.</p>
               <p class="muted">
                 The connected port acknowledged the PING but never returned a MANIFEST.
-                Most common cause: the firmware on the pedal is older than this editor
-                and has a known bug truncating large responses silently. Re-flash the
-                firmware bundled with this editor to fix it. If a retry now succeeds
-                you can ignore the re-flash.
+                Retry to request it again, or disconnect and reconnect the pedal.
+                {#if canUpdateFirmware && !IS_ANDROID}
+                  Older CircuitPython firmware can truncate large responses. If retries
+                  fail, re-flash the firmware bundled with this editor.
+                {/if}
               </p>
               <div class="row toolbar">
                 <button class="primary" onclick={retryManifest}>Retry</button>
-                {#if !IS_ANDROID}
-                  <button onclick={() => showFirmwarePush = true}>Re-flash firmware</button>
+                {#if !IS_ANDROID && canUpdateFirmware}
+                  <button onclick={() => openFirmwarePush()}>Re-flash firmware</button>
                 {/if}
                 <button onclick={doDisconnect}>Disconnect</button>
               </div>
@@ -1839,7 +1962,10 @@
           <header class="pageHead">
             <h2>Maintenance</h2>
           </header>
-          <MaintenancePanel {connected} {activeProfile} />
+          <MaintenancePanel {connected} {activeProfile} firmwareInfo={deviceInfo}
+                            unifiedRelease={canUseUnifiedUpdate ? bundledUpdate?.release : null}
+                            resumeUnifiedUpdate={canResumeUnifiedUpdate}
+                            onUnifiedUpdate={openUnifiedUpdate} />
 
         {:else if page === "monitor"}
           <header class="pageHead">
@@ -1901,8 +2027,17 @@
         installerAutoPrompt = false;
       }} />
   {/if}
+  {#if showUnifiedUpdate && !IS_ANDROID}
+    <UnifiedFirmwareUpdate manifest={bundledUpdate} installed={deviceInfo?.fw} endpoint={unifiedEndpoint}
+                           isCurrentConnection={() => connected && networkSession && connectedPortName === unifiedEndpoint}
+                           onJob={rememberUnifiedJob}
+                           onComplete={unifiedUpdateCompleted}
+                           onClose={() => showUnifiedUpdate = false} />
+  {/if}
+
   {#if showFirmwarePush && !IS_ANDROID}
     <FirmwarePushOverlay
+      isUpdateAllowed={isFirmwarePushAllowed}
       source={typeof showFirmwarePush === "string" ? showFirmwarePush : undefined}
       onClose={() => showFirmwarePush = false} />
   {/if}
@@ -2014,7 +2149,9 @@
        .primary  -> accent
        .danger   -> err
    */
-  :global(button) {
+  /* Stage supplies its own shared controls in the kiosk, desktop and Android.
+     Keep editor hover/disabled defaults outside that surface as well. */
+  :global(button:not(:where(.stage *))) {
     font: inherit;
     cursor: pointer;
     background: var(--bg-hover);
@@ -2026,29 +2163,29 @@
     font-weight: 500;
     transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
-  :global(button:hover:not(:disabled)) {
+  :global(button:not(:where(.stage *)):hover:not(:disabled)) {
     background: var(--bg-hover-strong);
     border-color: var(--border-stronger);
     color: var(--text);
   }
-  :global(button:disabled) { opacity: 0.4; cursor: not-allowed; }
-  :global(button.primary) {
+  :global(button:not(:where(.stage *)):disabled) { opacity: 0.4; cursor: not-allowed; }
+  :global(button.primary:not(:where(.stage *))) {
     background: var(--accent-bg);
     border-color: var(--accent-border);
     color: var(--accent);
     font-weight: 600;
   }
-  :global(button.primary:hover:not(:disabled)) {
+  :global(button.primary:not(:where(.stage *)):hover:not(:disabled)) {
     background: var(--accent-hover-bg);
     border-color: var(--accent-hover-border);
     color: var(--accent);
   }
-  :global(button.danger) {
+  :global(button.danger:not(:where(.stage *))) {
     background: var(--err-bg);
     border-color: var(--err-border);
     color: var(--err);
   }
-  :global(button.danger:hover:not(:disabled)) {
+  :global(button.danger:not(:where(.stage *)):hover:not(:disabled)) {
     background: var(--err-bg);
     border-color: var(--err);
     color: var(--err);
@@ -2504,10 +2641,10 @@
   }
 
   /* ---------- Stage Mode: full-screen immersive ---------- */
-  .app.stage .topbar { display: none; }
-  .app.stage .shell { flex-direction: column; }
-  .app.stage .sidebar { display: none; }
-  .app.stage .content {
+  .app.app--stage .topbar { display: none; }
+  .app.app--stage .shell { flex-direction: column; }
+  .app.app--stage .sidebar { display: none; }
+  .app.app--stage .content {
     flex: 1; padding: 0; overflow: hidden;
     max-width: none; margin: 0;
   }

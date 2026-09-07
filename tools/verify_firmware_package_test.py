@@ -98,6 +98,39 @@ class FirmwarePackageVerificationTests(unittest.TestCase):
                     VERIFY.verify_directory(self.resources, staged)
                 shutil.rmtree(staged)
 
+    def test_native_update_is_verified_in_staging_and_finished_apk(self):
+        native_update = self.resources / "update" / "bosun-update.zip"
+        native_update.parent.mkdir()
+        native_update.write_bytes(b"verified native update")
+        staged = self._stage()
+        expected_count = len(VERIFY._directory_inventory(self.resources))
+        self.assertEqual(VERIFY.verify_directory(self.resources, staged), expected_count)
+        self.assertEqual(
+            VERIFY.verify_archive(self.resources, self._archive(staged), "assets"),
+            expected_count,
+        )
+
+        packaged_update = staged / "update" / "bosun-update.zip"
+        for content in (None, b"obsolete native update"):
+            with self.subTest(content=content):
+                if content is None:
+                    packaged_update.unlink()
+                else:
+                    packaged_update.write_bytes(content)
+                with self.assertRaisesRegex(VERIFY.VerificationError, "update/bosun-update.zip"):
+                    VERIFY.verify_directory(self.resources, staged)
+                with self.assertRaisesRegex(VERIFY.VerificationError, "update/bosun-update.zip"):
+                    VERIFY.verify_archive(self.resources, self._archive(staged), "assets")
+
+    def test_unexpected_native_update_is_rejected_when_source_has_none(self):
+        staged = self._stage()
+        (staged / "update").mkdir()
+        (staged / "update" / "bosun-update.zip").write_bytes(b"obsolete checkout update")
+        with self.assertRaisesRegex(VERIFY.VerificationError, "unexpected: update/bosun-update.zip"):
+            VERIFY.verify_directory(self.resources, staged)
+        with self.assertRaisesRegex(VERIFY.VerificationError, "unexpected: update/bosun-update.zip"):
+            VERIFY.verify_archive(self.resources, self._archive(staged), "assets")
+
     def test_apk_rejects_missing_stale_and_unexpected_resource_entries(self):
         staged = self._stage()
         archives = []

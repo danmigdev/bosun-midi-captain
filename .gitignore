@@ -37,3 +37,16 @@ Thumbs.db
 *.keystore
 *.jks
 release/
+
+# Local planning, reports and access configuration are not public documentation.
+docs/plans/
+docs/private/
+docs/ui-test-screenshots/steps_*.json
+.env
+.env.*
+!.env.example
+.secrets/
+id_rsa
+id_ed25519
+*.key
+*.pem

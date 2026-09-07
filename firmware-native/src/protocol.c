@@ -67,7 +67,7 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * command envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "table", "on", "request", "mode"};
+        "table", "on", "request", "mode", "switch"};
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
         for (unsigned k = 0; k < sizeof names / sizeof *names; ++k)
@@ -319,7 +319,7 @@ static void device_info(bosun_protocol_t *p) {
     /* Kiosk treats preset_navigation as the fast-bootstrap capability marker
      * and skips GET_GLOBAL, so it also needs the compact Screen projection. */
     tft_projection(p, d);
-    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false,\"reboot_modes\":[\"normal\",\"bootloader\"]");
+    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
 }
 /* The reply buffer is also the file read workspace. Validate saved JSON before
  * exposing it on wire; these handlers no longer need request tokens afterward. */
@@ -357,10 +357,20 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     }
     if (!text_arg(p, "type", p->type, sizeof p->type, false) || !*p->type ||
         !text_arg(p, "profile", profile, sizeof profile, true)) { error(p, "invalid_request"); goto done; }
-    if (*profile && !bosun_config_profile_exists(profile)) { error(p, "no_such_profile"); goto done; }
+    if (*profile && strcmp(p->type, "ACTIVATE_SWITCH") && !bosun_config_profile_exists(profile))
+        { error(p, "no_such_profile"); goto done; }
     begin(p, "ACK");
     if (!strcmp(p->type, "PING")) string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
     else if (!strcmp(p->type, "GET_DEVICE_INFO")) device_info(p);
+    else if (!strcmp(p->type, "ACTIVATE_SWITCH")) {
+        char name[8];
+        if (!coordinates(p, &bank, &slot, false) || !text_arg(p, "switch", name, sizeof name, false))
+            { error(p, "invalid_request"); goto done; }
+        bosun_input_result_t result = bosun_runtime_activate_switch(rt, name, bank, slot,
+            get(p, "profile") >= 0 ? profile : NULL, now_ms, p->read_switches ? p->read_switches() : 0);
+        static const char *const errors[] = {NULL, "invalid_request", "stale_state", "busy", "unbound"};
+        if (result != BOSUN_INPUT_OK) { error(p, errors[result]); goto done; }
+    }
     else if (!strcmp(p->type, "GET_CONTEXT")) {
         begin(p, "CONTEXT"); field(&p->writer, "context");
         if (!bosun_runtime_context(rt, &p->writer)) p->writer.failed = true;
@@ -384,6 +394,9 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             /* Empty profile identifies the active store to hub cache keys;
              * the active profile id is already available via DEVICE_INFO. */
             string(&p->writer, "profile", *profile ? profile : "");
+            /* Explicit-profile reads are saved-file reads, even for the
+             * current profile. Only this active-store reply includes drafts. */
+            if (!*profile) string(&p->writer, "active_profile", c->profile);
             field(&p->writer, "patch"); r = read_value(p, profile, NULL, bank, slot);
         } else if (!strcmp(p->type, "PUT_PATCH")) {
             if (!object_arg(p, "patch", &data, &length)) r = BOSUN_STORE_INVALID;

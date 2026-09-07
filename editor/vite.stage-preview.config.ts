@@ -11,7 +11,11 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
-  server: { port: 4732, strictPort: true },
+  server: {
+    port: 4732, strictPort: true,
+    // Desktop/Android packaging must not reload an isolated Stage check.
+    watch: { ignored: ["**/src-tauri/**", "**/dist/**", "**/dist-stage/**"] },
+  },
   resolve: {
     alias: [
       {

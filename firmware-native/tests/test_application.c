@@ -522,6 +522,35 @@ static void test_usb_diagnostics_console(void) {
     capture_usb_rx = false;
 }
 
+static void test_remote_tap_gpio_and_disconnect(void) {
+    fixture();
+    assert(bosun_config_create("test", "Test", "generic", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&app.config, "test", false) == BOSUN_STORE_OK);
+    const char patch[] = "{\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}}]}";
+    assert(bosun_config_put_patch(&app.config, NULL, 1, 1, patch, sizeof patch - 1, now) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&app.config, 1, 1) == BOSUN_STORE_OK);
+    const char request[] = "{\"type\":\"ACTIVATE_SWITCH\",\"id\":\"tap\",\"switch\":\"1\",\"bank\":1,\"slot\":1,\"profile\":\"test\"}\n";
+    memcpy(input, request, sizeof request - 1); input_length = sizeof request - 1;
+    cdc = true; switches = 2;
+    assert(app.runtime.switches[1].last_raw); /* GPIO edge has not reached the FSM yet. */
+    tick();
+    assert(strstr((char *)output, "\"error\":\"busy\""));
+    assert(!midi_length[0] && !midi_length[1]);
+    switches = 0;
+    for (unsigned i = 0; i < 10; ++i) tick();
+    output_length = 0; output[0] = 0;
+    memcpy(input, request, sizeof request - 1); input_length = sizeof request - 1;
+    tick();
+    assert(strstr((char *)output, "\"type\":\"ACK\",\"id\":\"tap\""));
+    const uint8_t pair[] = {0x90,60,100,0x80,60,64};
+    for (unsigned port = 0; port < 2; ++port)
+        assert(midi_length[port] == sizeof pair && !memcmp(midi_output[port], pair, sizeof pair));
+    assert(!app.runtime.queue_count && !app.runtime.held_mask && app.runtime.switches[0].stable);
+    cdc = false;
+    for (unsigned i = 0; i < 100; ++i) tick();
+    assert(midi_length[0] == sizeof pair && midi_length[1] == sizeof pair);
+}
+
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
@@ -530,6 +559,7 @@ int main(void) {
     test_hold_label_matches_context();
     test_initial_patch_action();
     test_usb_diagnostics_console();
+    test_remote_tap_gpio_and_disconnect();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display and watchdog passed");
     return 0;

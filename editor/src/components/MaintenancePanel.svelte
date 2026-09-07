@@ -10,8 +10,15 @@
   import { pickFirmwareSource, prepareFirmwareSource } from "../lib/installer";
   import { IS_ANDROID } from "../lib/platform";
 
-  type Props = { connected: boolean; activeProfile?: ProfileInfo | null };
-  let { connected, activeProfile = null }: Props = $props();
+  import { isNativeFirmware, supportsFirmwareFileOta, type FirmwareIdentity } from "../lib/firmware-capabilities";
+
+  type Props = {
+    connected: boolean; activeProfile?: ProfileInfo | null; firmwareInfo?: FirmwareIdentity | null;
+    unifiedRelease?: string | null; resumeUnifiedUpdate?: boolean; onUnifiedUpdate?: () => void;
+  };
+  let { connected, activeProfile = null, firmwareInfo = null,
+    unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate }: Props = $props();
+  let canUpdateFirmware = $derived(connected && supportsFirmwareFileOta(firmwareInfo));
 
   let stats = $state<DeviceStats | null>(null);
   let statsErr = $state<string>("");
@@ -25,15 +32,17 @@
   let fwSrcMsg = $state<string>("");
 
   function openPush(source?: string) {
+    if (IS_ANDROID || !canUpdateFirmware) return;
     window.dispatchEvent(new CustomEvent("bosun-open-firmware-push",
       source ? { detail: { source } } : undefined));
   }
 
   async function pickAndPush(zip: boolean) {
+    if (IS_ANDROID || !canUpdateFirmware) return;
     fwSrcMsg = ""; fwSrcBusy = true;
     try {
       const src = await pickFirmwareSource(zip);
-      if (!src) return;                       // cancelled
+      if (!src || !canUpdateFirmware) return; // cancelled or device changed
       const root = await prepareFirmwareSource(src);
       openPush(root);
     } catch (e) {
@@ -618,7 +627,17 @@
   </section>
 
   {#if !IS_ANDROID}
+    {#if unifiedRelease || resumeUnifiedUpdate}
+      <section class="block">
+        <h3>Update Bosun</h3>
+        <p class="muted small">The Raspberry Pi installs the update and backs up and transfers your profiles automatically.</p>
+        <button class="primary" disabled={!connected} onclick={onUnifiedUpdate}>
+          {resumeUnifiedUpdate ? "Check Bosun update" : `Update Bosun to ${unifiedRelease}`}
+        </button>
+      </section>
+    {/if}
     <section class="block">
+      {#if canUpdateFirmware}
       <h3>Update firmware (OTA)</h3>
       <p class="muted small">
         Pushes a firmware tree to the pedal over USB - no bootloader, no drive,
@@ -627,10 +646,12 @@
         and reconnects when done.
       </p>
       <div class="row">
+        {#if !unifiedRelease}
         <button class="primary" disabled={!connected || fwSrcBusy}
                 onclick={() => openPush()}>
           Update from bundled
         </button>
+        {/if}
         <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(false)}>
           From folder…
         </button>
@@ -641,6 +662,22 @@
       {#if !connected}<p class="muted small">Connect the pedal first.</p>{/if}
       {#if fwSrcBusy}<p class="curr">Reading the selected firmware…</p>{/if}
       {#if fwSrcMsg}<p class="curr err">{fwSrcMsg}</p>{/if}
+      {:else}
+        <h3>Firmware</h3>
+        <p class="muted small">
+          {#if isNativeFirmware(firmwareInfo)}
+            {#if unifiedRelease || resumeUnifiedUpdate}
+              Use Update Bosun above to install the release and preserve your profiles.
+            {:else}
+              New Bosun releases can be installed through a Raspberry Pi with update support.
+            {/if}
+          {:else if firmwareInfo?.fw}
+            This device does not support CircuitPython firmware updates.
+          {:else}
+            Waiting for firmware information from the pedal.
+          {/if}
+        </p>
+      {/if}
     </section>
   {/if}
 

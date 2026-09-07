@@ -104,6 +104,63 @@ def test_server_smoke(tmp_path_factory=None):
     asyncio.run(body())
 
 
+def test_server_shutdown_closes_a_healthy_idle_tcp_client(monkeypatch):
+    async def body():
+        ready = asyncio.get_running_loop().create_future()
+
+        async def discovery_stub(host, tcp_port):
+            # Discover the real ephemeral TCP endpoint without reserving the
+            # machine-wide UDP discovery port used by another running hub.
+            assert host == "127.0.0.1" and tcp_port > 0
+            ready.set_result(tcp_port)
+            return None
+
+        monkeypatch.setattr("bosun_hub.server.serve_discovery", discovery_stub)
+        pedal = FakePedal()
+        server_task = asyncio.create_task(run(
+            f"tcp://127.0.0.1:{pedal.port}", host="127.0.0.1",
+            tcp_port=0, ws_port=0, http_port=0,
+        ))
+        writer = None
+        try:
+            port = await asyncio.wait_for(ready, timeout=3)
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            # Wait for the real upstream sentinel handshake, then establish
+            # that this connection is healthy before leaving it completely idle.
+            for attempt in range(50):
+                correlation = f"shutdown-health-{attempt}"
+                writer.write((json.dumps({"type": "PING", "id": correlation}) + "\n").encode())
+                await writer.drain()
+                reply = json.loads(await asyncio.wait_for(reader.readline(), timeout=2))
+                assert reply.get("id") == correlation
+                if reply.get("type") == "ACK":
+                    break
+                assert reply.get("type") == "ERROR" and reply.get("error") == "link_down", reply
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError("The hub never completed its upstream handshake")
+            assert not writer.is_closing() and not reader.at_eof()
+            server_task.cancel()
+            # Keep the client open throughout shutdown. Python 3.13 waits for
+            # accepted clients in Server.wait_closed(); older Python must also
+            # deliver EOF instead of leaking the handler after run() returns.
+            await asyncio.wait_for(asyncio.shield(server_task), timeout=2)
+            assert await asyncio.wait_for(reader.read(1), timeout=2) == b""
+        finally:
+            if writer is not None:
+                writer.close()
+                await writer.wait_closed()
+            if not server_task.done():
+                server_task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(server_task), timeout=2)
+            except asyncio.CancelledError:
+                pass
+            pedal.close()
+
+    asyncio.run(body())
+
+
 if __name__ == "__main__":
     try:
         test_server_smoke()

@@ -102,6 +102,10 @@ class DisconnectedHub:
     def __init__(self, target):
         self.started = False
         self.stopped = False
+        self.updates = self
+
+    async def wait(self):
+        pass
 
     def start(self):
         self.started = True

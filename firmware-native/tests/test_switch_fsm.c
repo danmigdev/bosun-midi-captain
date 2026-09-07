@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 static bosun_switch_result edge(bosun_switch_fsm *s, uint32_t now,
                                 bool high, bosun_switch_mode mode) {
@@ -70,8 +71,18 @@ static void double_tap_and_wrap(void) {
     assert(edge(&s, UINT32_MAX - 2, false, BOSUN_SWITCH_TAP).triggers == BOSUN_TRIGGER_PRESS);
 }
 
+static void invalid_remote_modes(void) {
+    bosun_switch_fsm state; bosun_switch_init(&state, NULL);
+    bosun_switch_fsm original = state;
+    uint8_t triggers = 255;
+    assert(!bosun_switch_tap(&state, 100, (bosun_switch_mode)-1, &triggers));
+    assert(!bosun_switch_tap(&state, 100, (bosun_switch_mode)6, &triggers));
+    assert(triggers == 255 && !memcmp(&state, &original, sizeof state));
+}
+
 int main(void) {
     tap_and_debounce(); long_press_and_reset(); momentary_hold(); double_tap_and_wrap();
+    invalid_remote_modes();
     puts("switch FSM: bounce, tap, hold, long, reset, double-tap, wrap passed");
     return 0;
 }

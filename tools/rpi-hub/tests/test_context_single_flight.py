@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bosun_hub.hub import Hub  # noqa: E402
@@ -193,7 +195,15 @@ def test_context_disconnect_and_link_down_fail_only_live_waiters_then_recover():
     _run(body())
 
 
-def test_context_mutation_barrier_queues_a_fresh_post_mutation_snapshot():
+@pytest.mark.parametrize("mutation,before_context,after_context", [
+    ({"type": "SWITCH_PATCH", "id": "switch", "bank": 2, "slot": 1},
+     {"bank": 1, "slot": 1}, {"bank": 2, "slot": 1}),
+    ({"type": "ACTIVATE_SWITCH", "id": "activate", "switch": "3", "bank": 1, "slot": 1},
+     {"bank": 1, "slot": 1, "kemper_block_X": "off"},
+     {"bank": 1, "slot": 1, "kemper_block_X": "on"}),
+])
+def test_context_mutation_barrier_queues_a_fresh_post_mutation_snapshot(
+        mutation, before_context, after_context):
     async def body():
         hub = Hub(None, context_timeout_s=1.0)
         link = RecordingLink()
@@ -203,7 +213,7 @@ def test_context_mutation_barrier_queues_a_fresh_post_mutation_snapshot():
 
         before.send('{"type":"GET_CONTEXT","id":"before"}')
         old_flight = json.loads(link.sent[0])["id"]
-        before.send('{"type":"SWITCH_PATCH","id":"switch","bank":2,"slot":1}')
+        before.send(json.dumps(mutation))
         after.send('{"type":"GET_CONTEXT","id":"after"}')
         assert len(link.sent) == 2  # context + mutation; no parallel snapshot
         assert len(hub._context_waiters) == 1
@@ -211,24 +221,25 @@ def test_context_mutation_barrier_queues_a_fresh_post_mutation_snapshot():
 
         hub._dispatch(json.dumps({
             "type": "CONTEXT", "id": old_flight,
-            "context": {"bank": 1, "slot": 1},
+            "context": before_context,
         }))
         assert (await _message(before))["id"] == "before"
         # Completing the old generation promotes exactly one post-barrier
-        # generation, ordered on the wire after SWITCH_PATCH.
+        # generation, ordered after the mutation, even without a firmware
+        # binding_fired/patch_switched event to invalidate the old snapshot.
         assert len(link.sent) == 3
-        assert json.loads(link.sent[1])["type"] == "SWITCH_PATCH"
+        assert json.loads(link.sent[1])["type"] == mutation["type"]
         fresh_flight = json.loads(link.sent[2])["id"]
         assert fresh_flight != old_flight
         assert after._queue.empty()
 
         hub._dispatch(json.dumps({
             "type": "CONTEXT", "id": fresh_flight,
-            "context": {"bank": 2, "slot": 1},
+            "context": after_context,
         }))
         assert await _message(after) == {
             "type": "CONTEXT", "id": "after",
-            "context": {"bank": 2, "slot": 1},
+            "context": after_context,
         }
         hub.stop()
 

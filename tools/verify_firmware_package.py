@@ -4,7 +4,8 @@
 The canonical packaging input is ``editor/src-tauri/resources`` after
 ``sync_firmware_resources.py`` has run.  Android additionally needs those
 files copied into its generated ``assets`` directory.  This checker compares
-the complete firmware/lib inventories plus ``circuitpython.uf2`` against
+the complete firmware/lib inventories, optional native ``update`` tree and
+``circuitpython.uf2`` against
 either that directory or a finished ZIP-compatible artifact such as an APK.
 Unrelated Android assets (the frontend and tauri.conf.json) are ignored.
 """
@@ -26,6 +27,7 @@ class VerificationError(RuntimeError):
 
 RESOURCE_FILE = "circuitpython.uf2"
 RESOURCE_TREES = ("firmware", "lib")
+OPTIONAL_RESOURCE_TREES = ("update",)
 # Git/checkouts can give adjacent tracked files slightly different mtimes.
 # Treat only a clearly newer source as evidence that its deploy-preferred
 # compiled sibling was not regenerated.
@@ -70,8 +72,10 @@ def _directory_inventory(root: Path) -> dict[str, str]:
 
     single = root / RESOURCE_FILE
     add_file(single, PurePosixPath(RESOURCE_FILE))
-    for tree_name in RESOURCE_TREES:
+    for tree_name in RESOURCE_TREES + OPTIONAL_RESOURCE_TREES:
         tree = root / tree_name
+        if tree_name in OPTIONAL_RESOURCE_TREES and not tree.exists() and not _is_link(tree):
+            continue
         if not tree.is_dir() or _is_link(tree):
             raise VerificationError(f"packaged resource tree is missing or unsafe: {tree}")
         for directory, dirnames, filenames in os.walk(tree, followlinks=False):
@@ -150,7 +154,7 @@ def _archive_inventory(archive: Path, prefix: str) -> dict[str, str]:
                 relative = PurePosixPath(*relative_parts)
                 in_scope = (
                     relative.as_posix() == RESOURCE_FILE
-                    or relative.parts[0] in RESOURCE_TREES
+                    or relative.parts[0] in RESOURCE_TREES + OPTIONAL_RESOURCE_TREES
                 )
                 if not in_scope:
                     continue
@@ -242,7 +246,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     target.add_argument("--archive", type=Path)
     parser.add_argument(
         "--prefix", default="",
-        help="archive path containing circuitpython.uf2, firmware and lib",
+        help="archive path containing circuitpython.uf2, firmware, lib and optional update",
     )
     return parser.parse_args(argv)
 

@@ -1,0 +1,2 @@
+# The hub pins the physical Captain USB path and flash identity before access.
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="0003", GROUP="plugdev", MODE="0660"

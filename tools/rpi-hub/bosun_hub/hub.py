@@ -36,6 +36,7 @@ import secrets
 from typing import Optional
 
 from .link import UpstreamLink
+from .update_service import UpdateService
 
 log = logging.getLogger("bosun_hub.hub")
 
@@ -100,7 +101,7 @@ _REQUEST_ID_STEM = "__bosun_req_"
 # snapshot ordered *after* the mutation instead of joining the old one.
 _CONTEXT_BARRIER_TYPES = {
     "PUT_GLOBAL", "PUT_PATCH", "PUT_BINDING", "DELETE_PATCH", "DISCARD",
-    "SWITCH_PATCH", "CREATE_PROFILE", "SWITCH_PROFILE", "DELETE_PROFILE",
+    "SWITCH_PATCH", "ACTIVATE_SWITCH", "CREATE_PROFILE", "SWITCH_PROFILE", "DELETE_PROFILE",
     "RENAME_PROFILE", "FACTORY_RESET", "REBOOT",
 }
 _CONTEXT_BARRIER_EVENTS = {"patch_switched", "binding_fired"}
@@ -234,6 +235,9 @@ class Hub:
             raise ValueError("request timeout must be positive")
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subs: set[Subscription] = set()
+        self._target = target
+        self._update_device_info = None
+        self.updates = UpdateService(self)
         self.link = UpstreamLink(
             target=target,
             on_line=self._on_upstream_line,
@@ -285,6 +289,7 @@ class Hub:
         self.link.start()
 
     def stop(self) -> None:
+        self.updates.stop()
         self._clear_all_context_waiters()
         self._clear_all_patch_waiters()
         self._clear_all_requests()
@@ -292,6 +297,12 @@ class Hub:
         self.link.stop()
         for sub in list(self._subs):
             sub.close()
+
+    def _restart_update_link(self) -> None:
+        self._update_device_info = None
+        self.link = UpstreamLink(target=self._target, on_line=self._on_upstream_line,
+                                 on_state=self._on_upstream_state)
+        self.link.start()
 
     # -- subscribers ----------------------------------------------------
 
@@ -426,13 +437,26 @@ class Hub:
         try:
             msg = json.loads(line)
         except (TypeError, ValueError):
+            if self.updates.maintenance:
+                return
             self.link.send(line)
             return
         if not isinstance(msg, dict):
+            if self.updates.maintenance:
+                return
             self.link.send(line)
             return
 
         kind = msg.get("type")
+        if self.updates.handle(sub, msg):
+            return
+        if kind == "PING" and self.updates.allows_local_ping():
+            self._offer_correlated(sub, "id" in msg, msg.get("id"), {"type": "ACK"})
+            return
+        if self.updates.maintenance:
+            response = {"type": "ERROR", "error": "maintenance_busy", "of": kind}
+            self._offer_correlated(sub, "id" in msg, msg.get("id"), response)
+            return
         if not isinstance(kind, str):
             self.link.send(line)
             return
@@ -1156,6 +1180,8 @@ class Hub:
             msg = json.loads(line)
         except (TypeError, ValueError):
             msg = None
+        if isinstance(msg, dict) and msg.get("type") == "DEVICE_INFO":
+            self._update_device_info = dict(msg)
         if isinstance(msg, dict) and self._consume_context_reply(msg):
             return
         if isinstance(msg, dict) and self._consume_patch_reply(msg):
@@ -1179,6 +1205,7 @@ class Hub:
     def _dispatch_status(self, line: str) -> None:
         try:
             if json.loads(line).get("link") == "down":
+                self._update_device_info = None
                 self._patch_cache.clear()
                 # Fail each request under its original id.  Raw clients do
                 # not receive HUB status frames, so this is also their only

@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { pushFirmware, type FirmwarePushState } from "../lib/firmware-push";
 
-  type Props = { onClose: () => void; source?: string };
-  let { onClose, source }: Props = $props();
+  type Props = { onClose: () => void; source?: string; isUpdateAllowed: () => boolean };
+  let { onClose, source, isUpdateAllowed }: Props = $props();
 
   // Named `pushState` instead of plain `state` because Svelte 4 store
   // heuristics in svelte-check flag every `state.foo` reference as a
@@ -20,7 +20,7 @@
     if (started) return;
     started = true;
     try {
-      await pushFirmware(s => (pushState = s), { source });
+      await pushFirmware(s => (pushState = s), { source, isUpdateAllowed });
     } catch { /* pushState.error is already populated */ }
   });
 

@@ -62,7 +62,9 @@ try {
         & $deployScript -ValidateOnly -SkipBuild -BundlePath $caseBundle | Out-Null
     }
 
-    $source = [IO.File]::ReadAllText($deployScript)
+    # The production remote helper sends LF. A Windows checkout may contain
+    # CRLF, which must not leak into the shell fixtures executed below.
+    $source = [IO.File]::ReadAllText($deployScript).Replace("`r`n", "`n")
     foreach ($forbidden in @(
         'apt-get',
         'npm install',
@@ -170,7 +172,7 @@ systemd-cgls() {
 }
 sleep() { :; }
 __KIOSK_SCRIPT__
-'@.Replace('__MODE__', $Mode).Replace('__KIOSK_SCRIPT__', $kioskScript)
+'@.Replace('__MODE__', $Mode).Replace('__KIOSK_SCRIPT__', $kioskScript).Replace("`r`n", "`n")
             $encodedProbe = [Convert]::ToBase64String(
                 [Text.UTF8Encoding]::new($false).GetBytes($probe)
             )

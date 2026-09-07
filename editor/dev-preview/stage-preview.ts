@@ -5,9 +5,14 @@
 // lets you preview Stage View's look with no pedal or Kemper attached.
 import { mount } from "svelte";
 import StageView from "../src/components/StageView.svelte";
-import type { Binding, BindingMode } from "../src/lib/protocol";
+import type { Binding, BindingMode, PatchSummary } from "../src/lib/protocol";
 
-type Win = typeof window & { __stageInbox?: string[]; __stageDoorbell?: () => void };
+type Win = typeof window & {
+  __stageInbox?: string[];
+  __stageDoorbell?: () => void;
+  __stagePreviewPatches?: PatchSummary[];
+  __stagePreviewTitle?: string;
+};
 
 function push(msg: unknown): Promise<void> {
   const w = window as Win;
@@ -27,7 +32,7 @@ const switches: Record<string, SwitchCfg> = Object.fromEntries(
   ]),
 );
 
-let deviceInfo = { fw: "0.6.0", device: "midi_captain_10", bank: 1, slot: 1 };
+let deviceInfo = { fw: "0.6.5-native", device: "midi_captain_10", bank: 1, slot: 1, stage_input: true };
 
 mount(StageView, {
   target: document.getElementById("app")!,
@@ -36,7 +41,7 @@ mount(StageView, {
     manifest: null,
     device: null,
     connected: true,
-    patches: [],
+    patches: (window as Win).__stagePreviewPatches ?? [],
     onExit: () => {},
   },
 });
@@ -147,6 +152,8 @@ function wireControls(): void {
 }
 
 wireControls();
+const initialTitle = (window as Win).__stagePreviewTitle;
+if (initialTitle !== undefined) (document.getElementById("rigName") as HTMLInputElement).value = initialTitle;
 // Push an initial state so Stage View isn't empty on first load.
 void pushPatch(
   (document.getElementById("rigName") as HTMLInputElement).value,

@@ -81,15 +81,29 @@ async def exercise(emulator):
             patches = await ws_request("bootstrap-list", "LIST_PATCHES", "PATCH_LIST")
             context = await ws_request("bootstrap-context", "GET_CONTEXT", "CONTEXT")
             assert device["current"] == {"bank": 1, "slot": 1}
+            assert device["stage_input"] is True
             assert len(patches["patches"]) == 2
             assert context["context"]["patch_name"] == "CLEAN"
             first_patch = await ws_request("cache-prime", "GET_PATCH", "PATCH", bank=1, slot=1)
             assert first_patch["patch"]["name"] == "CLEAN"
+            assert first_patch["profile"] == "" and first_patch["active_profile"] == "test"
+            cached_patch = await ws_request("cache-hit", "GET_PATCH", "PATCH", bank=1, slot=1)
+            assert cached_patch["patch"] == first_patch["patch"]
+            assert cached_patch["profile"] == "" and cached_patch["active_profile"] == "test"
 
-            changed = {"name": "UPDATED CLEAN", "bindings": [{"switch": "1", "mode": "tap", "label": "NEW BINDING"}]}
+            changed = {"name": "UPDATED CLEAN", "bindings": [{"switch": "1", "mode": "tap", "label": "NEW BINDING",
+                "actions": {"press": {"messages": [{"type": "cc", "cc": 7, "value": 64}]}}}]}
             await tcp_request("edit", "PUT_PATCH", "ACK", bank=1, slot=1, patch=changed)
             updated = await ws_request("cache-invalidated", "GET_PATCH", "PATCH", bank=1, slot=1)
             assert updated["patch"] == changed
+            assert updated["profile"] == "" and updated["active_profile"] == "test"
+            saved_patch = await tcp_request("saved-only", "GET_PATCH", "PATCH", bank=1, slot=1, profile="test")
+            assert saved_patch["patch"] == first_patch["patch"]
+            assert saved_patch["profile"] == "test" and "active_profile" not in saved_patch
+            # Saved-profile reads must not replace the cached active draft.
+            active_again = await ws_request("active-still-dirty", "GET_PATCH", "PATCH", bank=1, slot=1)
+            assert active_again["patch"] == changed and active_again["active_profile"] == "test"
+            await ws_request("stage-tap", "ACTIVATE_SWITCH", "ACK", switch="1", bank=1, slot=1, profile="test")
             # The current location didn't change: the UI needs an explicit
             # patch event to invalidate the old switch labels.
             await ws_request("after-edit-context", "GET_CONTEXT", "CONTEXT")
@@ -122,6 +136,7 @@ async def exercise(emulator):
             stats = await tcp_request("stats", "STATS", "STATS")
             assert stats["protocol_errors"] == 0, stats
             assert stats["queue_overflows"] == 0, stats
+            assert stats["midi_tx_count"] == 1 and stats["midi_tx_failed"] == 0, stats
 
             # Losing the editor must leave Stage connected and keep its own
             # request ids working; reconnecting the editor shares that link.
@@ -156,7 +171,7 @@ def main():
             assert (root / "untouched.txt").read_text() == "original sentinel"
         finally:
             emulator.close()
-    print("PASS native application + production hub: TCP/WS bootstrap, colliding IDs, UI events, cache invalidation, large JSON, 100 concurrent rounds, save and reconnect")
+    print("PASS native application + production hub: TCP/WS bootstrap, stage input, active-profile draft/cache identity, colliding IDs, UI events, large JSON, 100 concurrent rounds, save and reconnect")
 
 
 if __name__ == "__main__":

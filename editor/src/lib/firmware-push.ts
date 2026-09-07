@@ -10,12 +10,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   cmd,
+  sendAndAwait,
   waitForReboot,
   FirmwareCommandTimeoutError,
   type FirmwareFile,
   type FirmwareMessage,
 } from "./protocol";
 import { backupAllProfiles } from "./config-backup";
+import { assertFirmwareFileOta, FirmwareOtaUnavailableError } from "./firmware-capabilities";
 
 // 128 base64 characters decode to at most 96 bytes.  Larger chunks overlap
 // with the Captain's 256-byte USB-MIDI read and can exceed the RP2040's
@@ -46,6 +48,12 @@ export interface FirmwareFileUploadOptions {
   retries?: number;
   retryDelayMs?: number;
   onWarning?: (message: string) => void;
+  /** Live session guard; revoked permission must stop before another write. */
+  isUpdateAllowed?: () => boolean;
+}
+
+function requireUpdateAllowed(isUpdateAllowed?: () => boolean): void {
+  if (isUpdateAllowed?.() === false) throw new FirmwareOtaUnavailableError();
 }
 
 function base64Value(code: number): number {
@@ -137,10 +145,12 @@ export async function pushFirmwareFile(
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     const uncertainOffsets: number[] = [];
     try {
+      requireUpdateAllowed(options.isUpdateAllowed);
       const beginAck = requireAck(
         await commands.putFileBegin(path, expectedSize),
         `PUT_FILE_BEGIN ${path}`,
       );
+      requireUpdateAllowed(options.isUpdateAllowed);
       // Older firmware accepts unknown JSON fields, so merely sending `size`
       // does not prove END will enforce it.  Trust the ambiguity-resolving
       // path only when the firmware explicitly echoes this transaction's
@@ -162,11 +172,14 @@ export async function pushFirmwareFile(
         const chunkOffset = offset;
         offset += chunkSize;
         try {
+          requireUpdateAllowed(options.isUpdateAllowed);
           requireAck(
             await commands.putFileChunk(path, chunk, chunkOffset),
             `PUT_FILE_CHUNK ${path}@${chunkOffset}`,
           );
+          requireUpdateAllowed(options.isUpdateAllowed);
         } catch (error) {
+          requireUpdateAllowed(options.isUpdateAllowed);
           if (error instanceof FirmwareCommandTimeoutError &&
               error.commandType === "PUT_FILE_CHUNK") {
             if (!endVerifiesSize) {
@@ -193,15 +206,21 @@ export async function pushFirmwareFile(
         );
       }
 
+      requireUpdateAllowed(options.isUpdateAllowed);
       requireAck(await commands.putFileEnd(path), `PUT_FILE_END ${path}`);
+      requireUpdateAllowed(options.isUpdateAllowed);
       return { size: expectedSize, attempts: attempt, uncertainOffsets };
     } catch (error) {
+      if (error instanceof FirmwareOtaUnavailableError) throw error;
+      requireUpdateAllowed(options.isUpdateAllowed);
       if (attempt === retries) throw error;
       options.onWarning?.(
         `${path}: ${String(error)}; retrying complete file ` +
         `(${attempt + 1}/${retries})`,
       );
+      requireUpdateAllowed(options.isUpdateAllowed);
       await delay(retryDelayMs);
+      requireUpdateAllowed(options.isUpdateAllowed);
     }
   }
 
@@ -237,7 +256,7 @@ export interface FirmwarePushState {
  * Svelte $state-backed overlay without manual diffing. */
 export async function pushFirmware(
   onState: (s: FirmwarePushState) => void,
-  opts: { reboot?: boolean; source?: string } = {},
+  opts: { reboot?: boolean; source?: string; isUpdateAllowed?: () => boolean } = {},
 ): Promise<void> {
   const progress: FirmwarePushProgress = { total: 0, done: 0, current: "", log: [] };
   const state: FirmwarePushState = { phase: "listing", progress, error: "" };
@@ -250,27 +269,43 @@ export async function pushFirmware(
 
   push();
   try {
+    // Query the actual device at the start of every update. A stale version
+    // shown by the UI must never authorize pushing CircuitPython files onto
+    // native firmware, including updates selected from a folder or ZIP.
+    requireUpdateAllowed(opts.isUpdateAllowed);
+    const info = await sendAndAwait({ type: "GET_DEVICE_INFO" }, 8000);
+    requireUpdateAllowed(opts.isUpdateAllowed);
+    if (info.type !== "DEVICE_INFO") throw new FirmwareOtaUnavailableError();
+    assertFirmwareFileOta(info);
+
     // Always back up the user's current pedal state before we start
     // overwriting files on it. The bundled firmware tree includes
     // /config/profiles/... which would wipe customizations otherwise.
     state.phase = "backing-up";
     log("Backing up current pedal state");
     push();
+    requireUpdateAllowed(opts.isUpdateAllowed);
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
       const folder = await backupAllProfiles(`pre-firmware-update_${ts}`, msg => log(msg));
+      requireUpdateAllowed(opts.isUpdateAllowed);
       if (folder) log(`Backup saved to ${folder}`);
       else        log("No profiles on the pedal - nothing to back up");
     } catch (e) {
+      if (e instanceof FirmwareOtaUnavailableError) throw e;
+      requireUpdateAllowed(opts.isUpdateAllowed);
       // Don't block the update on a backup failure - log loudly and
       // proceed. The user can still abort by closing the modal.
       log("Backup failed: " + String(e) + " (continuing anyway)");
     }
+    requireUpdateAllowed(opts.isUpdateAllowed);
 
     log(opts.source ? "Listing firmware files from " + opts.source : "Listing firmware files");
+    requireUpdateAllowed(opts.isUpdateAllowed);
     const files = opts.source
       ? await invoke<FirmwareFile[]>("list_firmware_files_at", { root: opts.source })
       : await invoke<FirmwareFile[]>("list_firmware_files");
+    requireUpdateAllowed(opts.isUpdateAllowed);
     log(`${files.length} files, ${humanBytes(files.reduce((a, f) => a + f.size, 0))} total`);
     progress.total = files.length;
     state.phase = "pushing";
@@ -279,10 +314,16 @@ export async function pushFirmware(
     for (const file of files) {
       progress.current = file.dst;
       push();
+      requireUpdateAllowed(opts.isUpdateAllowed);
       const b64 = opts.source
         ? await invoke<string>("read_firmware_file_at_b64", { root: opts.source, rel: file.rel })
         : await invoke<string>("read_firmware_file_b64", { rel: file.rel });
-      const uploaded = await pushFirmwareFile(file.dst, b64, { onWarning: log });
+      requireUpdateAllowed(opts.isUpdateAllowed);
+      const uploaded = await pushFirmwareFile(file.dst, b64, {
+        onWarning: log,
+        isUpdateAllowed: opts.isUpdateAllowed,
+      });
+      requireUpdateAllowed(opts.isUpdateAllowed);
       progress.done += 1;
       log(`OK  ${file.dst}  (${humanBytes(uploaded.size)})`);
     }
@@ -290,6 +331,7 @@ export async function pushFirmware(
     if (opts.reboot !== false) {
       state.phase = "rebooting";
       push();
+      requireUpdateAllowed(opts.isUpdateAllowed);
       try { await cmd.reboot(); log("REBOOT sent"); }
       catch (e) { log("Reboot request failed: " + String(e)); }
       // Wait for the pedal to come back so the "done" screen reflects

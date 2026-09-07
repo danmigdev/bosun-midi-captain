@@ -16,8 +16,7 @@
 //! separate from the editor's CDC serial connection, so the bridge and the
 //! editor run together. The Android NDK midir backend requires a powered
 //! USB-C hub for simultaneous Kemper + pedal connections, which is why
-//! Android delegates to Kotlin instead. See docs/plans/kind-jumping-pike.md
-//! Phase 2.
+//! Android delegates to Kotlin instead.
 
 use serde::Serialize;
 

@@ -3,20 +3,14 @@
   Bump the project version everywhere it needs to match, in one call.
 
 .DESCRIPTION
-  Bosun keeps firmware and editor on the same semver (see
-  feedback_editor_firmware_version_aligned). Bumping "by hand" across a
-  session is error-prone in a specific way: firmware/lib/captain/__init__.py
-  is the source of truth, while editor/src-tauri/resources/{firmware,lib} are
-  gitignored derived copies of firmware/lib that the desktop app actually
-  bundles and pushes to the pedal (see project_resources_firmware_bundle).
-  Forgetting to re-sync __init__.py after a version-only edit ships a
-  portable build whose OWN "update available" check reads the OLD version
-  from the stale bundled copy - exactly what happened on 2026-08-15 (built
-  "0.5.13", the app still reported bundled 0.5.12, no update was offered).
+  Bosun keeps native C firmware and editor on the same semver. CircuitPython
+  firmware is retired: its source version and bundled recovery copies remain
+  frozen independently of the new release. Existing packaging still needs the
+  legacy resource trees, so the verified resource sync is retained.
 
   This script:
-    1. Writes the given version into the 4 canonical files + Cargo.lock's
-       bosun-editor package entry.
+    1. Aligns the editor and native firmware version fields,
+       including the npm/Cargo lockfiles and RP2040 program metadata.
     2. Runs the same verified firmware-resource sync used by every package
        build (exact firmware mirror plus additive vendored-library tree).
     3. Prints a diff-style summary so you can eyeball what moved.
@@ -54,17 +48,17 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$firmware   = Join-Path $repoRoot "firmware"
+$native     = Join-Path $repoRoot "firmware-native"
 $editor     = Join-Path $repoRoot "editor"
 $tauriDir   = Join-Path $editor "src-tauri"
 $resources  = Join-Path $tauriDir "resources"
 $syncScript = Join-Path $PSScriptRoot "sync_firmware_resources.py"
 $pythonExe  = (Get-Command python -ErrorAction Stop).Source
 
-# ---------- 1. Write the version into the 4 canonical files + Cargo.lock ----------
+# ---------- 1. Align canonical firmware/editor versions and lockfiles ----------
 
 function Set-VersionLine {
-    param([string] $Path, [string] $Pattern, [string] $Replacement)
+    param([string] $Path, [string] $Pattern, [string] $Replacement, [int] $ExpectedMatches = 0)
     if (-not (Test-Path $Path)) { throw "Missing: $Path" }
     $content = Get-Content -Path $Path -Raw
     # Check the pattern actually matched BEFORE replacing - comparing
@@ -74,17 +68,15 @@ function Set-VersionLine {
     if ($content -notmatch $Pattern) {
         throw "Version pattern not found in $Path - refusing to write (would silently no-op)."
     }
+    if ($ExpectedMatches -gt 0 -and [regex]::Matches($content, $Pattern).Count -ne $ExpectedMatches) {
+        throw "Expected $ExpectedMatches version fields in $Path - refusing a partial version update."
+    }
     $updated = $content -replace $Pattern, $Replacement
     Set-Content -Path $Path -Value $updated -NoNewline
     Write-Host "[ok  ] $Path" -ForegroundColor Green
 }
 
-Write-Host "[1/3] Writing version $Version into every version touchpoint in the repo" -ForegroundColor Yellow
-
-Set-VersionLine `
-    -Path (Join-Path $firmware "lib\captain\__init__.py") `
-    -Pattern 'VERSION = "\d+\.\d+\.\d+"' `
-    -Replacement "VERSION = `"$Version`""
+Write-Host "[1/3] Writing version $Version into maintained native/editor version fields" -ForegroundColor Yellow
 
 Set-VersionLine `
     -Path (Join-Path $editor "package.json") `
@@ -124,6 +116,28 @@ Set-VersionLine `
     -Path (Join-Path $editor "package-lock.json") `
     -Pattern '("name": "bosun-editor",\r?\n\s*"version": )"\d+\.\d+\.\d+"' `
     -Replacement "`${1}`"$Version`""
+
+# Native firmware shares the Bosun release number. Keep both CMake platform
+# branches, the runtime protocol version and picotool's program metadata aligned.
+# Require both project() declarations so a missing branch cannot silently ship
+# a different version from the host build or from the desktop update manifest.
+Set-VersionLine `
+    -Path (Join-Path $native "CMakeLists.txt") `
+    -Pattern '(?m)^(\s*project\(BosunNative VERSION )\d+\.\d+\.\d+(?= LANGUAGES\b)' `
+    -Replacement "`${1}$Version" `
+    -ExpectedMatches 2
+
+Set-VersionLine `
+    -Path (Join-Path $native "include\bosun\protocol.h") `
+    -Pattern '(?m)^(#define BOSUN_NATIVE_VERSION )"\d+\.\d+\.\d+-native(?:-experimental)?"' `
+    -Replacement "`${1}`"${Version}-native`"" `
+    -ExpectedMatches 1
+
+Set-VersionLine `
+    -Path (Join-Path $native "platform\rp2040\CMakeLists.txt") `
+    -Pattern '(?m)^(\s*pico_set_program_version\(\$\{target\} )"\d+\.\d+\.\d+-native(?:-experimental)?"(\))' `
+    -Replacement "`${1}`"${Version}-native`"`${2}" `
+    -ExpectedMatches 1
 
 # Android's versionName is READ AT GRADLE BUILD TIME from gen/android's own
 # tauri.properties - it is NOT derived from tauri.conf.json unless something
@@ -176,7 +190,7 @@ if (Test-Path $tauriPropsPath) {
 
 # ---------- 2. Verified resource sync ----------
 
-Write-Host "`n[2/3] Re-syncing firmware/ into the bundled resource trees" -ForegroundColor Yellow
+Write-Host "`n[2/3] Verifying frozen legacy firmware resources without changing their version" -ForegroundColor Yellow
 Invoke-NativeTool { & $pythonExe $syncScript --repo-root $repoRoot }
 if ($LASTEXITCODE -ne 0) {
     throw "Firmware resource sync failed"
@@ -188,5 +202,6 @@ Write-Host "`n[3/3] Resource hashes verified by the shared sync helper" -Foregro
 
 Write-Host "`nVersion bump complete: $Version" -ForegroundColor Green
 Write-Host "Next: run the build(s) that actually need it -" -ForegroundColor Cyan
+Write-Host "  tools\native-build.ps1 -Platform rp2040   (then regenerate the native update package for $Version)" -ForegroundColor Cyan
 Write-Host "  npm run package:portable   (from editor/, desktop dist)" -ForegroundColor Cyan
 Write-Host "  tools\build-android.ps1 -Deploy   (Android APK)" -ForegroundColor Cyan

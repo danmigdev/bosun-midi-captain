@@ -66,23 +66,17 @@ class FirmwareMpyBuildTests(unittest.TestCase):
             ("lib/captain/__init__.py", "lib/plugins/__init__.py"),
         )
 
-    def test_ci_and_release_gate_verify_checked_in_mpy_with_pinned_compiler(self):
-        expected_url = (
-            "https://adafruit-circuit-python.s3.amazonaws.com/bin/mpy-cross/"
-            "linux-amd64/mpy-cross-linux-amd64-9.2.7.static"
-        )
-        expected_hash = "3e5716e158ef977fb4f4f96e29500cdff6d85da34f507329fa7f6c2540d6faf8"
+    def test_retired_cp_runtime_is_not_a_routine_ci_or_release_gate(self):
         for workflow_name in ("ci.yml", "release.yml"):
             with self.subTest(workflow=workflow_name):
                 workflow = (
                     SCRIPT.parent.parent / ".github" / "workflows" / workflow_name
                 ).read_text(encoding="utf-8")
-                self.assertIn(expected_url, workflow)
-                self.assertIn(expected_hash, workflow)
-                self.assertIn(
-                    "build_firmware_mpy.py --compiler /tmp/mpy-cross --check",
-                    workflow,
-                )
+                self.assertNotIn("build_firmware_mpy.py", workflow)
+                self.assertNotIn("mpy-cross", workflow)
+                self.assertNotIn("compileall -q firmware", workflow)
+                self.assertNotIn("tools/run_all_tests.py", workflow)
+                self.assertIn("sync_firmware_resources.py", workflow)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

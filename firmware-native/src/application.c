@@ -277,6 +277,7 @@ bool bosun_application_init(bosun_application_t *app, const char *host_root) {
         app->config.has_patch && !app->runtime.kemper_enabled;
     bosun_protocol_init(&app->protocol, &app->runtime);
     app->protocol.read_led = bosun_board_leds_get;
+    app->protocol.read_switches = bosun_board_switches;
     bosun_display_init(&app->display);
     const bosun_expression_presence_backend_t presence_backend = {
         expression_charge, expression_release, expression_read

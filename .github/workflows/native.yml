@@ -7,7 +7,16 @@ on:
       - firmware-native/**
       - tools/native-build.*
       - tools/build_manifest_tail.py
+      - tools/package-native-update.py
+      - tools/verify-release-version.py
+      - tools/verify_release_version_test.py
+      - tools/rpi-hub/bosun_hub/update_package.py
+      - tools/rpi-hub/tests/test_update_package.py
+      - editor/package.json
+      - editor/src-tauri/tauri.conf.json
+      - editor/src-tauri/Cargo.toml
       - .github/workflows/native.yml
+      - .github/workflows/release.yml
       - .gitattributes
       - firmware/lib/captain/**
       - firmware/lib/plugins/**
@@ -16,7 +25,16 @@ on:
       - firmware-native/**
       - tools/native-build.*
       - tools/build_manifest_tail.py
+      - tools/package-native-update.py
+      - tools/verify-release-version.py
+      - tools/verify_release_version_test.py
+      - tools/rpi-hub/bosun_hub/update_package.py
+      - tools/rpi-hub/tests/test_update_package.py
+      - editor/package.json
+      - editor/src-tauri/tauri.conf.json
+      - editor/src-tauri/Cargo.toml
       - .github/workflows/native.yml
+      - .github/workflows/release.yml
       - .gitattributes
       - firmware/lib/captain/**
       - firmware/lib/plugins/**
@@ -50,10 +68,19 @@ jobs:
         run: python firmware-native/tests/test_hub_interop.py --emulator firmware-native/build-host/bosun_emulator
 
   rp2040:
-    name: RP2040 SDK 2.3.0 (ELF + UF2 bounds)
+    name: RP2040 SDK 2.3.0 (UF2 + verified update package)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify aligned editor and firmware versions
+        id: version
+        run: |
+          python tools/verify_release_version_test.py
+          python tools/verify-release-version.py --github-output "$GITHUB_OUTPUT"
       - name: Install ARM build tools
         run: >-
           sudo apt-get update && sudo apt-get install -y cmake ninja-build
@@ -61,6 +88,22 @@ jobs:
           g++ python3
       - name: Build firmware without accessing hardware
         run: bash tools/native-build.sh rp2040 --fetch-sdk
+      - name: Exercise update archive and migration validation
+        run: |
+          python -m pip install pytest
+          cd tools/rpi-hub
+          python -m pytest tests/test_update_package.py -q
+      - name: Build and verify the desktop update resource
+        env:
+          BOSUN_RELEASE: ${{ steps.version.outputs.release }}
+          BOSUN_FIRMWARE_VERSION: ${{ steps.version.outputs.firmware_version }}
+        run: |
+          python tools/package-native-update.py \
+            --uf2 firmware-native/build-rp2040/bosun_native.uf2 \
+            --output editor/src-tauri/resources/update/bosun-update.zip \
+            --release "$BOSUN_RELEASE" --firmware-version "$BOSUN_FIRMWARE_VERSION"
+          python tools/verify-release-version.py \
+            --package editor/src-tauri/resources/update/bosun-update.zip
       - name: Preserve reviewed binaries and memory report
         uses: actions/upload-artifact@v4
         with:
@@ -70,4 +113,10 @@ jobs:
             firmware-native/build-rp2040/bosun_native.elf
             firmware-native/build-rp2040/bosun_native.elf.map
             firmware-native/build-rp2040/bosun_native-memory.json
+          if-no-files-found: error
+      - name: Preserve the validated update package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bosun-native-update
+          path: editor/src-tauri/resources/update/bosun-update.zip
           if-no-files-found: error

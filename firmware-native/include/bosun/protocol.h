@@ -2,7 +2,7 @@
 #define BOSUN_PROTOCOL_H
 #include "bosun/runtime.h"
 
-#define BOSUN_NATIVE_VERSION "0.1.0-native-experimental"
+#define BOSUN_NATIVE_VERSION "0.6.5-native"
 #define BOSUN_PROTOCOL_RX_BYTES 26624u
 #define BOSUN_PROTOCOL_TX_BYTES 30720u
 #define BOSUN_PROTOCOL_TOKENS 1792u
@@ -18,6 +18,7 @@
 typedef struct {
     bosun_runtime_t *runtime;
     uint32_t (*read_led)(uint8_t index); /* Optional last submitted RGB frame. */
+    uint16_t (*read_switches)(void); /* Fresh GPIO guard for ACTIVATE_SWITCH. */
     char rx[BOSUN_PROTOCOL_RX_BYTES + 1], tx[BOSUN_PROTOCOL_TX_BYTES];
     bosun_json_token_t tokens[BOSUN_PROTOCOL_TOKENS];
     bosun_json_doc_t request;
