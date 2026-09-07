@@ -50,3 +50,6 @@ id_rsa
 id_ed25519
 *.key
 *.pem
+
+# Locally configured hotspot credentials; only the empty template is public.
+tools/rpi-hub/hotspot/hostapd.conf

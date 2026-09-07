@@ -39,6 +39,10 @@ Each service should report `active`. Keep the Pi powered during a firmware updat
 
 ## Connect the app and browser
 
+To connect a phone directly to the Pi without a separate router, follow the
+[optional Wi-Fi hotspot setup](hotspot/README.md). It starts automatically after
+reboot and supports Android editing of the USB-connected Captain.
+
 In Bosun Desktop or Android, select **Raspberry Pi (network) → Find Raspberry Pi** and choose your Pi. If discovery does not find it, enter its hostname and port `9876` manually.
 
 Open `http://YOUR_PI_HOSTNAME:8080/` to use Stage from a browser on the same network. Replace `YOUR_PI_HOSTNAME` with your Pi's address. This page uses the connected pedal's live state and accepts Stage inputs.

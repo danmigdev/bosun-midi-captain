@@ -59,6 +59,11 @@ Connect the Captain and accept Android's USB permission prompt, or select a
 Raspberry Pi network connection in Bosun. USB and network support are included;
 no source changes are needed to enable them.
 
+For a direct wireless connection without a separate router, configure the Pi's
+[optional hotspot](../../tools/rpi-hub/hotspot/README.md). Join that Wi-Fi on
+Android, select **Raspberry Pi (network)** in Bosun and connect to the hotspot's
+address on port `9876`. The Captain stays connected to the Pi by USB.
+
 Android can display Stage and edit the connected pedal. The unified firmware
 installation and migration procedure currently runs from Bosun Desktop through
 a Raspberry Pi; see [firmware updates](../../docs/firmware-updates.md).

@@ -1,6 +1,8 @@
 # Shell launchers execute under Linux on Raspberry Pi and must keep LF endings.
 tools/rpi-hub/kiosk/*.sh text eol=lf
 tools/rpi-hub/*.sh text eol=lf
+tools/rpi-hub/hotspot/* text eol=lf
+tools/rpi-hub/systemd/bosun-hotspot.service text eol=lf
 
 # Native build inputs must also work from a Windows checkout through WSL.
 /firmware-native/** text eol=lf

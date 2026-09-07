@@ -1,0 +1,20 @@
+# Copy to /etc/hostapd/bosun.conf and configure locally before starting.
+# Both country_code and wpa_passphrase must be filled in.
+# Keep the configured copy and its password out of version control.
+interface=wlan0
+bridge=bosunap
+driver=nl80211
+ctrl_interface=/run/hostapd
+ssid=Bosun-Hotspot
+country_code=
+hw_mode=g
+channel=6
+ieee80211n=1
+wmm_enabled=1
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+ieee80211w=0

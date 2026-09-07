@@ -1,0 +1,14 @@
+[Unit]
+Description=Bosun Raspberry Pi Wi-Fi hotspot
+Requires=NetworkManager.service sys-subsystem-net-devices-wlan0.device
+After=NetworkManager.service sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/nmcli --wait 30 connection up bosun-ap
+ExecStart=/usr/sbin/hostapd /etc/hostapd/bosun.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
