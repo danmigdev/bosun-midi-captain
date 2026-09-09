@@ -87,7 +87,7 @@ PROBE = r"""(() => {
 MAIN_SELECTORS = ['.stage','.stage__header','.stage__rig-name','.stage__bank-readout',
     '.stage__rig-readout','.stage__expression','.stage__icon-btn','.stage__bank-btn',
     '.stage__switch','.stage__switch-label','.stage__switch-id',
-    '.stage__expression-label','.stage__border-pulse']
+    '.stage__expression-label','.stage__border-pulse','.stage__border-segment']
 BANK_SELECTORS = ['.bank-picker','.bank-picker__header','.bank-picker__close',
     '.bank-picker__mode-trigger','.bank-picker__bank']
 SETTINGS_SELECTORS = ['.theme-panel','.theme-panel__sheet','.theme-panel__header',
@@ -143,7 +143,7 @@ async def inspect(cdp, args, *, host, theme, width, height, scale, appearance, c
         await fixture(cdp, 'WAH')
         # Compare the travelling highlight at the same point in both hosts.
         # Its timing/path remain the production CSS; only the clock is paused.
-        await cdp.evaluate("document.querySelector('.stage__border-pulse').getAnimations().forEach(a => { a.pause(); a.currentTime = 1200; })")
+        await cdp.evaluate("document.querySelector('.stage__border-pulse').getAnimations({subtree:true}).forEach(a => { a.pause(); a.currentTime = 1200; })")
         # Disable one card only in the isolated DOM to inspect the host's
         # disabled-button baseline without simulating any hardware action.
         await cdp.evaluate("document.querySelector('.stage__switch').disabled = true")
@@ -152,9 +152,14 @@ async def inspect(cdp, args, *, host, theme, width, height, scale, appearance, c
         stage = result['main']['.stage']
         assert len(stage) == 1, ('Only actual Stage carries .stage',host,stage)
         assert stage[0]['box'] == {'x':0,'y':0,'width':width,'height':height}, (host,'Stage fills viewport',stage)
-        beam = result['main']['.stage__border-pulse']
-        assert len(beam) == 1 and beam[0]['css']['animationDuration'] == '24s, 2.4s', (host,beam)
-        assert await cdp.evaluate("getComputedStyle(document.querySelector('.stage__border-pulse')).width") == '288px'
+        beam = result['main']['.stage__border-segment']
+        assert len(beam) == 48 and all(piece['css']['animationDuration'] == '24s' for piece in beam), (host,beam)
+        assert result['main']['.stage__border-pulse'][0]['css']['animationDuration'] == '2.4s'
+        assert await cdp.evaluate("""(() => {
+          const pieces = [...document.querySelectorAll('.stage__border-segment')];
+          const offsets = pieces.map(el => parseFloat(getComputedStyle(el).getPropertyValue('--beam-offset')));
+          return offsets.at(-1) - offsets[0] + 6;
+        })()""") == 288
         assert not await cdp.evaluate("document.querySelector('.stage__expression svg') !== null")
         if not coarse:
             target = await cdp.evaluate("(() => {const r=document.querySelector('.stage__switch--active').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()")

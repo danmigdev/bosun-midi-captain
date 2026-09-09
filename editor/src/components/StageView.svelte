@@ -82,6 +82,13 @@
   let stageTheme = $state<StageTheme>(readSavedStageTheme());
   let showThemeEditor = $state(false);
   let stageThemeVars = $derived(stageThemeToCssVars(stageTheme));
+  // Short overlapping pieces bend the whole 288px beam around the frame.
+  // A long straight element would rotate through, and be clipped by, corners.
+  const borderBeam = Array.from({ length: 48 }, (_, index) => ({
+    offset: (index + 0.5) * 6 - 144,
+    opacity: Math.sin(Math.PI * (index + 0.5) / 48) ** 2,
+  }));
+  let borderSecondsPerPixel = $state(0);
   let stageActionHeight = $state<number | undefined>();
   let stageActionWidth = $state<number | undefined>();
   type StageHeaderGeometry = {
@@ -100,6 +107,14 @@
     let destroyed = false;
     let scheduled = false;
     const measure = () => {
+      if (stage) {
+        const width = Math.max(0, stage.clientWidth - 8);
+        const height = Math.max(0, stage.clientHeight - 8);
+        const radius = Math.max(0, Math.min(width / 2, height / 2,
+          parseFloat(getComputedStyle(stage).borderTopLeftRadius) - 4));
+        const perimeter = 2 * (width + height) + (2 * Math.PI - 8) * radius;
+        if (perimeter > 0) borderSecondsPerPixel = 24 / perimeter;
+      }
       const headerRect = node.getBoundingClientRect();
       const actionRect = action.getBoundingClientRect();
       if (actionRect.height > 0) stageActionHeight = actionRect.height;
@@ -995,6 +1010,7 @@
 </script>
 
 <div class="stage" class:stage--preselect={!!preselectedBank} style={stageThemeVars}
+  style:--stage-beam-seconds-per-pixel={`${borderSecondsPerPixel}s`}
   style:--stage-action-height={stageActionHeight === undefined ? undefined : `${stageActionHeight}px`}
   style:--stage-action-width={stageActionWidth === undefined ? undefined : `${stageActionWidth}px`}
   style:--stage-header-top={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.top}px`}
@@ -1005,7 +1021,12 @@
   style:--stage-action-left={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionLeft}px`}
   style:--stage-action-offset-top={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionOffsetTop}px`}
   style:--stage-action-offset-right={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionOffsetRight}px`} use:synchronizePulses>
-  <span class="stage__border-pulse" aria-hidden="true"></span>
+  <span class="stage__border-pulse" aria-hidden="true">
+    {#each borderBeam as segment}
+      <span class="stage__border-segment" style:--beam-offset={segment.offset}
+        style:--beam-opacity={segment.opacity}></span>
+    {/each}
+  </span>
   {#if showThemeEditor}
     <StageThemeEditor theme={stageTheme} onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
   {/if}
@@ -1173,16 +1194,25 @@
     pointer-events: none;
   }
   .stage__border-pulse {
-    position: absolute; top: 0; left: 0; z-index: 3;
-    width: 288px; height: 4px; border-radius: 50%;
+    position: absolute; inset: 0; z-index: 3;
     pointer-events: none;
-    background: linear-gradient(90deg, transparent, #a1edcf 30%, #f0fff9 65%, transparent);
-    box-shadow: 0 0 7px 2px #a1edcf66;
-    /* A single small layer follows the frame clockwise. No full-screen
-       animated gradient, repaint loop, or change to the kiosk light bars. */
+    animation: stage-border-breathe 2.4s ease-in-out infinite;
+  }
+  .stage__border-segment {
+    position: absolute; top: 0; left: 0;
+    width: 8px; height: 4px; border-radius: 1px;
+    pointer-events: none;
+    background: #e0fff2;
+    box-shadow: 0 0 5px 1px #a1edcf40;
+    opacity: var(--beam-opacity);
+    /* Each piece stays tangent to the same closed path, including while
+       the beam straddles two sides. CSS owns the clock; no JS frame loop. */
     offset-path: inset(4px round max(0px, calc(var(--stage-corner-radius) - 4px)));
     offset-anchor: center;
-    animation: stage-border-orbit 24s linear infinite, stage-border-breathe 2.4s ease-in-out infinite;
+    /* Phase is calculated only when layout changes. Plain percentage
+       keyframes avoid per-frame length/percentage interpolation on the Pi. */
+    animation: stage-border-orbit 24s linear infinite;
+    animation-delay: calc(-24s - var(--beam-offset) * var(--stage-beam-seconds-per-pixel));
   }
   @keyframes stage-border-orbit {
     from { offset-distance: 0%; }
