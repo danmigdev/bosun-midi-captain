@@ -18,7 +18,23 @@ preselection.
 
 The settings button beside VOL/WAH opens the appearance panel. Change fonts,
 text sizes and colours for each section. Dropdown lists and the settings panel
-scroll when needed. Reset restores the corresponding default settings.
+scroll when needed. Text sizes default to **100%**, with a range of **10% to
+500%**. The default is twice the original text size (formerly 200%). Reset
+restores this new default; existing saved sizes are converted to the new
+percentages so their visual size stays the same.
+
+The **VOL / WAH** section controls the expression label's font, colour and size
+(10%–500%). This indicator displays text only.
+
+**Rounded corners** has one **Corners** slider shared by the screen frame (also
+used by the bank picker), the two outer corners of the bottom switch row, and
+the top-right corner of the main **X** button. It ranges from **0%** (square)
+to **200%**, with **75%** as the default. Other button corners
+keep their existing shape. Changes apply immediately and persist across reloads.
+The group's **Reset** restores default rounding while preserving fonts and colours.
+
+The outer frame has a small, softly pulsing highlight that travels clockwise
+once every 24 seconds and follows the configured corners.
 
 Preferences belong to the browser or app where they were saved. To configure
 the HDMI kiosk's appearance, use its connected mouse or touch input. A separate

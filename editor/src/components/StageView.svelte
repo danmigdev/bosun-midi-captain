@@ -1005,6 +1005,7 @@
   style:--stage-action-left={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionLeft}px`}
   style:--stage-action-offset-top={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionOffsetTop}px`}
   style:--stage-action-offset-right={stageHeaderGeometry === undefined ? undefined : `${stageHeaderGeometry.actionOffsetRight}px`} use:synchronizePulses>
+  <span class="stage__border-pulse" aria-hidden="true"></span>
   {#if showThemeEditor}
     <StageThemeEditor theme={stageTheme} onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
   {/if}
@@ -1052,20 +1053,11 @@
         <span class="stage__navigation-error" role="status">Update Captain firmware to control switches from Stage.</span>
       {/if}
     </div>
-    <span class="stage__expression" style:color={screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
-      <svg viewBox="0 0 16 12" aria-hidden="true" data-mode={expressionMode}
-           style:visibility={expressionMode === "---" ? "hidden" : "visible"}
-           fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
-        {#if expressionMode === "VOL"}
-          <path d="M1 10.5H14.5V1.5Z" fill="currentColor" stroke="none" />
-        {:else if expressionMode === "WAH"}
-          <path d="M1 6.5 14 2 14.5 3.5 1.5 8Z M7 6.5V9 M9 6V9 M1 9.5H14.5V11H1Z" />
-        {/if}
-      </svg>
+    <span class="stage__expression" style:color={stageTheme.sections.expression?.color ?? screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
       <span class="stage__expression-label"><span>{expressionMode}</span></span>
     </span>
     <div class="stage__controls">
-      <button class="stage__icon-btn stage-control-icon" onclick={onExit} aria-label="Exit Stage">
+      <button class="stage__icon-btn stage__exit-btn stage-control-icon" onclick={onExit} aria-label="Exit Stage">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
       <button class="stage__icon-btn stage-control-icon" onclick={() => (showThemeEditor = !showThemeEditor)} aria-label="Stage appearance">
@@ -1102,8 +1094,9 @@
         </div>
       {/each}
     </div>
-    {#each rows as row}
-      <div class="stage__pedal-row">
+    {#each rows as row, rowIndex}
+      <div class="stage__pedal-row"
+        class:stage__pedal-row--lower={rowIndex === rows.length - 1}>
         {#each row as sw}
           {@const b = preselectedBank ? null : bindingForSwitch(sw)}
           {@const navPatch = preselectedBank ? preselectionPatchFor(sw) : b ? null : navPatchFor(sw)}
@@ -1150,13 +1143,19 @@
     --stage-display-text: #edf5f7;
     --stage-display-muted: #9eafb9;
     --stage-display-accent: #6fd99b;
+    --stage-corner-radius: calc(clamp(28px, 4vw, 56px) * var(--stage-corner-scale, 0.75));
+    --stage-switch-outer-radius: calc(clamp(16px, 3vw, 36px) * var(--stage-corner-scale, 0.75));
     display: flex; flex-direction: column;
     /* Kiosk/preview have no global sizing reset. Keep padding INSIDE 100dvh. */
     box-sizing: border-box;
     height: 100%; height: 100dvh;
     min-height: 0;
     overflow: hidden;
-    padding: clamp(8px, 1.2vw, 20px);
+    border-radius: var(--stage-corner-radius);
+    /* Keep the rounded cutouts black in every host, including the light editor. */
+    box-shadow: 0 0 0 var(--stage-corner-radius) #000;
+    /* Inset controls far enough to clear the rounded corners. */
+    padding: max(clamp(8px, 1.2vw, 20px), calc(var(--stage-corner-radius) * 0.32));
     gap: clamp(6px, 1vw, 14px);
     font-family: var(--stage-font, "Inter", -apple-system, sans-serif);
     font-weight: 600;
@@ -1169,9 +1168,29 @@
   .stage::before {
     content: "";
     position: absolute; inset: 3px;
-    border: 1px solid var(--stage-display-edge);
-    border-radius: 3px;
+    border: 2px solid #657f8d;
+    border-radius: max(0px, calc(var(--stage-corner-radius) - 3px));
     pointer-events: none;
+  }
+  .stage__border-pulse {
+    position: absolute; top: 0; left: 0; z-index: 3;
+    width: 288px; height: 4px; border-radius: 50%;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, #a1edcf 30%, #f0fff9 65%, transparent);
+    box-shadow: 0 0 7px 2px #a1edcf66;
+    /* A single small layer follows the frame clockwise. No full-screen
+       animated gradient, repaint loop, or change to the kiosk light bars. */
+    offset-path: inset(4px round max(0px, calc(var(--stage-corner-radius) - 4px)));
+    offset-anchor: center;
+    animation: stage-border-orbit 24s linear infinite, stage-border-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes stage-border-orbit {
+    from { offset-distance: 0%; }
+    to { offset-distance: 100%; }
+  }
+  @keyframes stage-border-breathe {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
   }
 
   .stage__controls, .stage__bank-controls {
@@ -1183,6 +1202,9 @@
   .stage__icon-btn {
     width: 100%; min-height: 36px;
     flex: 1 1 0;
+  }
+  .stage__controls .stage__exit-btn {
+    border-top-right-radius: var(--stage-switch-outer-radius);
   }
 
   /* ----- header ----- */
@@ -1203,6 +1225,7 @@
   .stage--preselect::after {
     content: "";
     position: absolute; inset: 3px;
+    border-radius: max(0px, calc(var(--stage-corner-radius) - 3px));
     z-index: 2;
     background: #caff0029;
     pointer-events: none;
@@ -1372,11 +1395,14 @@
 
   /* ----- 2x5 pedal grid ----- */
   .stage__expression {
-    display: flex; align-items: center; gap: 0.4em;
+    position: relative;
+    display: flex; align-items: center;
     flex: 0 0 auto;
+    width: 6em; box-sizing: border-box;
     margin-left: auto;
     align-self: stretch;
     font-size: clamp(1rem, 3.5vw, 2.5rem);
+    font-family: var(--stage-expression-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     line-height: 1.1;
     color: var(--stage-display-text);
     white-space: nowrap;
@@ -1385,13 +1411,14 @@
     border: 1px solid var(--stage-display-edge);
     border-radius: 3px;
   }
-  .stage__expression svg { width: 1.3em; height: 0.975em; flex: 0 0 1.3em; }
-  .stage__expression-label { display: grid; }
-  /* Reserve the widest mode even while a new patch is still reporting ---.
-     The icon also keeps its own column when hidden, so incoming context
-     changes neither the readout width nor its neighbours' positions. */
-  .stage__expression-label::before { content: "WAH"; visibility: hidden; }
-  .stage__expression-label::before, .stage__expression-label > span { grid-area: 1 / 1; }
+  /* Scale only the text inside a stable readout. Mode changes and large
+     font preferences must not push the neighbouring Stage controls away. */
+  .stage__expression-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    font-size: calc(1em * var(--stage-expression-scale, 2));
+  }
 
   .stage__pedal {
     flex: 1 1 auto;
@@ -1462,6 +1489,18 @@
     border: 1px solid #ffffff06;
     border-radius: 1px;
     pointer-events: none;
+  }
+  .stage__pedal-row--lower .stage__switch:first-child {
+    border-bottom-left-radius: var(--stage-switch-outer-radius);
+  }
+  .stage__pedal-row--lower .stage__switch:last-child {
+    border-bottom-right-radius: var(--stage-switch-outer-radius);
+  }
+  .stage__pedal-row--lower .stage__switch:first-child::before {
+    border-bottom-left-radius: max(0px, calc(var(--stage-switch-outer-radius) - 5px));
+  }
+  .stage__pedal-row--lower .stage__switch:last-child::before {
+    border-bottom-right-radius: max(0px, calc(var(--stage-switch-outer-radius) - 5px));
   }
   .stage__switch::after {
     content: "";
@@ -1548,7 +1587,7 @@
   /* ===== LANDSCAPE: immersive full-screen ===== */
   @media (orientation: landscape) {
     .stage {
-      padding: clamp(8px, 1.8vh, 18px);
+      padding: max(clamp(8px, 1.8vh, 18px), calc(var(--stage-corner-radius) * 0.32));
       gap: clamp(6px, 1.4vh, 12px);
     }
     .stage__header {

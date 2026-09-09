@@ -27,10 +27,11 @@ if [[ ! -f "$STAGE_BUILD/stage-kiosk.html" && ! -f "$STAGE_BUILD/index.html" &&
     echo "Build Stage first: cd editor && npm install --no-audit --no-fund && npm run build:stage" >&2
     exit 1
 fi
-# Validate every input used by the native updater before package/code changes.
+# Validate native updater inputs and the kiosk input rule before package/code changes.
 # A partially copied checkout can contain the host tool but omit its headers,
 # littlefs sources, or USB rule; discovering that during compilation is too late.
 for required in \
+    tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
     tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
     firmware-native/platform/host/storage_image.c firmware-native/platform/rp2040/storage.c \
     firmware-native/src/storage_path.c firmware-native/src/config.c firmware-native/src/json.c \
@@ -96,10 +97,14 @@ install -m 644 "$SRC"/systemd/bosun-wayvnc.service /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-outputs.service /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-stage-vnc-web.service /etc/systemd/system/
 install -m 644 "$SRC"/udev/33-bosun-midi.rules    /etc/udev/rules.d/
+install -m 644 "$SRC"/udev/99-bosun-kiosk-input.rules /etc/udev/rules.d/
 
 bash "$SRC/install-native-updater.sh"
 systemctl daemon-reload
 udevadm control --reload
+# Apply the CEC exclusion to devices already present before Cage reopens them.
+udevadm trigger --action=change --subsystem-match=input
+udevadm settle --timeout=10
 systemctl enable --now seatd.service
 systemctl enable bosun-hub.service bosun-midi.timer bosun-kiosk.service
 systemctl enable bosun-outputs.service bosun-wayvnc.service bosun-stage-vnc-web.service

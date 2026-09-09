@@ -10,6 +10,12 @@
     FONT_STACKS,
     MIN_SECTION_SCALE,
     MAX_SECTION_SCALE,
+    DEFAULT_SECTION_SCALE,
+    MIN_CORNER_SCALE,
+    MAX_CORNER_SCALE,
+    DEFAULT_CORNER_SCALE,
+    clampCornerScale,
+    resetStageCorners,
     clampSectionScale,
     resetSection,
     resetAllStageTheme,
@@ -35,6 +41,7 @@
     tuner: "Tuner",
     switchLabel: "Switch label",
     switchId: "Switch ID",
+    expression: "VOL / WAH",
   };
 
   // Starting point shown in the color picker when a section has no
@@ -48,6 +55,7 @@
     tuner: "#4ade80",
     switchLabel: "#ffffff",
     switchId: "#6a7280",
+    expression: "#ffffff",
   };
 
   function updateSection(section: StageSection, patch: Partial<{ fontFamily: string; color: string; scale: number }>) {
@@ -84,6 +92,25 @@
     </div>
   </div>
 
+  <div class="theme-panel__row theme-panel__corners" role="group" aria-label="Rounded corners">
+    <div class="theme-panel__row-header">
+      <h3 class="theme-panel__label">Rounded corners</h3>
+      <button type="button" class="theme-panel__reset stage-control-button" aria-label="Reset corners"
+        onclick={() => onchange(resetStageCorners(theme))}>Reset</button>
+    </div>
+    <p class="theme-panel__hint">Screen, bottom outer switch corners and top-right X. 0%: square. Default: 75%.</p>
+    <label class="theme-panel__field">
+      <span class="theme-panel__scale-label">Corners <span class="theme-panel__scale-value">{Math.round((theme.corners ?? DEFAULT_CORNER_SCALE) * 100)}%</span></span>
+      <input type="range" class="theme-panel__scale"
+        min={MIN_CORNER_SCALE} max={MAX_CORNER_SCALE} step="0.05"
+        value={theme.corners ?? DEFAULT_CORNER_SCALE}
+        aria-label="Corners"
+        oninput={(e) => onchange({ ...theme,
+          corners: clampCornerScale(parseFloat((e.target as HTMLInputElement).value)),
+        })} />
+    </label>
+  </div>
+
   <div class="theme-panel__sections">
     {#each STAGE_SECTIONS as section (section)}
       {@const s = theme.sections[section] ?? {}}
@@ -115,14 +142,14 @@
         </div>
 
         <label class="theme-panel__field">
-        <span class="theme-panel__scale-label">Size <span class="theme-panel__scale-value">{Math.round((s.scale ?? 1) * 100)}%</span></span>
+        <span class="theme-panel__scale-label">Size <span class="theme-panel__scale-value">{Math.round((s.scale ?? DEFAULT_SECTION_SCALE) * 100)}%</span></span>
         <input
           type="range"
           class="theme-panel__scale"
           min={MIN_SECTION_SCALE}
           max={MAX_SECTION_SCALE}
           step="0.05"
-          value={s.scale ?? 1}
+          value={s.scale ?? DEFAULT_SECTION_SCALE}
           oninput={(e) => updateSection(section, { scale: clampSectionScale(parseFloat((e.target as HTMLInputElement).value)) })}
           aria-label={`${SECTION_LABELS[section]} size`}
         />
@@ -173,6 +200,10 @@
   .theme-panel__sections {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem;
   }
+  .theme-panel__corners { margin-bottom: 1rem; }
+  .theme-panel__hint {
+    margin: 0; color: var(--text-soft, #c6cad2); font-size: 0.9rem;
+  }
   .theme-panel__row {
     display: grid; align-content: start; gap: 1rem; min-width: 0;
     padding: 1rem;
@@ -196,7 +227,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
   }
   .theme-panel__scale-value {
-    color: var(--text, #e4e6eb); font-size: 1rem; font-variant-numeric: tabular-nums;
+    flex-shrink: 0; color: var(--text, #e4e6eb); font-size: 1rem; font-variant-numeric: tabular-nums;
   }
   .theme-panel__scale {
     appearance: none; width: 100%; min-width: 0; height: 48px; margin: 0;

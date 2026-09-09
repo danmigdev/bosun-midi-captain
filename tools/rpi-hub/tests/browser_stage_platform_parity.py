@@ -73,7 +73,9 @@ PROBE = r"""(() => {
   const properties = ['backgroundColor','backgroundImage','borderTopColor','borderTopWidth',
     'borderRadius','color','opacity','fontFamily','fontSize','fontWeight','fontFeatureSettings',
     'lineHeight','letterSpacing','paddingTop','paddingRight','paddingBottom','paddingLeft',
-    'colorScheme','textRendering'];
+    'colorScheme','textRendering','borderTopLeftRadius','borderTopRightRadius',
+    'borderBottomLeftRadius','borderBottomRightRadius','offsetPath','offsetDistance',
+    'animationDuration','pointerEvents'];
   return Object.fromEntries(selectors.map(selector => [selector,
     [...document.querySelectorAll(selector)].map(el => {
       const box = el.getBoundingClientRect(), css = getComputedStyle(el);
@@ -84,7 +86,8 @@ PROBE = r"""(() => {
 
 MAIN_SELECTORS = ['.stage','.stage__header','.stage__rig-name','.stage__bank-readout',
     '.stage__rig-readout','.stage__expression','.stage__icon-btn','.stage__bank-btn',
-    '.stage__switch','.stage__switch-label','.stage__switch-id']
+    '.stage__switch','.stage__switch-label','.stage__switch-id',
+    '.stage__expression-label','.stage__border-pulse']
 BANK_SELECTORS = ['.bank-picker','.bank-picker__header','.bank-picker__close',
     '.bank-picker__mode-trigger','.bank-picker__bank']
 SETTINGS_SELECTORS = ['.theme-panel','.theme-panel__sheet','.theme-panel__header',
@@ -138,6 +141,9 @@ async def inspect(cdp, args, *, host, theme, width, height, scale, appearance, c
         await cdp.evaluate('document.documentElement.style.fontSize = ' + json.dumps(str(scale * 100) + '%'))
         await asyncio.sleep(.25)
         await fixture(cdp, 'WAH')
+        # Compare the travelling highlight at the same point in both hosts.
+        # Its timing/path remain the production CSS; only the clock is paused.
+        await cdp.evaluate("document.querySelector('.stage__border-pulse').getAnimations().forEach(a => { a.pause(); a.currentTime = 1200; })")
         # Disable one card only in the isolated DOM to inspect the host's
         # disabled-button baseline without simulating any hardware action.
         await cdp.evaluate("document.querySelector('.stage__switch').disabled = true")
@@ -146,6 +152,10 @@ async def inspect(cdp, args, *, host, theme, width, height, scale, appearance, c
         stage = result['main']['.stage']
         assert len(stage) == 1, ('Only actual Stage carries .stage',host,stage)
         assert stage[0]['box'] == {'x':0,'y':0,'width':width,'height':height}, (host,'Stage fills viewport',stage)
+        beam = result['main']['.stage__border-pulse']
+        assert len(beam) == 1 and beam[0]['css']['animationDuration'] == '24s, 2.4s', (host,beam)
+        assert await cdp.evaluate("getComputedStyle(document.querySelector('.stage__border-pulse')).width") == '288px'
+        assert not await cdp.evaluate("document.querySelector('.stage__expression svg') !== null")
         if not coarse:
             target = await cdp.evaluate("(() => {const r=document.querySelector('.stage__switch--active').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()")
             await cdp.command('Input.dispatchMouseEvent', {'type':'mouseMoved',**target})
@@ -162,7 +172,10 @@ async def inspect(cdp, args, *, host, theme, width, height, scale, appearance, c
         await wait_for(cdp, "!!document.querySelector('.theme-panel__sheet')", 'Appearance panel')
         await cdp.command('Input.dispatchMouseEvent', {'type':'mouseMoved','x':0,'y':0})
         result['settings'] = await snapshot(cdp, SETTINGS_SELECTORS)
-        assert len(result['settings']['.stage-select__trigger']) == 7
+        assert len(result['settings']['.stage-select__trigger']) == 8
+        assert await cdp.evaluate("[...document.querySelectorAll('.theme-panel__sections input[type=range]')].every(el => el.min === '0.1' && el.max === '5')")
+        assert await cdp.evaluate("document.querySelectorAll('.theme-panel__corners input').length") == 1
+        assert float(await cdp.evaluate("document.querySelector('.theme-panel__corners input').value")) == appearance.get('corners', .75)
         await mouse(cdp, '.theme-panel__close')
         assert not await cdp.evaluate("window.__platformPeer.commands.some(m => ['ACTIVATE_SWITCH','SWITCH_PATCH','PUT_PATCH','SAVE_PATCH'].includes(m.type))")
         saved = await cdp.evaluate("JSON.parse(localStorage.getItem('BOSUN_STAGE_THEME'))")
@@ -201,9 +214,10 @@ async def run(args):
         cdp = CdpSession(await cdp_socket(port,args.base))
         await cdp.command('Page.enable')
         await cdp.command('Runtime.enable')
-        empty = {'version':1,'sections':{}}
-        custom = {'version':1,'fontFamily':'Georgia, "Times New Roman", Times, serif',
-                  'sections':{'rigName':{'scale':1.5,'fontFamily':'monospace'},'switchId':{'scale':1.5}}}
+        empty = {'version':2,'sections':{}}
+        custom = {'version':2,'corners':0,'fontFamily':'Georgia, "Times New Roman", Times, serif',
+                  'sections':{'rigName':{'scale':.75,'fontFamily':'monospace'},'switchId':{'scale':.75},
+                              'expression':{'scale':1.5,'color':'#ffaa00','fontFamily':'monospace'}}}
         for width,height,scale,appearance,coarse in (
             (1920,440,1,empty,False), (1100,720,1,empty,False),
             (1100,720,1.5,custom,False), (800,360,1,empty,True),
@@ -215,7 +229,7 @@ async def run(args):
                 actual = await inspect(cdp,args,host='app',theme=theme,**kwargs)
                 for part in baseline:
                     compare(actual[part],baseline[part],(part,theme,kwargs))
-                print(f'PASS App/kiosk parity {width}x{height}, root {scale:g}, {theme}, Android={coarse}: full viewport, controls, disabled/hover states, bank dialog, 7 appearance selectors and X/Android Back exit',flush=True)
+                print(f'PASS App/kiosk parity {width}x{height}, root {scale:g}, {theme}, Android={coarse}: full viewport, corners, 288px/24s beam, text-only VOL/WAH, 8 appearance selectors, bank dialog and X/Android Back exit',flush=True)
         print('PASS all platform parity checks; isolated fixture, saved preferences preserved, zero device actions',flush=True)
     except BaseException as exc:
         error = exc

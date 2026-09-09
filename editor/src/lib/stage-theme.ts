@@ -15,10 +15,11 @@ export type StageSection =
   | "bpm"
   | "tuner"
   | "switchLabel"
-  | "switchId";
+  | "switchId"
+  | "expression";
 
 export const STAGE_SECTIONS: StageSection[] = [
-  "rigName", "bank", "bpm", "tuner", "switchLabel", "switchId",
+  "rigName", "bank", "bpm", "tuner", "switchLabel", "switchId", "expression",
 ];
 
 // CSS custom-property key per section, matching the kebab-case class names
@@ -30,22 +31,32 @@ const SECTION_CSS_KEY: Record<StageSection, string> = {
   tuner: "tuner",
   switchLabel: "switch-label",
   switchId: "switch-id",
+  expression: "expression",
 };
 
 export type StageSectionStyle = {
   fontFamily?: string;
   color?: string;
-  scale?: number; // MIN_SECTION_SCALE - MAX_SECTION_SCALE, default 1.0
+  scale?: number; // MIN_SECTION_SCALE - MAX_SECTION_SCALE, default DEFAULT_SECTION_SCALE
 };
 
 export type StageTheme = {
-  version: 1;
+  version: 2;
   fontFamily?: string; // global fallback, used when a section has none of its own
+  corners?: number; // shared radius scale for the screen and selected button corners
   sections: Partial<Record<StageSection, StageSectionStyle>>;
 };
 
-export const MIN_SECTION_SCALE = 0.5;
-export const MAX_SECTION_SCALE = 2.0;
+export const MIN_CORNER_SCALE = 0;
+export const MAX_CORNER_SCALE = 2;
+export const DEFAULT_CORNER_SCALE = 0.75;
+
+export const MIN_SECTION_SCALE = 0.1;
+export const MAX_SECTION_SCALE = 5.0;
+export const DEFAULT_SECTION_SCALE = 1.0;
+// Version 2's 100% is the original display size at 200%. The existing CSS
+// formulas stay unchanged; only their baseline and saved percentages change.
+const SECTION_BASE_SIZE = 2;
 
 // Curated system-font stacks only (no bundled web fonts): guarantees
 // identical bundle size and no asset-packaging work across
@@ -61,38 +72,50 @@ export const FONT_STACKS: Record<string, string> = {
 
 const STORAGE_KEY = "BOSUN_STAGE_THEME";
 
+export function clampCornerScale(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_CORNER_SCALE;
+  return Math.round(Math.min(MAX_CORNER_SCALE, Math.max(MIN_CORNER_SCALE, n)) * 100) / 100;
+}
+
 export function clampSectionScale(n: number): number {
-  if (!Number.isFinite(n)) return 1;
+  if (!Number.isFinite(n)) return DEFAULT_SECTION_SCALE;
   if (n < MIN_SECTION_SCALE) return MIN_SECTION_SCALE;
   if (n > MAX_SECTION_SCALE) return MAX_SECTION_SCALE;
   // Round to 2 decimals to avoid floating-point drift from slider steps.
   return Math.round(n * 100) / 100;
 }
 
-function sanitizeSectionStyle(raw: unknown): StageSectionStyle {
+function sanitizeSectionStyle(raw: unknown, legacy: boolean): StageSectionStyle {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
   const out: StageSectionStyle = {};
   if (typeof r.fontFamily === "string" && r.fontFamily) out.fontFamily = r.fontFamily;
   if (typeof r.color === "string" && r.color) out.color = r.color;
-  if (typeof r.scale === "number") out.scale = clampSectionScale(r.scale);
+  if (typeof r.scale === "number") {
+    // Preserve explicitly chosen visual sizes across the baseline change.
+    out.scale = clampSectionScale(legacy ? r.scale / SECTION_BASE_SIZE : r.scale);
+  }
   return out;
 }
 
 export function readSavedStageTheme(): StageTheme {
-  const empty: StageTheme = { version: 1, sections: {} };
+  const empty: StageTheme = { version: 2, sections: {} };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return empty;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return empty;
-    const theme: StageTheme = { version: 1, sections: {} };
+    const theme: StageTheme = { version: 2, sections: {} };
     const p = parsed as Record<string, unknown>;
     if (typeof p.fontFamily === "string" && p.fontFamily) theme.fontFamily = p.fontFamily;
+    // Former per-element corner overrides use the new shared default.
+    if (typeof p.corners === "number" && Number.isFinite(p.corners)) {
+      theme.corners = clampCornerScale(p.corners);
+    }
     const rawSections = p.sections;
     if (rawSections && typeof rawSections === "object") {
       for (const section of STAGE_SECTIONS) {
-        const style = sanitizeSectionStyle((rawSections as Record<string, unknown>)[section]);
+        const style = sanitizeSectionStyle((rawSections as Record<string, unknown>)[section], p.version !== 2);
         if (Object.keys(style).length > 0) theme.sections[section] = style;
       }
     }
@@ -113,22 +136,28 @@ export function resetSection(theme: StageTheme, section: StageSection): StageThe
 }
 
 export function resetAllStageTheme(): StageTheme {
-  return { version: 1, sections: {} };
+  return { version: 2, sections: {} };
 }
 
-/** Builds the inline `style` string for the `.stage` root: one CSS custom
- *  property per set field. Unset fields emit nothing, so the component's
- *  `var(--stage-x-y, <default>)` fallbacks keep today's hardcoded look. */
+export function resetStageCorners(theme: StageTheme): StageTheme {
+  const next = { ...theme };
+  delete next.corners;
+  return next;
+}
+
+/** Builds the inline `style` string for the `.stage` root. Every section gets
+ *  its saved percentage applied to the doubled baseline; fonts and colors
+ *  remain optional. The UI's 100% produces the same pixels as the old 200%. */
 export function stageThemeToCssVars(theme: StageTheme): string {
   const parts: string[] = [];
   if (theme.fontFamily) parts.push(`--stage-font: ${theme.fontFamily}`);
+  if (theme.corners !== undefined) parts.push(`--stage-corner-scale: ${clampCornerScale(theme.corners)}`);
   for (const section of STAGE_SECTIONS) {
-    const s = theme.sections[section];
-    if (!s) continue;
+    const s = theme.sections[section] ?? {};
     const key = SECTION_CSS_KEY[section];
     if (s.fontFamily) parts.push(`--stage-${key}-font: ${s.fontFamily}`);
     if (s.color) parts.push(`--stage-${key}-color: ${s.color}`);
-    if (s.scale != null) parts.push(`--stage-${key}-scale: ${s.scale}`);
+    parts.push(`--stage-${key}-scale: ${SECTION_BASE_SIZE * clampSectionScale(s.scale ?? DEFAULT_SECTION_SCALE)}`);
   }
   return parts.join("; ");
 }

@@ -64,6 +64,9 @@ Connect and power an HDMI screen. Stage is configured to open automatically at s
 
 Without an HDMI screen, the Pi keeps a virtual 1920 × 440 display available for the viewer below. The kiosk uses reduced motion to keep its light bars steady.
 
+The Pi hides its cursor when no mouse is connected and restores it when a mouse
+is plugged in. Touchscreen input remains available without a mouse cursor.
+
 ## View the actual Pi display on Windows
 
 ![Actual Stage picture rendered by the Pi](../../docs/ui-test-screenshots/stage_vnc.png)

@@ -197,8 +197,12 @@ def test_fresh_install_sets_access_and_native_support_before_starting_services(a
     assert (appliance.installed_stage / "index.html").read_text() == "<p>new Stage</p>\n"
     assert (appliance.system / "opt/bosun-hub/bin/bosun_storage_image").is_file()
     assert (appliance.system / "etc/udev/rules.d/60-bosun-update.rules").is_file()
+    assert (appliance.system / "etc/udev/rules.d/99-bosun-kiosk-input.rules").is_file()
     first_restart = next(i for i, line in enumerate(events) if line.startswith("systemctl restart "))
     before_start = events[:first_restart]
+    assert before_start.index("udevadm control --reload") < before_start.index(
+        "udevadm trigger --action=change --subsystem-match=input"
+    ) < before_start.index("udevadm settle --timeout=10")
     assert any(line.startswith("apt-get install ") and "build-essential" in line
                and "picotool" in line and "seatd" in line for line in before_start)
     assert any(line.startswith("cc ") for line in before_start)

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
 import {
-  MIN_SECTION_SCALE, MAX_SECTION_SCALE,
+  MIN_SECTION_SCALE, MAX_SECTION_SCALE, DEFAULT_SECTION_SCALE,
   clampSectionScale, readSavedStageTheme, saveStageTheme,
   resetSection, resetAllStageTheme, stageThemeToCssVars,
   type StageTheme,
@@ -13,7 +13,7 @@ beforeEach(() => {
 
 describe("clampSectionScale", () => {
   it("clamps below MIN to MIN", () => {
-    expect(clampSectionScale(0.1)).toBe(MIN_SECTION_SCALE);
+    expect(clampSectionScale(0.01)).toBe(MIN_SECTION_SCALE);
     expect(clampSectionScale(-5)).toBe(MIN_SECTION_SCALE);
   });
 
@@ -25,7 +25,13 @@ describe("clampSectionScale", () => {
     expect(clampSectionScale(1.0500000000000003)).toBe(1.05);
   });
 
-  it("falls back to 1 for non-finite input", () => {
+  it("accepts the full 10% to 500% range", () => {
+    expect(clampSectionScale(0.1)).toBe(0.1);
+    expect(clampSectionScale(5)).toBe(5);
+  });
+
+  it("falls back to the 100% default for non-finite input", () => {
+    expect(DEFAULT_SECTION_SCALE).toBe(1);
     expect(clampSectionScale(NaN)).toBe(1);
     expect(clampSectionScale(Infinity)).toBe(1);
   });
@@ -33,12 +39,12 @@ describe("clampSectionScale", () => {
 
 describe("readSavedStageTheme", () => {
   it("returns an empty theme when nothing is stored", () => {
-    expect(readSavedStageTheme()).toEqual({ version: 1, sections: {} });
+    expect(readSavedStageTheme()).toEqual({ version: 2, sections: {} });
   });
 
   it("returns an empty theme for malformed JSON", () => {
     localStorage.setItem("BOSUN_STAGE_THEME", "not json");
-    expect(readSavedStageTheme()).toEqual({ version: 1, sections: {} });
+    expect(readSavedStageTheme()).toEqual({ version: 2, sections: {} });
   });
 
   it("drops unknown section keys and non-object section values", () => {
@@ -46,7 +52,7 @@ describe("readSavedStageTheme", () => {
       sections: { rigName: { color: "#ff0000" }, notASection: { color: "#00ff00" }, bank: "nope" },
     }));
     expect(readSavedStageTheme()).toEqual({
-      version: 1,
+      version: 2,
       sections: { rigName: { color: "#ff0000" } },
     });
   });
@@ -58,9 +64,44 @@ describe("readSavedStageTheme", () => {
     expect(readSavedStageTheme().sections.tuner?.scale).toBe(MAX_SECTION_SCALE);
   });
 
+  it("preserves saved scales across the expanded range", () => {
+    saveStageTheme({ version: 2, sections: { rigName: { scale: 0.1 }, bank: { scale: 5 } } });
+    expect(readSavedStageTheme().sections).toEqual({ rigName: { scale: 0.1 }, bank: { scale: 5 } });
+  });
+
+  it("converts old saved percentages without changing their rendered sizes or migrating twice", () => {
+    localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({
+      version: 1,
+      fontFamily: "Georgia, serif",
+      sections: {
+        rigName: { scale: 2, color: "#abcdef" },
+        bank: { scale: 1.2 },
+        switchLabel: { scale: 0.5 },
+        switchId: { fontFamily: "monospace" },
+      },
+    }));
+    const migrated = readSavedStageTheme();
+    expect(migrated).toEqual({
+      version: 2,
+      fontFamily: "Georgia, serif",
+      sections: {
+        rigName: { scale: 1, color: "#abcdef" },
+        bank: { scale: 0.6 },
+        switchLabel: { scale: 0.25 },
+        switchId: { fontFamily: "monospace" },
+      },
+    });
+    const css = stageThemeToCssVars(migrated);
+    expect(css).toContain("--stage-rig-name-scale: 2");
+    expect(css).toContain("--stage-bank-scale: 1.2");
+    expect(css).toContain("--stage-switch-label-scale: 0.5");
+    saveStageTheme(migrated);
+    expect(readSavedStageTheme()).toEqual(migrated);
+  });
+
   it("round-trips a full theme via saveStageTheme", () => {
     const theme: StageTheme = {
-      version: 1,
+      version: 2,
       fontFamily: "Georgia, serif",
       sections: {
         rigName: { color: "#ff0000", scale: 1.2 },
@@ -74,7 +115,7 @@ describe("readSavedStageTheme", () => {
 
 describe("resetSection / resetAllStageTheme", () => {
   const theme: StageTheme = {
-    version: 1,
+    version: 2,
     fontFamily: "Georgia, serif",
     sections: {
       rigName: { color: "#ff0000" },
@@ -90,26 +131,40 @@ describe("resetSection / resetAllStageTheme", () => {
   });
 
   it("resetAllStageTheme clears everything", () => {
-    expect(resetAllStageTheme()).toEqual({ version: 1, sections: {} });
+    expect(resetAllStageTheme()).toEqual({ version: 2, sections: {} });
   });
 });
 
 describe("stageThemeToCssVars", () => {
-  it("produces an empty string for an empty theme", () => {
-    expect(stageThemeToCssVars({ version: 1, sections: {} })).toBe("");
+  it("applies percentages relative to twice the original base size", () => {
+    expect(stageThemeToCssVars({ version: 2, sections: {
+      rigName: { scale: 0.1 }, bank: { scale: 1 }, switchLabel: { scale: 5 },
+    } })).toContain("--stage-rig-name-scale: 0.2; --stage-bank-scale: 2");
+    expect(stageThemeToCssVars({ version: 2, sections: { switchLabel: { scale: 5 } } }))
+      .toContain("--stage-switch-label-scale: 10");
   });
 
-  it("emits only the fields that are set", () => {
+  it("renders the old 200% size at the new 100% on a fresh or reset theme", () => {
+    const defaults = [
+      "--stage-rig-name-scale: 2", "--stage-bank-scale: 2", "--stage-bpm-scale: 2",
+      "--stage-tuner-scale: 2", "--stage-switch-label-scale: 2", "--stage-switch-id-scale: 2", "--stage-expression-scale: 2",
+    ].join("; ");
+    expect(stageThemeToCssVars(readSavedStageTheme())).toBe(defaults);
+    expect(stageThemeToCssVars(resetAllStageTheme())).toBe(defaults);
+  });
+
+  it("adds a color override without changing default sizes", () => {
     const css = stageThemeToCssVars({
-      version: 1,
+      version: 2,
       sections: { switchLabel: { color: "#123456" } },
     });
-    expect(css).toBe("--stage-switch-label-color: #123456");
+    expect(css).toContain("--stage-switch-label-color: #123456; --stage-switch-label-scale: 2");
+    expect(css).not.toContain("-font:");
   });
 
   it("maps every section to its kebab-case CSS key", () => {
     const css = stageThemeToCssVars({
-      version: 1,
+      version: 2,
       fontFamily: "Georgia, serif",
       sections: {
         rigName: { color: "#a", scale: 1.1 },
@@ -123,12 +178,18 @@ describe("stageThemeToCssVars", () => {
     expect(css).toBe([
       "--stage-font: Georgia, serif",
       "--stage-rig-name-color: #a",
-      "--stage-rig-name-scale: 1.1",
+      "--stage-rig-name-scale: 2.2",
       "--stage-bank-font: monospace",
+      "--stage-bank-scale: 2",
       "--stage-bpm-color: #b",
+      "--stage-bpm-scale: 2",
       "--stage-tuner-color: #c",
+      "--stage-tuner-scale: 2",
       "--stage-switch-label-color: #d",
+      "--stage-switch-label-scale: 2",
       "--stage-switch-id-color: #e",
+      "--stage-switch-id-scale: 2",
+      "--stage-expression-scale: 2",
     ].join("; "));
   });
 });

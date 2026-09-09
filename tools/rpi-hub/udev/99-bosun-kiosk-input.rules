@@ -1,0 +1,5 @@
+# The Raspberry Pi HDMI-CEC remote advertises relative pointer capabilities
+# even without a mouse. Keep it out of libinput so Cage hides its cursor when
+# the last real pointer is unplugged; USB/Bluetooth mice and touch stay usable.
+# Match only CEC names, not the separate "vc4-hdmi HDMI Jack" audio input.
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event[0-9]*", ATTRS{name}=="vc4-hdmi|vc4-hdmi-[0-9]*", ENV{LIBINPUT_IGNORE_DEVICE}="1"

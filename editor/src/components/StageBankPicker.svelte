@@ -122,11 +122,12 @@
     padding: 0;
     overflow: hidden;
     border: 0;
+    border-radius: var(--stage-corner-radius);
     background: #080f14;
     color: #edf5f7;
     font-family: var(--stage-font, "Inter", -apple-system, sans-serif);
   }
-  .bank-picker::backdrop { background: #080f14; }
+  .bank-picker::backdrop { background: #000; }
   .bank-picker__sheet { height: 100%; min-height: 0; display: flex; flex-direction: column; }
   .bank-picker__header {
     position: relative;

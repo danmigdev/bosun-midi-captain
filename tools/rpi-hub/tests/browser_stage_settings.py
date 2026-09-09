@@ -26,10 +26,10 @@ from browser_stage_transition import EDGE, CdpSession, cdp_socket, cleanup_brows
 
 
 LABELS = ('Default font', 'Rig name font', 'Bank / Rig font', 'BPM font',
-          'Tuner font', 'Switch label font', 'Switch ID font')
+          'Tuner font', 'Switch label font', 'Switch ID font', 'VOL / WAH font')
 VIEWPORTS = ((1045, 399), (320, 568), (568, 320), (375, 667))
 SECTIONS = (('rigName', 'rig-name'), ('bank', 'bank'), ('bpm', 'bpm'),
-            ('tuner', 'tuner'), ('switchLabel', 'switch-label'), ('switchId', 'switch-id'))
+            ('tuner', 'tuner'), ('switchLabel', 'switch-label'), ('switchId', 'switch-id'), ('expression', 'expression'))
 STORAGE = 'BOSUN_STAGE_THEME'
 
 
@@ -74,8 +74,8 @@ async def geometry(cdp, label):
 
 async def open_appearance(cdp):
     await mouse(cdp, '.stage__icon-btn[aria-label="Stage appearance"]')
-    await wait_for(cdp, "document.querySelectorAll('.theme-panel [role=combobox]').length === 7",
-                   'Seven custom font menus')
+    await wait_for(cdp, f"document.querySelectorAll('.theme-panel [role=combobox]').length === {len(LABELS)}",
+                   'All custom font menus')
     labels = await cdp.evaluate("[...document.querySelectorAll('.theme-panel [role=combobox]')].map(el => el.getAttribute('aria-label'))")
     assert labels == list(LABELS), labels
     assert await cdp.evaluate("document.querySelectorAll('.theme-panel select').length") == 0
@@ -176,7 +176,7 @@ async def passive_geometry(cdp, args):
                     await capture(cdp, path.with_name(name))
                 await close_menu(cdp, label)
             assert all(abs(value - sizes[0]) <= 1 for value in sizes), sizes
-            print(f'PASS {"LIVE " if args.live else ""}all seven font menus {width}x{height}, root {scale:g}x: options/controls match Stage X at ' + ', '.join(f'{value:g}' for value in sizes) + 'px; viewport bounds and scroll', flush=True)
+            print(f'PASS {"LIVE " if args.live else ""}all {len(LABELS)} font menus {width}x{height}, root {scale:g}x: options/controls match Stage X at ' + ', '.join(f'{value:g}' for value in sizes) + 'px; viewport bounds and scroll', flush=True)
     assert scrolled, 'No overflow menu was exercised'
     assert flipped, 'No menu above its trigger was exercised'
     if not args.live:
@@ -186,7 +186,7 @@ async def passive_geometry(cdp, args):
 
 async def theme(cdp):
     raw = await cdp.evaluate('localStorage.getItem(' + json.dumps(STORAGE) + ')')
-    return json.loads(raw) if raw else {'version':1,'sections':{}}
+    return json.loads(raw) if raw else {'version':2,'sections':{}}
 
 
 async def no_actions(cdp, *, live):
@@ -211,6 +211,10 @@ async def choose_named(cdp, label, name, *, use_touch=False):
 
 
 async def input_checks(cdp, args):
+    assert await cdp.evaluate("""[...document.querySelectorAll('.theme-panel__sections input[type="range"]')]
+      .map(el => ({value:el.value,min:el.min,max:el.max}))""") == [
+        {'value':'1','min':'0.1','max':'5'} for _ in SECTIONS]
+    print('PASS all font sizes default to 100% with a 10%-500% range and doubled base size', flush=True)
     await cdp.command('Emulation.setDeviceMetricsOverride', {
         'width':1045,'height':399,'deviceScaleFactor':1,'mobile':False,
     })
@@ -252,10 +256,14 @@ async def input_checks(cdp, args):
         size = '.theme-panel input[type="range"][aria-label=' + json.dumps(label[:-5] + ' size') + ']'
         await reveal(cdp, size)
         await mouse(cdp, size)
+        await key(cdp, 'Home', 36)
+        assert await cdp.evaluate('document.querySelector(' + json.dumps(size) + ').value') == '0.1'
+        assert (await theme(cdp))['sections'][section]['scale'] == 0.1
+        assert await cdp.evaluate('document.querySelector(".stage").style.getPropertyValue(' + json.dumps('--stage-' + css_key + '-scale') + ')') == '0.2'
         await key(cdp, 'End', 35)
-        assert await cdp.evaluate('document.querySelector(' + json.dumps(size) + ').value') == '2'
-        assert (await theme(cdp))['sections'][section]['scale'] == 2
-        assert await cdp.evaluate('document.querySelector(".stage").style.getPropertyValue(' + json.dumps('--stage-' + css_key + '-scale') + ')') == '2'
+        assert await cdp.evaluate('document.querySelector(' + json.dumps(size) + ').value') == '5'
+        assert (await theme(cdp))['sections'][section]['scale'] == 5
+        assert await cdp.evaluate('document.querySelector(".stage").style.getPropertyValue(' + json.dumps('--stage-' + css_key + '-scale') + ')') == '10'
         state = await open_menu(cdp, label)
         verify_geometry(state)
         common = await geometry(cdp, 'Default font')
@@ -263,7 +271,7 @@ async def input_checks(cdp, args):
         assert state['font'] == common['font'], state
         await close_menu(cdp, label)
     await cdp.evaluate('document.documentElement.style.fontSize = ""')
-    print('PASS all six section size sliders at 200% update saved display CSS; every control/option follows the same Stage X height and common typography at root 150% without clipping', flush=True)
+    print('PASS all section size sliders at 10% and 500% update saved display CSS; every control/option follows the same Stage X height and common typography at root 150% without clipping', flush=True)
 
     await mouse(cdp, '.theme-panel__close')
     await open_appearance(cdp)
@@ -276,6 +284,7 @@ async def input_checks(cdp, args):
     await open_appearance(cdp)
     assert await cdp.evaluate('document.querySelector(' + json.dumps(trigger('Default font')) + ').dataset.value') == condensed
     assert await cdp.evaluate('document.querySelector(' + json.dumps(trigger('Rig name font')) + ').dataset.value') == mono
+    assert await cdp.evaluate("[...document.querySelectorAll('.theme-panel__sections input[type=range]')].every(el => el.value === '5')")
     print('PASS default and section font preferences survive panel reopen and full page reload', flush=True)
 
     reset = '.theme-panel__row[aria-label="Rig name appearance"] .theme-panel__reset'
@@ -284,11 +293,97 @@ async def input_checks(cdp, args):
     assert 'rigName' not in (await theme(cdp))['sections']
     assert (await theme(cdp))['fontFamily'] == condensed
     assert await cdp.evaluate('document.querySelector(' + json.dumps(trigger('Rig name font')) + ').dataset.value') == ''
+    assert await cdp.evaluate('document.querySelector(".stage").style.getPropertyValue("--stage-rig-name-scale")') == '2'
     await mouse(cdp, '.theme-panel__reset-all')
-    assert await theme(cdp) == {'version':1,'sections':{}}
+    assert await theme(cdp) == {'version':2,'sections':{}}
     assert await cdp.evaluate("[...document.querySelectorAll('.theme-panel [role=combobox]')].every(el => el.dataset.value === '')")
+    assert await cdp.evaluate("[...document.querySelectorAll('.theme-panel__sections input[type=range]')].every(el => el.value === '1')")
     await no_actions(cdp, live=False)
-    print('PASS section reset preserves default font; Reset all restores seven defaults; zero device actions', flush=True)
+    print('PASS section reset preserves default font; Reset all restores defaults; zero device actions', flush=True)
+
+
+async def corner_checks(cdp, args):
+    await cdp.command('Emulation.setDeviceMetricsOverride', {
+        'width':1920,'height':440,'deviceScaleFactor':1,'mobile':False,
+    })
+    await asyncio.sleep(.1)
+    assert await cdp.evaluate("""[...document.querySelectorAll('.theme-panel__corners input[type=range]')]
+      .map(el => ({value:el.value,min:el.min,max:el.max}))""") == [
+        {'value':'0.75','min':'0','max':'2'}]
+    serif = await choose_named(cdp, 'Default font', 'Serif')
+
+    async def radii():
+        return await cdp.evaluate("""(() => {
+          const radius = (el, pseudo = null) => {
+            const s = getComputedStyle(el, pseudo);
+            return [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomRightRadius, s.borderBottomLeftRadius];
+          };
+          const stage = document.querySelector('.stage');
+          return {screen:radius(stage), inset:radius(stage, '::before'),
+            rows:[...document.querySelectorAll('.stage__pedal-row')].map(row =>
+              [...row.querySelectorAll('.stage__switch')].map(el => ({outer:radius(el),inner:radius(el,'::before')}))),
+            controls:[...document.querySelectorAll('.stage__header button')].map(el => ({label:el.getAttribute('aria-label'),radius:radius(el)}))};
+        })()""")
+
+    async def set_endpoint(maximum):
+        selector = '.theme-panel__corners input[aria-label="Corners"]'
+        await reveal(cdp, selector)
+        await mouse(cdp, selector)
+        await key(cdp, 'End' if maximum else 'Home', 35 if maximum else 36)
+
+    baseline = await radii()
+    assert baseline['screen'] == ['42px'] * 4, baseline
+    assert baseline['rows'][-1][0]['outer'] == ['4px', '4px', '4px', '27px'], baseline
+    assert baseline['rows'][-1][-1]['outer'] == ['4px', '4px', '27px', '4px'], baseline
+    assert next(item for item in baseline['controls'] if item['label'] == 'Exit Stage')['radius'][1] == '27px'
+    for scale in (2, 0):
+        await set_endpoint(scale == 2)
+        expected = json.loads(json.dumps(baseline))
+        expected['screen'] = [f'{56 * scale}px'] * 4
+        expected['inset'] = [f'{max(0, 56 * scale - 3)}px'] * 4
+        for tile, index in ((expected['rows'][-1][0], 3), (expected['rows'][-1][-1], 2)):
+            tile['outer'][index] = f'{36 * scale}px'
+            tile['inner'][index] = f'{max(0, 36 * scale - 5)}px'
+        next(item for item in expected['controls'] if item['label'] == 'Exit Stage')['radius'][1] = f'{36 * scale}px'
+        actual = await radii()
+        assert actual == expected, {'scale':scale, 'actual':actual, 'expected':expected}
+        assert (await theme(cdp))['corners'] == scale
+    reset = '.theme-panel [aria-label="Reset corners"]'
+    await reveal(cdp, reset)
+    await mouse(cdp, reset)
+    assert await radii() == baseline
+    assert 'corners' not in await theme(cdp)
+    assert (await theme(cdp))['fontFamily'] == serif
+    assert await cdp.evaluate("document.querySelector('.theme-panel__corners input').value") == '0.75'
+    print('PASS one Corners control defaults to 75%; 0% and 200% affect only the screen, two lower outer switch corners and top-right X; corner reset restores 75% and preserves fonts', flush=True)
+
+    if args.screenshot:
+        await reveal(cdp, '.theme-panel__corners')
+        path = Path(args.screenshot)
+        await capture(cdp, path.with_name(path.stem + '-corners' + path.suffix))
+    await set_endpoint(False)
+    squared = await radii()
+    await no_actions(cdp, live=False)
+    await cdp.command('Page.reload')
+    await wait_for(cdp, "typeof window.__stageDoorbell === 'function' && !!document.querySelector('.stage__bank-readout')", 'Reloaded square Stage')
+    await fixture(cdp, 'WAH', title='SQUARE DISPLAY')
+    await cdp.evaluate(PEER)
+    assert await radii() == squared
+    assert (await theme(cdp))['corners'] == 0
+    if args.screenshot:
+        await capture(cdp, path.with_name(path.stem + '-square' + path.suffix))
+    await mouse(cdp, '.stage__bank-readout')
+    await wait_for(cdp, "!!document.querySelector('.bank-picker[open]')", 'Square bank picker')
+    assert await cdp.evaluate("getComputedStyle(document.querySelector('.bank-picker')).borderRadius") == '0px'
+    await escape(cdp)
+    await open_appearance(cdp)
+    assert await cdp.evaluate("[...document.querySelectorAll('.theme-panel__corners input')].every(el => el.value === '0')")
+    await mouse(cdp, '.theme-panel__reset-all')
+    assert await theme(cdp) == {'version':2,'sections':{}}
+    assert await radii() == baseline
+    await no_actions(cdp, live=False)
+    assert await cdp.evaluate("document.querySelector('.theme-panel__corners input').value") == '0.75'
+    print('PASS single corner value survives reload, including square bank picker frame; Reset all restores 75%; zero device actions', flush=True)
 
 
 async def run(args):
@@ -327,6 +422,7 @@ async def run(args):
             print('PASS LIVE passive open/inspect/close of every settings menu; unchanged local preferences and zero rig/effect commands', flush=True)
         else:
             await input_checks(cdp, args)
+            await corner_checks(cdp, args)
             print('PASS all Stage settings browser checks; isolated preview, no hardware connection', flush=True)
     except BaseException as exc:
         error = exc

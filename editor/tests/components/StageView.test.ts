@@ -1209,27 +1209,24 @@ describe("StageView", () => {
   });
 
   describe("expression pedal indicator", () => {
-    it("shows the confirmed mode with a pedal icon inside the title bar", async () => {
+    it("shows only the confirmed mode text inside the title bar", async () => {
       const { container } = renderStage();
       await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
       const badge = container.querySelector(".stage__header .stage__expression");
       expect(badge).toHaveTextContent("WAH");
-      expect(badge?.querySelector("svg")).not.toBeNull();
-      expect(badge?.querySelector("svg")).toHaveAttribute("data-mode", "WAH");
-      const wahPath = badge?.querySelector("path")?.getAttribute("d");
+      expect(badge?.querySelector("svg")).toBeNull();
       expect(badge).toHaveAttribute("aria-label", "Expression pedal: WAH");
       await pushFirmwareMessage({ type: "CONTEXT", partial: true, context: { expression_mode: "VOL" } });
       expect(badge).toHaveTextContent("VOL");
-      expect(badge?.querySelector("svg")).toHaveAttribute("data-mode", "VOL");
-      expect(badge?.querySelector("path")?.getAttribute("d")).not.toBe(wahPath);
-      expect(badge?.querySelector("path")).toHaveAttribute("fill", "currentColor");
+      expect(badge?.querySelector("svg")).toBeNull();
+      expect(badge).toHaveAttribute("aria-label", "Expression pedal: VOL");
     });
 
     it("never guesses VOL when the state is missing, invalid, disconnected or changing rig", async () => {
       const { container, rerender } = renderStage();
       const badge = () => container.querySelector(".stage__expression");
       expect(badge()).toHaveTextContent("---");
-      expect(badge()?.querySelector("svg")).toHaveStyle("visibility: hidden");
+      expect(badge()?.querySelector("svg")).toBeNull();
       await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "invalid" } });
       expect(badge()).toHaveTextContent("---");
       await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
@@ -1876,7 +1873,7 @@ describe("StageView", () => {
     it("persists global and section fonts selected from the touch menus", async () => {
       const { container } = renderStage();
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
-      expect(screen.getAllByRole("combobox")).toHaveLength(7);
+      expect(screen.getAllByRole("combobox")).toHaveLength(8);
       expect(container.querySelector(".theme-panel select")).toBeNull();
 
       await chooseFont("Default font", FONT_STACKS.Serif);
