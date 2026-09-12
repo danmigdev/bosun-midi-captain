@@ -1,0 +1,331 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Bosun" type="device" compressed="false" pages="2">
+  <diagram id="bosun-connections-1" name="1 - Wiring">
+    <mxGraphModel dx="1600" dy="1080" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1080" math="0" shadow="0" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="direct" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="142" width="1520" height="174" />
+        </mxCell>
+        <mxCell id="android" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="334" width="1520" height="246" />
+        </mxCell>
+        <mxCell id="pi" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="598" width="1520" height="328" />
+        </mxCell>
+        <mxCell id="d-usb" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#8054B0;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d-captain" target="d-player">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="a-usb-c" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.22;entryDx=0;entryDy=0;" edge="1" parent="1" source="a-captain" target="a-hub">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="408" y="430" />
+              <mxPoint x="408" y="458.96" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a-usb-p" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#8054B0;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.78;entryDx=0;entryDy=0;" edge="1" parent="1" source="a-player" target="a-hub">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="408" y="526" />
+              <mxPoint x="408" y="497.04" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a-otg" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="a-hub" target="a-android">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="r-usb-c" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.24;entryDx=0;entryDy=0;" edge="1" parent="1" source="r-captain" target="r-pi">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="416" y="698" />
+              <mxPoint x="416" y="736.16" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-usb-p" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#8054B0;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.77;entryDx=0;entryDy=0;" edge="1" parent="1" source="r-player" target="r-pi">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="416" y="812" />
+              <mxPoint x="416" y="780.68" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-hdmi" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#C87813;startArrow=none;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.28;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="r-pi" target="r-display">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="990" y="739.52" />
+              <mxPoint x="990" y="706" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-touch" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=none;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=0;exitY=0.84;exitDx=0;exitDy=0;entryX=1;entryY=0.8;entryDx=0;entryDy=0;dashed=1;dashPattern=6 4;" edge="1" parent="1" source="r-display" target="r-pi">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1110" y="729.12" />
+              <mxPoint x="1110" y="783.2" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r-power-cable" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#758390;startArrow=none;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=0.7;exitY=0;exitDx=0;exitDy=0;entryX=0.7;entryY=1;entryDx=0;entryDy=0;dashed=1;dashPattern=6 4;" edge="1" parent="1" source="r-power" target="r-display">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="title" value="BOSUN / Hardware connections" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=30;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="30" width="1504" height="42" />
+        </mxCell>
+        <mxCell id="subtitle" value="Three alternative setups - The Captain USB cable carries MIDI and Bosun data; the Player uses MIDI for commands and feedback." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="82" width="1504" height="44" />
+        </mxCell>
+        <mxCell id="direct-title" value="01  Captain directly to Player" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="158" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="d-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="212" width="260" height="66" />
+        </mxCell>
+        <mxCell id="d-player" value="Kemper Player&#10;USB-A - MIDI host" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D6C2E7;fillColor=#F4EEFA;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="520" y="212" width="260" height="66" />
+        </mxCell>
+        <mxCell id="d-usb-label" value="USB A-B&#10;Bidirectional MIDI" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#8054B0;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="350" y="194" width="160" height="40" />
+        </mxCell>
+        <mxCell id="d-note" value="Play with the Captain and its built-in display.&#10;To edit: move the USB cable to a Bosun host.&#10;This setup does not provide an external Stage display." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="856" y="208" width="660" height="72" />
+        </mxCell>
+        <mxCell id="android-title" value="02  Captain + Player -&gt; USB hub -&gt; Android" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="350" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="a-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="400" width="220" height="60" />
+        </mxCell>
+        <mxCell id="a-player" value="Kemper Player&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D6C2E7;fillColor=#F4EEFA;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="496" width="220" height="60" />
+        </mxCell>
+        <mxCell id="a-hub" value="USB hub&#10;2 USB-A ports" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#FFFFFF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="474" y="444" width="220" height="68" />
+        </mxCell>
+        <mxCell id="a-android" value="Android - USB-OTG&#10;Bosun + Stage + MIDI bridge" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="844" y="434" width="310" height="88" />
+        </mxCell>
+        <mxCell id="a-usb-c-label" value="MIDI + data" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="304" y="395" width="158" height="28" />
+        </mxCell>
+        <mxCell id="a-usb-p-label" value="MIDI + feedback" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#8054B0;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="304" y="529" width="158" height="24" />
+        </mxCell>
+        <mxCell id="a-otg-label" value="USB-OTG" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="699" y="445" width="140" height="26" />
+        </mxCell>
+        <mxCell id="a-note" value="Bridge ON - keep Bosun running.&#10;Use a powered hub if needed.&#10;A USB hub alone is not a MIDI bridge.&#10;Alternative: Bosun Desktop,&#10;with direct USB ports or a hub." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1200" y="419" width="334" height="110" />
+        </mxCell>
+        <mxCell id="pi-title" value="03  Captain + Player -&gt; Raspberry Pi 3 -&gt; optional display" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="614" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="r-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="668" width="220" height="60" />
+        </mxCell>
+        <mxCell id="r-player" value="Kemper Player&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D6C2E7;fillColor=#F4EEFA;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="782" width="220" height="60" />
+        </mxCell>
+        <mxCell id="r-pi" value="Raspberry Pi 3 - 2 x USB-A&#10;Bosun hub + MIDI bridge + Stage" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#AFD9CC;fillColor=#E9F7F1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="494" y="716" width="350" height="84" />
+        </mxCell>
+        <mxCell id="r-display" value="Stage display - optional&#10;HDMI input" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#EAD2A7;fillColor=#FFF7E7;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1180" y="672" width="318" height="68" />
+        </mxCell>
+        <mxCell id="r-power" value="Separate USB power supply" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#CFD7DF;fillColor=#F1F3F5;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1180" y="818" width="318" height="50" />
+        </mxCell>
+        <mxCell id="r-usb-c-label" value="USB-A - port 1&#10;MIDI + data" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="310" y="661" width="171" height="42" />
+        </mxCell>
+        <mxCell id="r-usb-p-label" value="USB-A - port 2&#10;MIDI + feedback" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#8054B0;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="310" y="814" width="171" height="42" />
+        </mxCell>
+        <mxCell id="r-hdmi-label" value="HDMI - video" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#C87813;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="996" y="674" width="175" height="26" />
+        </mxCell>
+        <mxCell id="r-touch-label" value="USB touch - if available" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="854" y="789" width="310" height="28" />
+        </mxCell>
+        <mxCell id="r-power-cable-label" value="Power only" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#758390;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1175" y="769" width="210" height="26" />
+        </mxCell>
+        <mxCell id="r-note" value="MIDI and Stage start automatically - works without a phone, PC, router or Internet.&#10;The display is optional; Android, Desktop and browsers connect over the network (page 2)." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="868" width="1040" height="44" />
+        </mxCell>
+        <mxCell id="power-note" value="Power the Pi and Player with their own supplies. Use a separate USB power supply for the display." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="944" width="1504" height="25" />
+        </mxCell>
+        <mxCell id="host-note" value="One host at a time on the Captain USB-B port: Player, Android, Desktop or Pi. Do not use a splitter between hosts." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="977" width="1504" height="25" />
+        </mxCell>
+        <mxCell id="legend-0" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#2475BC;fillColor=#2475BC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="1030" width="30" height="7" />
+        </mxCell>
+        <mxCell id="legend-text-0" value="USB / data" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="90" y="1018" width="210" height="30" />
+        </mxCell>
+        <mxCell id="legend-1" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#8054B0;fillColor=#8054B0;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="290" y="1030" width="30" height="7" />
+        </mxCell>
+        <mxCell id="legend-text-1" value="MIDI (USB)" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="332" y="1018" width="225" height="30" />
+        </mxCell>
+        <mxCell id="legend-2" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#168374;fillColor=#168374;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="542" y="1030" width="30" height="7" />
+        </mxCell>
+        <mxCell id="legend-text-2" value="Network" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="584" y="1018" width="170" height="30" />
+        </mxCell>
+        <mxCell id="legend-3" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#C87813;fillColor=#C87813;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="762" y="1030" width="30" height="7" />
+        </mxCell>
+        <mxCell id="legend-text-3" value="HDMI" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="804" y="1018" width="170" height="30" />
+        </mxCell>
+        <mxCell id="legend-4" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#758390;fillColor=#758390;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="994" y="1030" width="30" height="7" />
+        </mxCell>
+        <mxCell id="legend-text-4" value="USB / power" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1036" y="1018" width="350" height="30" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="bosun-connections-2" name="2 - Apps and network">
+    <mxGraphModel dx="1600" dy="1080" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1080" math="0" shadow="0" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="usb" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="142" width="1520" height="166" />
+        </mxCell>
+        <mxCell id="lan" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="328" width="1520" height="226" />
+        </mxCell>
+        <mxCell id="hotspot" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F8FAFC;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="574" width="1520" height="230" />
+        </mxCell>
+        <mxCell id="browser" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F0F5F8;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="836" width="493" height="180" />
+        </mxCell>
+        <mxCell id="autonomy" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F0F5F8;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="553" y="836" width="493" height="180" />
+        </mxCell>
+        <mxCell id="limits" value="" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#D5DFE7;fillColor=#F0F5F8;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1066" y="836" width="494" height="180" />
+        </mxCell>
+        <mxCell id="u-cable" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="u-captain" target="u-app">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="l-usb" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="l-captain" target="l-pi">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="l-network" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#168374;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="l-pi" target="l-lan">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="l-client" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#168374;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="l-lan" target="l-app">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="h-usb" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#2475BC;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="h-captain" target="h-pi">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="h-wifi" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=0;strokeWidth=2;strokeColor=#168374;startArrow=block;startFill=1;endArrow=block;endFill=1;endSize=8;startSize=8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="h-pi" target="h-app">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="title" value="BOSUN / Android, Desktop and network" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=30;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="30" width="1504" height="42" />
+        </mxCell>
+        <mxCell id="subtitle" value="Three ways to connect the apps to the Captain. The Player is optional for editing alone; to play, use the wiring on page 1." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="82" width="1504" height="44" />
+        </mxCell>
+        <mxCell id="usb-title" value="01  Direct USB - select USB in the app" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="158" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="u-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="212" width="250" height="64" />
+        </mxCell>
+        <mxCell id="u-app" value="Bosun Android or Desktop&#10;Editor + Stage" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="636" y="212" width="360" height="64" />
+        </mxCell>
+        <mxCell id="u-cable-label" value="USB data cable + adapter" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="344" y="208" width="280" height="26" />
+        </mxCell>
+        <mxCell id="u-note" value="Android: USB host/OTG + USB permissions.&#10;Desktop: USB-A or USB-C port.&#10;To play: connect the Player too&#10;and enable the MIDI bridge in the app." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1050" y="201" width="466" height="82" />
+        </mxCell>
+        <mxCell id="lan-title" value="02  Local network - Captain connected to the Pi by USB" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="344" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="l-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="414" width="220" height="64" />
+        </mxCell>
+        <mxCell id="l-pi" value="Raspberry Pi 3&#10;Bosun hub" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#AFD9CC;fillColor=#E9F7F1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="434" y="414" width="220" height="64" />
+        </mxCell>
+        <mxCell id="l-lan" value="Existing LAN&#10;Router / switch" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#AFD9CC;fillColor=#E9F7F1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="810" y="414" width="240" height="64" />
+        </mxCell>
+        <mxCell id="l-app" value="Bosun Android / Desktop&#10;Editor + Stage" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1220" y="414" width="300" height="64" />
+        </mxCell>
+        <mxCell id="l-usb-label" value="USB-B &lt;-&gt; USB-A" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="304" y="408" width="124" height="26" />
+        </mxCell>
+        <mxCell id="l-network-label" value="Wi-Fi / Ethernet" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#168374;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="658" y="407" width="148" height="26" />
+        </mxCell>
+        <mxCell id="l-client-label" value="Same LAN" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#168374;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1055" y="407" width="158" height="26" />
+        </mxCell>
+        <mxCell id="l-note" value="Android over Wi-Fi; Desktop and Pi over Wi-Fi or Ethernet. In the apps: Raspberry Pi (network) -&gt; Find Raspberry Pi -&gt; Connect.&#10;If discovery fails: enter the Pi hostname/IP and port 9876." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="494" width="1440" height="44" />
+        </mxCell>
+        <mxCell id="hotspot-title" value="03  Pi Wi-Fi hotspot - Captain connected to the Pi by USB" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="64" y="590" width="1460" height="32" />
+        </mxCell>
+        <mxCell id="h-captain" value="MIDI Captain&#10;USB-B" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="660" width="220" height="64" />
+        </mxCell>
+        <mxCell id="h-pi" value="Raspberry Pi 3 - Wi-Fi hotspot&#10;Bosun hub - default IP 10.42.0.1" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#AFD9CC;fillColor=#E9F7F1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="504" y="648" width="396" height="88" />
+        </mxCell>
+        <mxCell id="h-app" value="Bosun Android / Desktop&#10;Join the configured Pi Wi-Fi network" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=1;fontColor=#172B3A;rounded=1;arcSize=12;strokeWidth=1;strokeColor=#B4D0ED;fillColor=#EDF5FF;spacing=8;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1140" y="656" width="380" height="72" />
+        </mxCell>
+        <mxCell id="h-usb-label" value="USB-B &lt;-&gt; USB-A" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#2475BC;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="306" y="653" width="192" height="27" />
+        </mxCell>
+        <mxCell id="h-wifi-label" value="Direct Wi-Fi&#10;No router / Internet needed" style="whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontStyle=0;fontColor=#168374;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="906" y="628" width="228" height="44" />
+        </mxCell>
+        <mxCell id="h-note" value="In the apps: Raspberry Pi (network) -&gt; Find Raspberry Pi -&gt; Connect; default manual address: 10.42.0.1:9876.&#10;Stay on the Pi Wi-Fi even if the device reports no Internet. Desktop needs Wi-Fi; Ethernet remains available on the Pi." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="80" y="748" width="1440" height="44" />
+        </mxCell>
+        <mxCell id="browser-title" value="APPS AND BROWSERS" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="58" y="848" width="457" height="28" />
+        </mxCell>
+        <mxCell id="browser-body" value="Apps: full editor + Stage - port 9876&#10;Browser: Stage only - http://&lt;Pi&gt;:8080/&#10;Hotspot: http://10.42.0.1:8080/&#10;VNC: exact display mirror, read-only.&#10;Separate appearance settings per app/browser." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="58" y="879" width="457" height="131" />
+        </mxCell>
+        <mxCell id="autonomy-title" value="STANDALONE PI" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="571" y="848" width="457" height="28" />
+        </mxCell>
+        <mxCell id="autonomy-body" value="The Captain stays on the Pi USB port.&#10;With the Player on the Pi, the Pi handles MIDI.&#10;Closing the app leaves MIDI and HDMI Stage on.&#10;Apps, browsers and the display can coexist.&#10;Install hub and Stage; set up a hotspot if needed." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="571" y="879" width="457" height="131" />
+        </mxCell>
+        <mxCell id="limits-title" value="NATIVE FIRMWARE AND LIMITS" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1084" y="848" width="458" height="28" />
+        </mxCell>
+        <mxCell id="limits-body" value="Firmware updates: use Bosun Desktop.&#10;See README for supported update paths.&#10;Player Wi-Fi/Bluetooth does not connect Bosun.&#10;Android is not a network hub for the Pi.&#10;Captain USB-B: one host at a time." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1084" y="879" width="458" height="131" />
+        </mxCell>
+        <mxCell id="q-foot" value="The Android setup needs Bosun running for its MIDI bridge; in the Pi setup, the bridge runs on the Raspberry Pi." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="48" y="1030" width="1504" height="27" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
