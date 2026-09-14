@@ -99,6 +99,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ---------- 1. Validate the fdroiddata checkout ----------
+$FdroidDataPath = (Resolve-Path -LiteralPath $FdroidDataPath).Path
 $recipePath = Join-Path $FdroidDataPath "metadata\$AppId.yml"
 if (-not (Test-Path $recipePath)) {
     throw "No recipe at $recipePath - is -FdroidDataPath a real fdroiddata clone with this app already submitted?"
@@ -128,34 +129,8 @@ if ($freshJson -notmatch '"versionCode":\d+') {
     throw "Extracted tauri.conf.json doesn't look right (no versionCode field found) - aborting before touching the recipe."
 }
 
-# ---------- 4. Splice it into the recipe ----------
-Write-Host "[3/5] Updating $recipePath ..." -ForegroundColor Cyan
-$content = [System.IO.File]::ReadAllText($recipePath)
-$pattern = "printf '%s'\s*'(.*?)'\r?\n\s*> src-tauri/gen/android/app/src/main/assets/tauri\.conf\.json"
-$regexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline
-$match = [System.Text.RegularExpressions.Regex]::Match($content, $pattern, $regexOptions)
-if (-not $match.Success) {
-    throw "Could not find the tauri.conf.json printf literal in $recipePath - has the recipe's structure changed?"
-}
-$literalGroup = $match.Groups[1]
-# The captured group is still YAML-folded (embedded newlines + indentation
-# from the last rewritemeta pass) - fold it back to a single line the same
-# way YAML's own parser would before comparing, or this always looks
-# "different" even when nothing actually changed.
-$foldedOld = [System.Text.RegularExpressions.Regex]::Replace($literalGroup.Value, "[ \t]*\r?\n\s*", " ")
-if ($foldedOld -eq $freshJson) {
-    Write-Host "  Already up to date - no change needed." -ForegroundColor DarkGray
-} else {
-    $newContent = $content.Substring(0, $literalGroup.Index) + $freshJson + $content.Substring($literalGroup.Index + $literalGroup.Length)
-    # No BOM: Set-Content -Encoding utf8 in PowerShell 5.1 adds one, which
-    # would corrupt this YAML file for fdroidserver's own parser.
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($recipePath, $newContent, $utf8NoBom)
-    Write-Host "  Literal replaced." -ForegroundColor Green
-}
-
-# ---------- 5. Match GitLab CI's exact ruamel.yaml, then canonicalize ----------
-Write-Host "[4/5] Ensuring the matching ruamel.yaml (0.18.10 + clib) is available ..." -ForegroundColor Cyan
+# ---------- 4. Match GitLab CI's serializer before editing the YAML ----------
+Write-Host "[3/5] Ensuring the matching ruamel.yaml (0.18.10 + clib) is available ..." -ForegroundColor Cyan
 $pyDepsDir = Join-Path $env:TEMP "bosun-fdroid-pydeps"
 $ruamelMarker = Join-Path $pyDepsDir "ruamel"
 if (-not (Test-Path $ruamelMarker)) {
@@ -163,18 +138,37 @@ if (-not (Test-Path $ruamelMarker)) {
     Invoke-NativeTool { & $python -m pip install --target $pyDepsDir --no-deps "ruamel.yaml==0.18.10" "ruamel.yaml.clib==0.2.12" }
     if ($LASTEXITCODE -ne 0) { throw "pip install of the pinned ruamel.yaml failed." }
 }
+# Match the server revision used for the reproducibility verification too:
+# a different metadata writer can produce YAML that fails CI formatting.
+$serverRevision = "6416542655477ad44adbc59878e8e302366d3803"
+$serverMarker = Join-Path $pyDepsDir "fdroidserver-$serverRevision.txt"
+if (-not (Test-Path -LiteralPath $serverMarker)) {
+    $serverArchive = "https://gitlab.com/fdroid/fdroidserver/-/archive/$serverRevision/fdroidserver-$serverRevision.tar.gz"
+    Invoke-NativeTool { & $python -m pip install --target $pyDepsDir --upgrade --no-deps $serverArchive }
+    if ($LASTEXITCODE -ne 0) { throw "Installing the pinned fdroidserver failed." }
+    Set-Content -LiteralPath $serverMarker -Value $serverRevision -Encoding ascii
+}
 
-Write-Host "[5/5] Running fdroidserver rewritemeta + lint ..." -ForegroundColor Cyan
+$updateScript = Join-Path $PSScriptRoot "update_fdroid_config.py"
+$tempConfig = [System.IO.Path]::GetTempFileName()
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($tempConfig, $freshJson, $utf8NoBom)
+$previousPythonPath = $env:PYTHONPATH
 $env:PYTHONPATH = $pyDepsDir
 Push-Location $FdroidDataPath
 try {
-    Invoke-NativeTool { & $python -m fdroidserver.rewritemeta $AppId }
+    Write-Host "[4/5] Updating the matching release build in $recipePath ..." -ForegroundColor Cyan
+    Invoke-NativeTool { & $python -X utf8 $updateScript $recipePath $tempConfig }
+    if ($LASTEXITCODE -ne 0) { throw "F-Droid configuration update failed." }
+    Write-Host "[5/5] Running fdroidserver rewritemeta + lint ..." -ForegroundColor Cyan
+    Invoke-NativeTool { & $python -X utf8 -m fdroidserver.rewritemeta $AppId }
     if ($LASTEXITCODE -ne 0) { throw "fdroidserver.rewritemeta failed." }
-    Invoke-NativeTool { & $python -m fdroidserver.lint $AppId }
+    Invoke-NativeTool { & $python -X utf8 -m fdroidserver.lint $AppId }
     if ($LASTEXITCODE -ne 0) { throw "fdroidserver.lint reported an error (not just warnings) - check output above." }
 } finally {
     Pop-Location
-    Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue
+    $env:PYTHONPATH = $previousPythonPath
+    Remove-Item -LiteralPath $tempConfig -ErrorAction SilentlyContinue
 }
 
 Write-Host "`nDone. Review the diff, then commit and push from $FdroidDataPath yourself:" -ForegroundColor Green
