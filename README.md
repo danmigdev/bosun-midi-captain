@@ -1,10 +1,14 @@
-# Bosun
+# Bosun: MIDI Captain firmware for Kemper Player
 
-Bosun turns the 10-switch PaintAudio MIDI Captain into a configurable controller for Kemper Player and generic MIDI devices. Use the desktop or Android app to edit your sounds, and Stage to view the current rig and effects on a tablet, browser or Raspberry Pi display.
+Bosun is open-source alternative firmware for the 10-switch PaintAudio MIDI Captain. It turns the pedal into a configurable **MIDI foot controller for the Kemper PROFILER Player (KPP)** and generic MIDI devices, with a desktop and Android app for editing footswitch assignments, banks and rigs.
+
+**Stage** adds an external Kemper Player display: see live rig names and effect states on a phone, tablet, browser or Raspberry Pi screen. Connect over USB, or use a Pi hub for access over your local network or Wi-Fi hotspot.
 
 The maintained pedal firmware runs natively in C. The supported update target is the RP2040 MIDI Captain with 8 MiB flash.
 
-![Bosun Stage on the Raspberry Pi](docs/ui-test-screenshots/stage_vnc.png)
+[Download](#download-and-install) · [Connections](#connections) · [Editor](#configure-your-sounds) · [Stage display](#stage) · [Screenshots](#desktop-app-screenshots)
+
+![Bosun Stage display on Raspberry Pi showing the current rig, bank and colour-coded effect switches](docs/ui-test-screenshots/stage_vnc.png)
 
 See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch editing, MIDI Learn and device settings.
 
@@ -26,7 +30,9 @@ update and Stage features. Keep the app and Pi on matching versions.
 
 Windows requires WebView2. Allow the Android USB permission prompt when connecting the pedal directly. Use a desktop computer for initial pedal setup and firmware updates.
 
-## Connection options: MIDI Captain, Player, Android, desktop and Raspberry Pi 3 + display
+<a id="connections"></a>
+
+## Connect MIDI Captain and Kemper Player over USB or Wi-Fi
 
 An [editable draw.io overview](docs/diagrams/bosun-connections.drawio) (English, two pages) summarises the wiring and app/network connections.
 
@@ -149,7 +155,9 @@ Connect the pedal directly to a desktop computer and follow **Install firmware**
 
 Once Bosun connects, create a supported profile and move the Captain's USB connection to a configured Raspberry Pi. Use **Update Bosun** below to complete the migration to native firmware. The first-install backup remains necessary: the updater's later backup contains the bootstrap installation, not the original factory firmware.
 
-## Configure your sounds
+<a id="configure-your-sounds"></a>
+
+## MIDI Captain editor: footswitches, banks and rigs
 
 - **Profiles** keep settings for different devices or setups separate.
 - **Patches** contains your banks and rigs. Open a rig to assign messages to a switch's press, release or hold action, and set its label and LED colour.
@@ -166,19 +174,19 @@ These screenshots show earlier desktop versions. Labels and available actions ma
 
 ### Home
 
-![Desktop Home screen with connection status, active profile and live pedal state](docs/ui-test-screenshots/43_home_livemirror.png)
+![Bosun desktop editor with the Kemper Player profile, USB connection status and current rig](docs/ui-test-screenshots/43_home_livemirror.png)
 
 ### Patches
 
-![Patches grid](docs/ui-test-screenshots/02_patches.png)
+![Bosun patches grid for organising banks and rigs](docs/ui-test-screenshots/02_patches.png)
 
 ### Patch editor
 
-![Patch editor, switch rows](docs/ui-test-screenshots/ui_editor.png)
+![MIDI Captain patch editor with footswitch assignments](docs/ui-test-screenshots/ui_editor.png)
 
-![Patch editor, expanded switch](docs/ui-test-screenshots/ui_editor_expanded.png)
+![Expanded footswitch settings in the Bosun patch editor](docs/ui-test-screenshots/ui_editor_expanded.png)
 
-![Patch editor, pedal map and switch rows](docs/ui-test-screenshots/42_editor_pedalmap.png)
+![Bosun patch editor with the MIDI Captain pedal map and switch rows](docs/ui-test-screenshots/42_editor_pedalmap.png)
 
 ### Quick setup
 
@@ -204,7 +212,9 @@ These screenshots show earlier desktop versions. Labels and available actions ma
 
 ![Maintenance](docs/ui-test-screenshots/ui_maint.png)
 
-## Stage
+<a id="stage"></a>
+
+## Stage: external display for Kemper Player
 
 Stage shows the current rig, bank, effects and expression mode. With compatible native firmware, tap or click a configured switch tile to operate the pedal.
 
@@ -216,6 +226,20 @@ Use **+ / −** to move between banks, or tap **BANK** to open the bank grid. Th
 The settings button opens Stage appearance controls for fonts, colours and sizes. Preferences are saved separately in each browser or app.
 
 A Raspberry Pi can show Stage automatically over HDMI. Its browser page also works from another screen on the same network. The optional read-only VNC viewer shows the actual Pi-rendered picture, including when no HDMI screen is connected. Follow the [Raspberry Pi installation and display guide](tools/rpi-hub/README.md).
+
+## Common questions
+
+### Can I use MIDI Captain as a Kemper Player footswitch controller?
+
+Yes. Bosun lets you assign rig changes and effect controls to the Captain's switches, including press, release and hold actions. Bidirectional USB MIDI returns rig names and effect states from the Player to the pedal. Choose the wiring that suits your setup in the [connection guide](#connections).
+
+### Is Bosun an alternative to the stock MIDI Captain firmware?
+
+Yes. Bosun replaces the factory firmware on the supported 10-switch Captain and adds a graphical editor and Stage display. You keep the same pedal hardware. Follow [first installation](#first-installation-from-factory-firmware), including the original firmware backup.
+
+### Can I use an Android tablet as a Kemper Player display?
+
+Yes. Connect the Captain and Player to Android through a USB-OTG hub, or connect both to a Raspberry Pi and reach Stage over Wi-Fi. The Captain running Bosun supplies the live data; see the [Android connection options](#2-android-over-usb-with-an-optional-player).
 
 ## Update firmware
 
