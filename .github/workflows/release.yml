@@ -18,6 +18,11 @@ on:
       tag:
         description: "Existing tag to build and attach (e.g. v0.4.0)"
         required: true
+      platform:
+        description: "Platform to rebuild for the existing tag"
+        type: choice
+        default: all
+        options: [all, windows, macos, linux, android]
 
 permissions:
   contents: write
@@ -78,6 +83,7 @@ jobs:
   native-package:
     name: Verified native update package
     needs: verify
+    if: github.event.inputs.platform != 'android'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -116,19 +122,12 @@ jobs:
 
   build:
     needs: [verify, native-package]
+    if: github.event.inputs.platform != 'android'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            name: windows
-          # Pinned to macos-15 (Apple Silicon): macos-latest is migrating to
-          # macOS 26. Note the artifact is aarch64-only; Intel Macs would need
-          # a separate x86_64 build (e.g. macos-13) or a universal binary.
-          - os: macos-15
-            name: macos
-          - os: ubuntu-22.04
-            name: linux
+        # macos-15 is Apple Silicon; the DMG is aarch64-only.
+        include: ${{ fromJSON('{"all":[{"os":"windows-latest","name":"windows"},{"os":"macos-15","name":"macos"},{"os":"ubuntu-22.04","name":"linux"}],"windows":[{"os":"windows-latest","name":"windows"}],"macos":[{"os":"macos-15","name":"macos"}],"linux":[{"os":"ubuntu-22.04","name":"linux"}],"android":[]}')[github.event.inputs.platform || 'all'] }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -214,7 +213,9 @@ jobs:
         if: matrix.name == 'windows'
         shell: pwsh
         working-directory: editor
-        run: npm run package:portable
+        # npm's script launches Windows PowerShell 5 through cmd.exe, which
+        # inherits incompatible PowerShell 7 module paths from the runner.
+        run: ../tools/package-portable.ps1
 
       - name: Build - macOS dmg
         if: matrix.name == 'macos'
@@ -252,6 +253,7 @@ jobs:
 
   android:
     needs: verify
+    if: github.event.inputs.platform == '' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android'
     runs-on: ubuntu-latest
     env:
       # Reproducible-builds match for the F-Droid submission (docs/fdroid-
