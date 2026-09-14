@@ -1,4 +1,5 @@
 # F-Droid build metadata for the pinned release below.
+# Reproducibility maintenance: android-reproducible-builds.md.
 Categories:
   - Multimedia
 License: GPL-3.0-or-later

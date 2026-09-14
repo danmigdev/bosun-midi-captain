@@ -1465,7 +1465,7 @@ describe("StageView", () => {
 
     it("shows the tuner with note and pitch indicator when active", async () => {
       const { container } = renderStage();
-      expect(container.querySelector(".stage__tuner")).toBeNull();
+      expect(container.querySelector(".tuner-screen")).toBeNull();
 
       await pushFirmwareMessage({
         type: "CONTEXT",
@@ -1475,9 +1475,10 @@ describe("StageView", () => {
           kemper_tuner_deviance: 8200,
         },
       });
-      expect(container.querySelector(".stage__tuner")).toHaveTextContent(/A ●/);
+      expect(container.querySelector(".tuner-screen__note")).toHaveTextContent("A");
+      expect(container.querySelector(".tuner-screen__meter")).toHaveAttribute("aria-label", "A: In tune");
 
-      // Deviance below 8000 renders a flat sign.
+      // Flat feedback updates the fullscreen pitch indicator.
       await pushFirmwareMessage({
         type: "CONTEXT",
         context: {
@@ -1486,7 +1487,7 @@ describe("StageView", () => {
           kemper_tuner_deviance: 7800,
         },
       });
-      expect(container.querySelector(".stage__tuner")).toHaveTextContent(/A ♭/);
+      expect(container.querySelector(".tuner-screen__meter")).toHaveAttribute("aria-label", "A: Tune up");
     });
 
     it("hides the tuner when it turns off", async () => {
@@ -1495,13 +1496,13 @@ describe("StageView", () => {
         type: "CONTEXT",
         context: { kemper_tuner: "on", kemper_tuner_note: "A", kemper_tuner_deviance: 8200 },
       });
-      expect(container.querySelector(".stage__tuner")).not.toBeNull();
+      expect(container.querySelector(".tuner-screen")).not.toBeNull();
 
       await pushFirmwareMessage({
         type: "CONTEXT",
         context: { kemper_tuner: "off" },
       });
-      expect(container.querySelector(".stage__tuner")).toBeNull();
+      expect(container.querySelector(".tuner-screen")).toBeNull();
     });
   });
 
@@ -2314,7 +2315,7 @@ describe("StageView", () => {
       });
       expect(container.querySelector(".stage__rig-name")).toHaveTextContent("CRUNCH");
       expect(container.querySelector(".stage__bpm")).toHaveTextContent("132");
-      expect(container.querySelector(".stage__tuner")).toHaveTextContent("A");
+      expect(container.querySelector(".tuner-screen__note")).toHaveTextContent("A");
     });
 
     it("follows a rig change: bank/rig header and block colours track together", async () => {

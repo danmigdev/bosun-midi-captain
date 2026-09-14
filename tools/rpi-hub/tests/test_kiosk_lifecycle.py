@@ -230,6 +230,14 @@ def test_wayvnc_uses_but_cannot_remove_the_kiosk_private_runtime():
     assert _value(lines, "PartOf") == "bosun-kiosk.service"
 
 
+def test_output_recovery_restart_brings_back_its_dependent_vnc_viewer():
+    # Requires= in the mirror stops it when outputs are restarted. Starting
+    # outputs must pull it back in, otherwise HDMI works but VNC stays dead.
+    lines = _active_lines(ROOT / "systemd/bosun-outputs.service")
+    assert "bosun-wayvnc.service" in _value(lines, "Wants").split()
+    assert _value(lines, "After") == "bosun-kiosk.service"
+
+
 def test_installer_repairs_groups_for_new_and_existing_users():
     installer = INSTALLER.read_text(encoding="utf-8")
     loop = re.search(

@@ -101,6 +101,7 @@ pub async fn connect(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _operation = crate::usb_update::normal_operation()?;
     let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
     if let Some(existing) = guard.as_ref() {
         // Stale handle whose reader thread already exited (firmware
@@ -275,6 +276,7 @@ pub fn disconnect(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn send_command(line: String, state: State<AppState>) -> Result<(), String> {
+    let _operation = crate::usb_update::normal_operation()?;
     if crate::tcp_serial::tcp_active() {
         return crate::tcp_serial::tcp_send(&line);
     }
@@ -375,7 +377,10 @@ pub async fn auto_connect(
 
     for p in ports {
         let name = p.to_string_lossy().into_owned();
-        let result = probe_ping(&name);
+        let result = {
+            let _operation = crate::usb_update::normal_operation()?;
+            probe_ping(&name)
+        };
         eprintln!("[auto_connect] {} -> {:?}", name, result);
         match result {
             Ok(_) => {
@@ -406,6 +411,7 @@ pub async fn auto_connect(
 /// still shows the manual fallback if no RPI-RP2 appears.
 #[tauri::command]
 pub fn reboot_to_bootloader(state: State<AppState>) -> Result<String, String> {
+    let _operation = crate::usb_update::normal_operation()?;
     // Release any handle we hold so our own reader thread isn't sitting on
     // the console port when we try to open it here.
     if let Ok(mut guard) = state.serial.lock() {

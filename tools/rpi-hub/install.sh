@@ -31,6 +31,7 @@ fi
 # A partially copied checkout can contain the host tool but omit its headers,
 # littlefs sources, or USB rule; discovering that during compilation is too late.
 for required in \
+    tools/rpi-hub/kiosk/bosun-hdmi-recovery.py \
     tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
     tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
     firmware-native/platform/host/storage_image.c firmware-native/platform/rp2040/storage.c \

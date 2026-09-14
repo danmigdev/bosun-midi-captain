@@ -15,9 +15,11 @@
   type Props = {
     connected: boolean; activeProfile?: ProfileInfo | null; firmwareInfo?: FirmwareIdentity | null;
     unifiedRelease?: string | null; resumeUnifiedUpdate?: boolean; onUnifiedUpdate?: () => void;
+    usbRelease?: string | null; onUsbUpdate?: () => void;
   };
   let { connected, activeProfile = null, firmwareInfo = null,
-    unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate }: Props = $props();
+    unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate,
+    usbRelease = null, onUsbUpdate }: Props = $props();
   let canUpdateFirmware = $derived(connected && supportsFirmwareFileOta(firmwareInfo));
 
   let stats = $state<DeviceStats | null>(null);
@@ -627,6 +629,13 @@
   </section>
 
   {#if !IS_ANDROID}
+    {#if usbRelease}
+      <section class="block">
+        <h3>USB firmware</h3>
+        <p class="muted small">Install or reinstall the bundled native firmware directly from this computer. Bosun keeps a full recovery backup and verifies your saved configuration after restarting the Captain.</p>
+        <button class="primary" disabled={!connected} onclick={onUsbUpdate}>Install firmware (USB) — {usbRelease}</button>
+      </section>
+    {/if}
     {#if unifiedRelease || resumeUnifiedUpdate}
       <section class="block">
         <h3>Update Bosun</h3>
@@ -666,10 +675,12 @@
         <h3>Firmware</h3>
         <p class="muted small">
           {#if isNativeFirmware(firmwareInfo)}
-            {#if unifiedRelease || resumeUnifiedUpdate}
+            {#if usbRelease}
+              Use Install firmware (USB) above to install or reinstall the bundled release and preserve your profiles.
+            {:else if unifiedRelease || resumeUnifiedUpdate}
               Use Update Bosun above to install the release and preserve your profiles.
             {:else}
-              New Bosun releases can be installed through a Raspberry Pi with update support.
+              Connect by Desktop USB or through a Raspberry Pi with update support to install a bundled native release.
             {/if}
           {:else if firmwareInfo?.fw}
             This device does not support CircuitPython firmware updates.

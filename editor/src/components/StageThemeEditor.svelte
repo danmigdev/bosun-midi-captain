@@ -78,7 +78,7 @@
   <div class="theme-panel__sheet">
   <div class="theme-panel__header">
     <h2>Stage appearance</h2>
-    <button type="button" class="theme-panel__close stage-control-icon stage-control-icon--dialog" onclick={onclose} aria-label="Close appearance panel">
+    <button type="button" class="theme-panel__close stage-control-icon stage-control-icon--dialog stage-control-icon--close" onclick={onclose} aria-label="Close appearance panel">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </button>
   </div>

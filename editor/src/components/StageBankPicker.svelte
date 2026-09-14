@@ -57,7 +57,7 @@
         onchange={(mode) => onmodechange?.(mode as BankSelectionMode)} />
       <button
         type="button"
-        class="bank-picker__close stage-control-icon stage-control-icon--dialog"
+        class="bank-picker__close stage-control-icon stage-control-icon--dialog stage-control-icon--close"
         aria-label="Close bank selection"
         disabled={pending}
         onclick={close}

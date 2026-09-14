@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply HDMI/fallback output policy in Cage, then wait for Wayland events.
+# Apply HDMI/fallback policy and recover panels powered after the Pi.
 set -eu
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/bosun-kiosk}"
@@ -15,14 +15,14 @@ if [[ ! -r "$OUTPUT_CONFIG" ]]; then
     exit 1
 fi
 
-# The kiosk owns the runtime directory. Wait only during startup; kanshi then
-# sleeps on the Wayland connection and reacts to output changes without polling.
+# The kiosk owns the runtime directory. Wait only during startup. The supervisor
+# keeps kanshi as the policy owner and briefly suspends it during HDMI recovery.
 shopt -s nullglob
 for ((attempt = 0; attempt < 30; attempt++)); do
     for socket_path in "$XDG_RUNTIME_DIR"/wayland-*; do
         [[ -S "$socket_path" ]] || continue
         export WAYLAND_DISPLAY="${socket_path##*/}"
-        exec kanshi --config "$OUTPUT_CONFIG"
+        exec python3 "$SCRIPT_DIR/bosun-hdmi-recovery.py" "$OUTPUT_CONFIG"
     done
     sleep 0.3
 done

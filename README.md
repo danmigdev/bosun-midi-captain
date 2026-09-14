@@ -16,10 +16,10 @@ See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch edit
 
 Download the package for your system from [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
 
-These instructions describe source version **0.6.5**. Until a matching release
-is published, use the [desktop build guide](editor/SETUP.md) or
-[Android build guide](editor/src-tauri/android-config.md) for the new native
-update and Stage features. Keep the app and Pi on matching versions.
+These instructions cover **Bosun 0.6.5**, including native firmware updates
+and the Stage tuner. Keep the app and Pi on matching versions. To build
+from source, use the [desktop build guide](editor/SETUP.md) or
+[Android build guide](editor/src-tauri/android-config.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
@@ -218,6 +218,8 @@ These screenshots show earlier desktop versions. Labels and available actions ma
 
 Stage shows the current rig, bank, effects and expression mode. With compatible native firmware, tap or click a configured switch tile to operate the pedal.
 
+Activating the Kemper tuner opens a [dedicated fullscreen tuner](docs/stage-instrument-display.md#tuner) with a large note and graphical pitch indicator. Switch the tuner off to return to Stage automatically.
+
 Use **+ / −** to move between banks, or tap **BANK** to open the bank grid. The selector offers two behaviours:
 
 - **Load rig immediately** changes to the selected bank straight away.
@@ -244,20 +246,20 @@ Yes. Connect the Captain and Player to Android through a USB-OTG hub, or connect
 ## Update firmware
 
 1. Export a configuration backup and save all pending edits.
-2. Connect the Captain by USB to a configured Raspberry Pi, then connect Bosun Desktop to that Pi.
-3. Select **Update Bosun**, review the bundled release and choose **Update**.
-4. Keep the Pi and Captain powered until the app confirms completion.
+2. For existing native firmware, connect the Captain directly to the computer by USB and select **USB** in Bosun Desktop. The top bar offers **Update firmware (USB)** only when the bundled version is newer. For a manual installation or reinstallation, choose **Maintenance → Install firmware (USB)**. Alternatively, connect the Captain to a configured Pi, connect Desktop to that Pi and choose **Update Bosun**.
+3. Review the bundled release and choose **Update**.
+4. Keep the Captain and the host performing the update powered until completion. Direct USB pauses MIDI and Stage, saves a full backup on the computer and verifies the firmware and settings after reboot.
 
-The updater supports native upgrades and migration from supported existing CircuitPython configurations. It checks compatibility before writing firmware, makes a complete recovery backup and verifies the result. Unsupported profiles or configurations stop the update before installation.
+Both paths support native upgrades on the 8 MiB RP2040 Captain. The Pi path also migrates supported existing CircuitPython configurations. Compatibility checks and a verified full recovery backup precede firmware writing. Unsupported configurations stop the update before installation.
 
-Use a current desktop package with its matching Pi hub. Direct desktop USB and Android connections do not perform this update flow. To reopen an update after reconnecting, use **Check Bosun update**; do not start another installation while one is still running. If recovery is required, retain the backup shown by the app.
+Use a desktop package containing the native release. Direct USB requires access to the Captain's PICOBOOT interface (WinUSB on Windows); see the [USB update and recovery guide](docs/firmware-updates.md#direct-desktop-usb). An interrupted USB write reopens with **Restore backup** available for the same Captain. Pi updates can be reopened with **Check Bosun update**. Keep the backup shown by the app until recovery is complete. Android does not perform these updates.
 
 ## Connection help
 
 - **Pedal not found:** use a USB data cable, check power and reconnect it. Close other programs that may hold the same USB connection.
 - **Pi not found:** keep the app and Pi on the same local network. Enter the Pi's hostname and port `9876` manually if network discovery is unavailable.
 - **No patches:** create a profile and add your first rig.
-- **Update unavailable:** connect the desktop through the Pi and check that its update support and the desktop's bundled release are installed.
+- **Update unavailable:** use Bosun Desktop with its bundled native release. Direct USB requires existing native firmware; migration from CircuitPython requires a Pi with update support.
 
 ## License
 

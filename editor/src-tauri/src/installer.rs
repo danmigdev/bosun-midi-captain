@@ -161,6 +161,7 @@ fn assets_status(app: &AppHandle) -> (bool, Vec<String>) {
 
 #[tauri::command]
 pub fn flash_circuitpython(target: String, app: AppHandle) -> Result<(), String> {
+    let _operation = crate::usb_update::normal_operation()?;
     let resource = app
         .path()
         .resolve("circuitpython.uf2", BaseDirectory::Resource)
@@ -176,6 +177,7 @@ pub fn flash_circuitpython(target: String, app: AppHandle) -> Result<(), String>
 
 #[tauri::command]
 pub fn install_firmware(target: String, app: AppHandle) -> Result<Vec<String>, String> {
+    let _operation = crate::usb_update::normal_operation()?;
     let resource_root = app
         .path()
         .resolve("", BaseDirectory::Resource)

@@ -220,6 +220,11 @@ foreach ($tree in @("firmware", "lib", "update")) {
     Write-Host "[ok  ] $tree\"
 }
 
+# License for the small RP2040 flash-identification helper embedded in Bosun.
+$licenseDir = Join-Path $stageDir "licenses"
+New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
+Copy-Item -LiteralPath (Join-Path $tauriDir "vendor/picotool/LICENSE.TXT") -Destination (Join-Path $licenseDir "picotool.txt")
+
 # Drop python caches the device installer skips anyway - keeps the ZIP clean.
 Get-ChildItem -Path $stageDir -Recurse -Directory -Filter "__pycache__" |
     Remove-Item -Recurse -Force
@@ -236,8 +241,13 @@ $product $version - portable build
 Windows 11 already includes the WebView2 runtime. On older Windows, install
 the free Microsoft WebView2 runtime if the window stays blank.
 
-Keep $product.exe together with circuitpython.uf2, firmware\ and lib\: the
+Keep $product.exe together with circuitpython.uf2, firmware\, lib\ and update\: the
 firmware installer reads them from beside the executable.
+
+Native firmware can be updated via Maintenance > Install firmware (USB),
+or through a configured Raspberry Pi. Direct USB requires the Captain's
+PICOBOOT interface to use WinUSB. Bosun keeps its recovery backup in the
+application data directory and shows its location in the update window.
 "@
 Set-Content -Path (Join-Path $stageDir "README.txt") -Value $readme -Encoding utf8
 

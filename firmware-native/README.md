@@ -7,11 +7,11 @@ parallel firmware target.
 
 ## Install or update
 
-For a Captain already running Bosun, connect it by USB to a Raspberry Pi running
-Bosun Hub. Connect Bosun Desktop to that Pi, save pending pedal changes and
-select **Update Bosun**. Follow the
-[firmware update instructions](../docs/firmware-updates.md) for Pi prerequisites,
-configuration migration and backup/recovery. The update package supports the
+For existing native firmware, connect the Captain directly by USB to Bosun Desktop,
+save pending changes and select **Update firmware (USB)**. For CircuitPython
+migration or a Captain hosted by a Pi, connect Bosun Desktop to the Pi and select
+**Update Bosun**. Follow the [firmware update instructions](../docs/firmware-updates.md)
+for USB driver requirements, Pi prerequisites and backup/recovery. The update package supports the
 RP2040 MIDI Captain with **8 MiB flash**.
 
 A raw UF2 does not migrate configuration or create a recovery backup. Use the

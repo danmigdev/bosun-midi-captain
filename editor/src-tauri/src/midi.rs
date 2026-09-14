@@ -125,6 +125,7 @@ pub fn midi_bridge_start(
     kemper: Option<String>,
     pedal: Option<String>,
 ) -> Result<BridgeStatus, String> {
+    let _operation = crate::usb_update::normal_operation()?;
     // Tear down any existing bridge first so a restart can't leak connections.
     {
         let mut g = state.bridge.lock().map_err(|_| "lock poisoned")?;

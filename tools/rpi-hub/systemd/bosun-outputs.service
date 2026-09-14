@@ -2,6 +2,7 @@
 Description=Bosun Stage HDMI and no-panel output policy
 After=bosun-kiosk.service
 Requires=bosun-kiosk.service
+Wants=bosun-wayvnc.service
 PartOf=bosun-kiosk.service
 
 [Service]

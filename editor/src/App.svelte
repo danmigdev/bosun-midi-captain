@@ -5,6 +5,8 @@
   import Installer from "./components/Installer.svelte";
   import FirmwarePushOverlay from "./components/FirmwarePushOverlay.svelte";
   import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
+  import NativeUsbUpdate from "./components/NativeUsbUpdate.svelte";
+  import { usbUpdateStatus, usbUpdateTerminal, type UsbUpdateJob } from "./lib/usb-update";
   import MaintenancePanel from "./components/MaintenancePanel.svelte";
   import MidiMonitor from "./components/MidiMonitor.svelte";
   import Dashboard from "./components/Dashboard.svelte";
@@ -279,6 +281,50 @@
   let hubUpdateOnly = $state(false);
   let canUpdateFirmware = $derived(connected && !hubUpdateOnly && supportsFirmwareFileOta(deviceInfo));
   let bundledUpdate = $state<BundledUpdateManifest | null>(null);
+  let usbJob = $state<UsbUpdateJob | null>(null);
+  let usbPreparing = $state(false);
+  let showUsbUpdate = $state(false);
+  let usbUpdatePort = $state("");
+  let usbInstalled = $state<string | undefined>();
+  let usbLocked = $derived(usbPreparing || (!!usbJob && !usbUpdateTerminal(usbJob)));
+  let canUseUsbUpdate = $derived(!IS_ANDROID && connected && !networkSession && !busy && !usbLocked && isNativeFirmware(deviceInfo) && !!bundledUpdate);
+  let hasUsbUpdate = $derived(canUseUsbUpdate && unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate));
+  function openUsbUpdate() {
+    if (!canUseUsbUpdate || showFirmwarePush || showUnifiedUpdate || showUsbUpdate) return;
+    usbJob = null;
+    usbUpdatePort = connectedPortName;
+    usbInstalled = deviceInfo?.fw;
+    showUsbUpdate = true;
+  }
+  function prepareUsbUpdate() {
+    usbPreparing = true;
+    connected = false;
+    firmwarePushSession++;
+    learning = false;
+    showInstaller = false;
+  }
+  function acceptUsbJob(job: UsbUpdateJob | null) {
+    usbJob = job;
+    usbPreparing = false;
+  }
+  async function closeUsbUpdate() {
+    showUsbUpdate = false;
+    if (usbLocked || connected) return;
+    const port = usbJob?.port || usbUpdatePort;
+    if (!port) return;
+    busy = true;
+    try {
+      // Reconnect only the port verified by the worker, never an unrelated pedal.
+      if (!await isConnected()) await connect(port);
+      connectionMode = "usb";
+      connectedPortName = port;
+      connected = true;
+      await refetchAll();
+      _bridgeAutoDone = false;
+      void startBridge(true);
+    } catch (e) { error = String(e); }
+    finally { busy = false; }
+  }
   let hubCanUpdate = $state(false);
   let unifiedJob = $state<PendingUpdate | null>(readPendingUpdate());
   let showUnifiedUpdate = $state(false);
@@ -414,7 +460,17 @@
       void startBridge(true);
       showToast("ok", "Pedal reconnected");
     });
-    connected = await isConnected();
+    if (!IS_ANDROID) {
+      try {
+        const pending = await usbUpdateStatus();
+        if (pending && !usbUpdateTerminal(pending)) {
+          usbJob = pending;
+          usbUpdatePort = pending.port;
+          showUsbUpdate = true;
+        }
+      } catch (e) { error = String(e); }
+    }
+    connected = !usbLocked && await isConnected();
     if (connected) {
       if (connectionMode === "network" && networkHost.trim()) {
         try { connectedPortName = `tcp://${networkAddress(networkHost, networkPort)}`; } catch {}
@@ -429,7 +485,7 @@
     // for the pedal and attach if found. Stays quiet when no pedal is plugged
     // in (no error toast) - the user can still connect manually. The watchdog
     // starts automatically via the `connected` $effect below.
-    if (!connected && (connectionMode === "network" || !manualMode) && (connectionMode === "usb" || networkHost.trim())) {
+    if (!usbLocked && !connected && (connectionMode === "network" || !manualMode) && (connectionMode === "usb" || networkHost.trim())) {
       busy = true;
       try {
         connectedPortName = await connectSelected();
@@ -629,7 +685,7 @@
   }
 
   async function handleLinkLoss(manual = false) {
-    if (appDestroyed || (networkRecoveryPending && !connected)) return;
+    if (usbLocked || appDestroyed || (networkRecoveryPending && !connected)) return;
     // Capture ownership before clearing connected. Duplicate notifications and
     // firmware/profile operations must not start competing reconnect loops.
     const recover = connected && networkSession && !busy && !manual;
@@ -887,7 +943,7 @@
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
   // pedal doesn't (prompt).
   async function pollForUnflashedPedal() {
-    if (connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
+    if (usbLocked || showUsbUpdate || connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
     // Don't let a new probe start while the previous one is still running:
     // auto_connect can take several seconds, longer than the poll interval,
     // and overlapping opens contend for the same serial port (spurious fails).
@@ -896,7 +952,7 @@
     try {
       let dev;
       try { dev = await detectPedal(); } catch { return; }
-      if (connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
+      if (usbLocked || showUsbUpdate || connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
 
       const inBootloader = !!dev.bootloader_drive;
       const cpNeedsFirmware = !!dev.circuitpy_drive && !dev.has_captain_firmware;
@@ -969,7 +1025,7 @@
   }
 
   async function doConnect() {
-    if (busy) return;
+    if (busy || usbLocked) return;
     busy = true; error = "";
     try {
       // Defensive: if a prior stale handle is somehow still around (e.g.
@@ -1575,6 +1631,8 @@
                   title="Updates Bosun through the Raspberry Pi and preserves your profiles automatically.">
             Update Bosun ({deviceInfo?.fw} -> {bundledUpdate?.release})
           </button>
+        {:else if hasUsbUpdate}
+          <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled native firmware over USB with a full recovery backup.">Update firmware (USB)</button>
         {:else if isNativeFirmware(deviceInfo)}
           <span class="fwstatus muted" title="Native firmware uses UF2 updates. CircuitPython file updates are unavailable.">Native firmware · v{deviceInfo?.fw}</span>
         {:else if !canUpdateFirmware}
@@ -1630,7 +1688,15 @@
   </header>
   {/if}
 
-  {#if !connected}
+  {#if usbLocked}
+    <main class="welcome">
+      <div class="card">
+        <h1>Bosun USB firmware update</h1>
+        <p>{usbJob?.message || "Preparing the update…"}</p>
+        <button class="big" onclick={() => showUsbUpdate = true}>Check USB update</button>
+      </div>
+    </main>
+  {:else if !connected}
     <main class="welcome">
       <div class="card">
         <h1>Connect your pedal</h1>
@@ -1963,6 +2029,8 @@
             <h2>Maintenance</h2>
           </header>
           <MaintenancePanel {connected} {activeProfile} firmwareInfo={deviceInfo}
+                            usbRelease={canUseUsbUpdate ? bundledUpdate?.release : null}
+                            onUsbUpdate={openUsbUpdate}
                             unifiedRelease={canUseUnifiedUpdate ? bundledUpdate?.release : null}
                             resumeUnifiedUpdate={canResumeUnifiedUpdate}
                             onUnifiedUpdate={openUnifiedUpdate} />
@@ -2033,6 +2101,12 @@
                            onJob={rememberUnifiedJob}
                            onComplete={unifiedUpdateCompleted}
                            onClose={() => showUnifiedUpdate = false} />
+  {/if}
+
+  {#if showUsbUpdate && !IS_ANDROID}
+    <NativeUsbUpdate port={usbUpdatePort} installed={usbInstalled} version={bundledUpdate?.firmware_version || usbJob?.version || ""}
+                     job={usbJob} canStart={() => canUseUsbUpdate && connectedPortName === usbUpdatePort}
+                     onPreparing={prepareUsbUpdate} onJob={acceptUsbJob} onClose={closeUsbUpdate} />
   {/if}
 
   {#if showFirmwarePush && !IS_ANDROID}

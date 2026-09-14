@@ -20,6 +20,7 @@
   } from "../lib/stage-theme";
   import StageThemeEditor from "./StageThemeEditor.svelte";
   import StageBankPicker from "./StageBankPicker.svelte";
+  import StageTuner from "./StageTuner.svelte";
   import { readBankSelectionMode, saveBankSelectionMode, type BankSelectionMode } from "../lib/stage-behavior";
   import "../lib/stage-controls.css";
 
@@ -588,10 +589,19 @@
   );
   let bpm = $derived(context.kemper_bpm as number | undefined);
   let tunerOn = $derived(
-    context.kemper_tuner === "on" || context.tuner === "on"
+    connected && (context.kemper_tuner === "on" || context.tuner === "on")
   );
-  let tunerNote = $derived(context.kemper_tuner_note as string | undefined);
-  let tunerDeviance = $derived(context.kemper_tuner_deviance as number | undefined);
+  let tunerNote = $derived((context.kemper_tuner_note ?? context.tuner_note) as string | undefined);
+  let tunerDeviance = $derived((context.kemper_tuner_deviance ?? context.tuner_deviance) as number | undefined);
+  let tunerDismissed = $state(false);
+  let showTuner = $derived(tunerOn && !tunerDismissed);
+  $effect(() => { if (!tunerOn) tunerDismissed = false; });
+  $effect(() => {
+    if (showTuner) {
+      showThemeEditor = false;
+      if (showBankPicker) dismissBankPicker(true);
+    }
+  });
   let expressionMode = $derived(connected
     && (context.expression_mode === "VOL" || context.expression_mode === "WAH")
     ? context.expression_mode : "---");
@@ -1036,8 +1046,12 @@
       selectionMode={bankSelectionMode} onmodechange={changeBankSelectionMode}
       onselect={selectBank} onclose={() => dismissBankPicker()} onretry={refreshBankPicker} />
   {/if}
+  {#if showTuner}
+    <StageTuner note={tunerNote} deviance={tunerDeviance}
+      onclose={() => (tunerDismissed = true)} />
+  {/if}
 
-  <!-- header: rig name + bank/rig + BPM + tuner -->
+  <!-- header: rig name + bank/rig + BPM + expression -->
   <div class="stage__header" use:measureStageHeader>
     <div class="stage__rig-name" style:color={screenColors.title} use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
     <div class="stage__bank-controls" role="group" aria-label="Bank navigation" aria-busy={bankChangePending}>
@@ -1060,11 +1074,6 @@
       {#if bpm}
         <span class="stage__bpm">{bpm} <small>BPM</small></span>
       {/if}
-      {#if tunerOn}
-        <span class="stage__tuner">
-          {tunerNote ?? "--"} {tunerDeviance != null ? (tunerDeviance < 8000 ? "♭" : tunerDeviance > 8400 ? "♯" : "●") : ""}
-        </span>
-      {/if}
       {#if bankChangeError && !showBankPicker}
         <span class="stage__navigation-error" role="alert">{bankChangeError}</span>
       {/if}
@@ -1078,7 +1087,7 @@
       <span class="stage__expression-label"><span>{expressionMode}</span></span>
     </span>
     <div class="stage__controls">
-      <button class="stage__icon-btn stage__exit-btn stage-control-icon" onclick={onExit} aria-label="Exit Stage">
+      <button class="stage__icon-btn stage__exit-btn stage-control-icon stage-control-icon--close" onclick={onExit} aria-label="Exit Stage">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
       <button class="stage__icon-btn stage-control-icon" onclick={() => (showThemeEditor = !showThemeEditor)} aria-label="Stage appearance">
@@ -1233,9 +1242,6 @@
     width: 100%; min-height: 36px;
     flex: 1 1 0;
   }
-  .stage__controls .stage__exit-btn {
-    border-top-right-radius: var(--stage-switch-outer-radius);
-  }
 
   /* ----- header ----- */
   .stage__header {
@@ -1332,7 +1338,7 @@
     min-width: 0;
   }
   .stage__bank, .stage__rig {
-    font-size: calc(clamp(1.3rem, 5vw, 3rem) * var(--stage-bank-scale, 1));
+    font-size: calc(clamp(1rem, 3.5vw, 2.5rem) * var(--stage-bank-scale, 1));
     color: var(--stage-bank-color, #ffffff);
     font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     letter-spacing: 0.02em;
@@ -1413,15 +1419,9 @@
     font-size: calc(clamp(1.1rem, 3.5vw, 2.5rem) * var(--stage-bpm-scale, 1));
     color: var(--stage-bpm-color, var(--stage-display-text));
     font-family: var(--stage-bpm-font, var(--stage-font, "Inter", -apple-system, sans-serif));
-    margin-left: auto; /* docks BPM (and tuner after it) to the right edge */
+    margin-left: auto; /* docks BPM to the right edge */
   }
   .stage__bpm small { font-size: 0.45em; color: var(--stage-display-muted); letter-spacing: 0.08em; }
-  .stage__tuner {
-    align-self: center;
-    font-size: calc(clamp(1.1rem, 3.5vw, 2.5rem) * var(--stage-tuner-scale, 1));
-    color: var(--stage-tuner-color, #4ade80);
-    font-family: var(--stage-tuner-font, var(--stage-font, "Inter", -apple-system, sans-serif));
-  }
 
   /* ----- 2x5 pedal grid ----- */
   .stage__expression {
@@ -1639,12 +1639,11 @@
       flex: 1.15 1 0;
     }
     .stage__bank, .stage__rig {
-      font-size: calc(min(6.6vh, 3vw, 4rem) * var(--stage-bank-scale, 1));
+      font-size: calc(min(5.5vh, 2.4vw, 3rem) * var(--stage-bank-scale, 1));
       color: var(--stage-bank-color, #ffffff);
       letter-spacing: 0.02em; line-height: 1.2;
     }
     .stage__bpm  { font-size: calc(min(5vh, 2.4vw, 3rem) * var(--stage-bpm-scale, 1)); }
-    .stage__tuner { font-size: calc(min(5vh, 2.4vw, 3rem) * var(--stage-tuner-scale, 1)); }
     .stage__expression { font-size: min(5.5vh, 2.4vw, 3rem); }
 
     .stage__pedal {

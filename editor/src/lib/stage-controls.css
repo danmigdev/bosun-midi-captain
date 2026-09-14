@@ -53,6 +53,11 @@
   min-height: 0;
 }
 
+/* Every Stage close icon follows the saved corner setting. */
+.stage .stage-control-icon--close {
+  border-top-right-radius: var(--stage-switch-outer-radius);
+}
+
 .stage .stage-control-icon svg {
   width: clamp(24px, 1.8vw, 32px);
   height: clamp(24px, 1.8vw, 32px);

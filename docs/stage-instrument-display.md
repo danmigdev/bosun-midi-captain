@@ -14,6 +14,23 @@ Use **+ / -** to browse banks or tap **BANK** to open the bank grid. See
 [bank selection](stage-bank-selection.md) to choose immediate loading or
 preselection.
 
+## Tuner
+
+Activating the Kemper tuner opens a dedicated fullscreen display with a large
+note, accidental and horizontal pitch indicator, with large ♭ and ♯ symbols
+beside its axis. The display contains no text labels. Orange indicates a flat
+or sharp note; green highlights the centre when the pitch is in tune. Missing
+or invalid feedback hides the active needle. The scale
+shows relative Kemper pitch deviation, not a calibrated cents measurement.
+
+Switching the Kemper tuner off returns automatically to Stage. **X** or
+Escape closes only the display and leaves the Kemper tuner on. To reopen it,
+switch the Kemper tuner off and on again. Stage has no compact tuner readout
+beside VOL/WAH. These display controls do not change rigs or mute settings.
+
+The view adapts to the Pi's wide panel and to portrait/landscape phones. The
+**Tuner** appearance settings control its note font, colour and size.
+
 ## Appearance
 
 The settings button beside VOL/WAH opens the appearance panel. Change fonts,
@@ -26,9 +43,13 @@ percentages so their visual size stays the same.
 The **VOL / WAH** section controls the expression label's font, colour and size
 (10%–500%). This indicator displays text only.
 
+**BANK**, **RIG** and **VOL / WAH** use the same base text size in both landscape
+and portrait. Their separate appearance settings still allow different fonts
+or size percentages.
+
 **Rounded corners** has one **Corners** slider shared by the screen frame (also
 used by the bank picker), the two outer corners of the bottom switch row, and
-the top-right corner of the main **X** button. It ranges from **0%** (square)
+the top-right corner of the **X** buttons in Stage and its dialogs. It ranges from **0%** (square)
 to **200%**, with **75%** as the default. Other button corners
 keep their existing shape. Changes apply immediately and persist across reloads.
 The group's **Reset** restores default rounding while preserving fonts and colours.

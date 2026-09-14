@@ -192,7 +192,8 @@ async def inspect(cdp, args, width, height, scale, section_overrides, coarse=Fal
     assert abs(cancel['box']['height'] - active_main['box']['height']) <= 1, (cancel, active_main)
     assert abs((cancel['box']['x'] + cancel['box']['right']) / 2 - width / 2) <= 1, cancel
     same_css(cancel, active_main, 'CANCEL uses shared button surface',
-             properties=('color','backgroundColor','borderTopColor','borderTopWidth','borderTopStyle','borderRadius'))
+             properties=('color','backgroundColor','borderTopColor','borderTopWidth','borderTopStyle'))
+    same_css(cancel, settings_button, 'CANCEL keeps standard control corners', properties=('borderRadius',))
     await mouse(cdp, CANCEL)
     await wait_for(cdp, '!document.querySelector(' + json.dumps(CANCEL) + ')', 'Preview cancelled')
     await open_picker(cdp)

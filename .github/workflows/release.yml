@@ -268,6 +268,9 @@ jobs:
       # API level) - consistent with this being the last remaining cause,
       # not a guess.
       RUSTFLAGS: --remap-path-prefix=/home/runner=/build
+      CC: gcc-13
+      CXX: g++-13
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: gcc-13
     steps:
       - uses: actions/checkout@v7
         with:
@@ -275,7 +278,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "22.23.2"
 
       - uses: actions/setup-python@v6
         with:
@@ -284,6 +287,7 @@ jobs:
       - name: Rust toolchain with Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.97.1
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - name: Setup Java 21
@@ -297,7 +301,16 @@ jobs:
         with:
           # The generated app compiles/targets API 36. Keep build-tools 34 as
           # well because sign-android-release is explicitly pinned to it.
-          packages: "platforms;android-36 build-tools;36.0.0 build-tools;34.0.0 ndk;25.2.9519653 cmdline-tools;latest"
+          packages: "platforms;android-36 build-tools;35.0.0 build-tools;34.0.0 ndk;29.0.14206865 cmdline-tools;latest"
+
+      - name: Select the Android toolchain verified with F-Droid
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13
+          ndk="$ANDROID_HOME/ndk/29.0.14206865"
+          test -d "$ndk"
+          printf 'NDK_HOME=%s\nANDROID_NDK_HOME=%s\nANDROID_NDK_ROOT=%s\n' "$ndk" "$ndk" "$ndk" >> "$GITHUB_ENV"
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -363,7 +376,7 @@ jobs:
 
       - name: Build Android APK (release, unsigned)
         working-directory: editor
-        run: npx tauri android build --apk
+        run: npx tauri android build --apk --ci -- --locked
 
       - name: Sign Release APK
         uses: r0adkll/sign-android-release@v1

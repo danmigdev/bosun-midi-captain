@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { tick } from "svelte";
 import App from "../src/App.svelte";
 import type { FirmwareMessage } from "../src/lib/protocol";
+import type { UsbUpdateJob } from "../src/lib/usb-update";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -139,6 +140,77 @@ function expectNoOtaControls() {
   expect(screen.queryByRole("button", { name: /^From folder/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^From \.zip/ })).not.toBeInTheDocument();
 }
+
+describe("App direct USB firmware update", () => {
+  let current: UsbUpdateJob | null;
+  const updateJob = (phase: UsbUpdateJob["phase"]): UsbUpdateJob => ({
+    id: "usb-job", phase, port: "COM9", previous_version: "0.6.5-native", version: "0.6.5-native",
+    message: "USB update status", percent: 0, backup_path: "C:/backup/flash-before.bin",
+    identity: { serial: "0123456789ABCDEF", bus: "1", ports: [2] },
+  });
+  beforeEach(() => {
+    current = null;
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "usb", host: "", port: "9876" }));
+    Object.defineProperty(HTMLDialogElement.prototype,"showModal",{ configurable: true, value() { this.setAttribute("open", ""); } });
+    const previous = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (command: string, args: unknown) => {
+      if (command === "usb_update_status") return current;
+      if (command === "bundled_update_manifest") return { schema: 1, board: "midi-captain-rp2040", release: "0.6.5", family: "native", firmware_version: "0.6.5-native", flash_bytes: 8388608, firmware_sha256: "a".repeat(64) };
+      if (command === "auto_connect" || command === "connect") { backendConnected = true; return "COM9"; }
+      if (command === "usb_update_start") { backendConnected = false; current = updateJob("writing"); return current; }
+      return previous(command, args);
+    });
+  });
+  it.each([
+    { installed: "0.6.4-native", available: true },
+    { installed: "0.6.5-native", available: false },
+    { installed: "0.6.6-native", available: false },
+  ])("only advertises a USB update newer than $installed", async ({ installed, available }) => {
+    render(App);
+    await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    await screen.findByTitle("Connected on COM9");
+    await deviceInfo({ fw: installed, native_experimental: true, firmware_ota: false });
+    const button = screen.queryByRole("button", { name: "Update firmware (USB)", exact: true });
+    if (available) expect(button).toBeEnabled();
+    else expect(button).not.toBeInTheDocument();
+    expect(mocks.invoke.mock.calls.filter(([c]) => c === "usb_update_start")).toHaveLength(0);
+  });
+  it("keeps same-version reinstall in Maintenance and suspends editor access while the USB worker runs", async () => {
+    render(App);
+    await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    await deviceInfo({ fw: "0.6.5-native", native_experimental: true, firmware_ota: false });
+    expect(screen.queryByRole("button", { name: "Update firmware (USB)", exact: true })).not.toBeInTheDocument();
+    await maintenance();
+    await fireEvent.click(screen.getByRole("button", { name: /^Install firmware \(USB\)/ }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("COM9");
+    expect(mocks.invoke.mock.calls.filter(([c]) => c === "usb_update_start")).toHaveLength(0);
+    await fireEvent.click(screen.getByRole("button", { name: "Update", exact: true }));
+    await screen.findByRole("heading", { name: "Installing firmware" });
+    expect(screen.queryByRole("heading", { name: "Connect your pedal" })).not.toBeInTheDocument();
+    const probes = mocks.invoke.mock.calls.filter(([c]) => c === "auto_connect").length;
+    mocks.onDisconnected.mock.calls[0][0]();
+    await tick();
+    expect(mocks.invoke.mock.calls.filter(([c]) => c === "auto_connect")).toHaveLength(probes);
+    current = updateJob("done");
+    await screen.findByRole("heading", { name: "Bosun updated" }, { timeout: 2000 });
+    await fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await screen.findByTitle("Connected on COM9");
+    expect(mocks.invoke).toHaveBeenCalledWith("connect", { port: "COM9" });
+    expect(mocks.invoke.mock.calls.filter(([c]) => c === "usb_update_start")).toHaveLength(1);
+  });
+  it("reopens an interrupted USB update before any startup probe and retains offline recovery", async () => {
+    current = updateJob("recovery-required");
+    render(App);
+    await screen.findByRole("button", { name: "Restore backup" });
+    await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
+    expect(mocks.invoke.mock.calls.filter(([c]) => ["auto_connect", "connect", "usb_update_start", "usb_update_recover"].includes(c))).toHaveLength(0);
+    await fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Connect your pedal" })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Check USB update" }));
+    expect(screen.getByRole("button", { name: "Restore backup" })).toBeEnabled();
+  });
+});
 
 describe("App firmware update capabilities", () => {
   it.each([

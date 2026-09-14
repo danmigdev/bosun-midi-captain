@@ -39,7 +39,8 @@
       "resources/circuitpython.uf2": "circuitpython.uf2",
       "resources/firmware": "firmware",
       "resources/lib": "lib",
-      "resources/update": "update"
+      "resources/update": "update",
+      "vendor/picotool/LICENSE.TXT": "licenses/picotool.txt"
     },
     "android": {
       "minSdkVersion": 29,

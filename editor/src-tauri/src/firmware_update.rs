@@ -10,16 +10,16 @@ use tauri::{AppHandle, Manager, path::BaseDirectory};
 
 const MAX_PACKAGE: u64 = 4 * 1024 * 1024;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateManifest {
-    schema: u32,
-    board: String,
-    release: String,
-    family: String,
-    firmware_version: String,
-    flash_bytes: u32,
-    firmware_sha256: String,
+    pub schema: u32,
+    pub board: String,
+    pub release: String,
+    pub family: String,
+    pub firmware_version: String,
+    pub flash_bytes: u32,
+    pub firmware_sha256: String,
 }
 
 #[derive(Serialize)]

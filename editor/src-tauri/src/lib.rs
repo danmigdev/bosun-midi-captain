@@ -15,6 +15,12 @@ mod tcp_serial;
 mod installer;
 #[cfg(not(target_os = "android"))]
 mod firmware_update;
+#[cfg(not(target_os = "android"))]
+mod firmware_package;
+#[cfg(not(target_os = "android"))]
+mod picoboot;
+#[cfg(not(target_os = "android"))]
+mod usb_update;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,7 +43,14 @@ pub fn run() {
     // in the Kotlin BosunMidiBridge singleton instead (midi_android.rs).
     #[cfg(not(target_os = "android"))]
     {
-        builder = builder.manage(midi::MidiState::default());
+        builder = builder.manage(midi::MidiState::default())
+            .manage(usb_update::UsbUpdateState::default())
+            .setup(|app| usb_update::initialize(app.handle()).map_err(Into::into))
+            .on_window_event(|_, event| {
+                if usb_update::busy() {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event { api.prevent_close(); }
+                }
+            });
     }
 
     // ---- command handlers ----
@@ -67,6 +80,9 @@ pub fn run() {
             installer::read_firmware_file_at_b64,
             firmware_update::bundled_update_manifest,
             firmware_update::read_bundled_update,
+            usb_update::usb_update_start,
+            usb_update::usb_update_status,
+            usb_update::usb_update_recover,
             export::pick_export_folder,
             export::write_export_file,
             export::default_backup_folder,

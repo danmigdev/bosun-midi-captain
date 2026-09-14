@@ -62,6 +62,18 @@ Keep these services on your local network; they are not a public internet servic
 
 Connect and power an HDMI screen. Stage is configured to open automatically at startup and select the screen when it is connected later. The screen's advertised preferred resolution is used; a 1920 × 440 panel should advertise that mode. Check the actual image and supported resolution on your screen after connecting it.
 
+For the separately powered bar display, connect HDMI to the Pi and USB power to
+its own supply. A panel can report itself connected before it is ready to show
+the signal. The output service therefore waits three seconds after boot-time
+detection or an HDMI hotplug event, then turns HDMI off for two seconds and
+reenables the panel's preferred mode. Stage stays on the virtual output during
+that interval; the browser, hub and MIDI connection keep running.
+
+Recovery runs once per connection event, with up to three attempts if a display
+command fails. It does not repeatedly blank a healthy display. It also checks
+connector status in case a hotplug notification is missed. After powering or
+reconnecting the display, allow about ten seconds for the picture to settle.
+
 Without an HDMI screen, the Pi keeps a virtual 1920 × 440 display available for the viewer below. The kiosk uses reduced motion to keep its light bars steady.
 
 The Pi hides its cursor when no mouse is connected and restores it when a mouse
@@ -114,5 +126,6 @@ The commands require Python and Node.js/npm on Windows. The Stage helper builds 
 - **App cannot find the Pi:** check that both are on the same network, then try its hostname and port `9876` directly. Guest Wi-Fi isolation can block discovery and connections.
 - **Pi connects but the pedal is missing:** check the Captain's power and USB data cable, then reconnect it.
 - **Stage page is missing:** repeat the Stage build and installation steps.
+- **Display stays black:** check its separate USB power and HDMI connection, then inspect `journalctl -u bosun-outputs.service -n 30 --no-pager`. To retry the HDMI handshake, run `sudo systemctl restart bosun-outputs.service`; this leaves the kiosk, hub and MIDI routing running. A working VNC picture verifies Stage rendering but cannot confirm that the physical panel is showing it.
 - **Viewer will not open:** verify the SSH alias and rerun the Windows helper. The viewer's localhost URL works only while that helper's tunnel is running.
 - **A service is inactive:** inspect its recent log, for example `journalctl -u bosun-hub.service -n 30 --no-pager`.

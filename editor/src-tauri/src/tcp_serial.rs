@@ -215,6 +215,8 @@ fn tcp_connect_blocking(
     state: &AppState,
     app: AppHandle,
 ) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    let _operation = crate::usb_update::normal_operation()?;
     let mut guard = state.serial.lock().map_err(|_| "lock poisoned")?;
     if let Some(existing) = guard.as_ref() {
         if existing.is_alive() {

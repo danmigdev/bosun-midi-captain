@@ -501,7 +501,7 @@ describe("StageView: CONTEXT-driven Stage Mode data flow", () => {
     expect(bpm!.textContent).toContain("BPM");
   });
 
-  it("shows the tuner (note + deviance symbol) when kemper_tuner is on", async () => {
+  it("opens the fullscreen tuner with note and pitch feedback when kemper_tuner is on", async () => {
     const { container } = render(StageView, baseProps);
     await flushMicrotasks();
     await pushContext({
@@ -509,42 +509,40 @@ describe("StageView: CONTEXT-driven Stage Mode data flow", () => {
       kemper_tuner_note: "A",
       kemper_tuner_deviance: 8000,
     });
-    const tuner = container.querySelector(".stage__tuner");
+    const tuner = container.querySelector(".tuner-screen");
     expect(tuner).not.toBeNull();
     expect(tuner!.textContent).toContain("A");
-    // Deviance 8000 sits in the in-tune band (not < 8000, not > 8400).
-    expect(tuner!.textContent).toContain("●");
+    expect(tuner!.querySelector(".tuner-screen__meter")!.getAttribute("aria-label")).toBe("A: In tune");
   });
 
   it("hides the tuner when kemper_tuner turns off", async () => {
     const { container } = render(StageView, baseProps);
     await flushMicrotasks();
     await pushContext({ kemper_tuner: "on", kemper_tuner_note: "A", kemper_tuner_deviance: 8000 });
-    expect(container.querySelector(".stage__tuner")).not.toBeNull();
+    expect(container.querySelector(".tuner-screen")).not.toBeNull();
     await pushContext({ kemper_tuner: "off" });
-    expect(container.querySelector(".stage__tuner")).toBeNull();
+    expect(container.querySelector(".tuner-screen")).toBeNull();
   });
 
   it("renders flat/sharp deviance symbols around the in-tune band", async () => {
     const { container } = render(StageView, baseProps);
     await flushMicrotasks();
     await pushContext({ kemper_tuner: "on", kemper_tuner_note: "B", kemper_tuner_deviance: 7000 });
-    let tuner = container.querySelector(".stage__tuner");
-    expect(tuner!.textContent).toContain("♭");
+    let meter = container.querySelector(".tuner-screen__meter");
+    expect(meter!.getAttribute("aria-label")).toBe("B: Tune up");
     await pushContext({ kemper_tuner: "on", kemper_tuner_note: "B", kemper_tuner_deviance: 9000 });
-    tuner = container.querySelector(".stage__tuner");
-    expect(tuner!.textContent).toContain("♯");
+    meter = container.querySelector(".tuner-screen__meter");
+    expect(meter!.getAttribute("aria-label")).toBe("B: Tune down");
   });
 
   it("activates the tuner display through the generic tuner alias", async () => {
-    // The plugin mirrors kemper_tuner -> tuner; StageView's on/off check
-    // accepts both spellings, but the note/deviance are read from the
-    // kemper_* fields only, so the generic aliases leave the placeholder.
+    // Generic plugins can supply the same live reading through tuner aliases.
     const { container } = render(StageView, baseProps);
     await flushMicrotasks();
     await pushContext({ tuner: "on", tuner_note: "E", tuner_deviance: 8000 });
-    const tuner = container.querySelector(".stage__tuner");
+    const tuner = container.querySelector(".tuner-screen");
     expect(tuner).not.toBeNull();
-    expect(tuner!.textContent).toContain("--");
+    expect(tuner!.querySelector(".tuner-screen__note")!.textContent).toContain("E");
+    expect(tuner!.querySelector(".tuner-screen__meter")!.getAttribute("aria-label")).toBe("E: In tune");
   });
 });

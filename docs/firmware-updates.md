@@ -1,21 +1,77 @@
 # Update Captain firmware
 
-**Update Bosun** installs the native firmware through a Raspberry Pi and can
-migrate supported existing CircuitPython configurations automatically. It
+Bosun Desktop updates existing native firmware directly over USB or through a
+Raspberry Pi. The Pi updater also migrates supported CircuitPython configurations. It
 supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player or
 Generic MIDI profiles. CircuitPython is no longer maintained separately.
 
-## Requirements
+## Direct Desktop USB
+
+This path updates an existing native installation on an **8 MiB RP2040 Captain**.
+It uses the native package bundled with Bosun Desktop, including when reinstalling
+the same version. CircuitPython migration and factory installation use the paths
+described below.
+
+1. Save or discard pending patch edits and export a configuration backup.
+2. Connect **Captain USB-B → computer USB-A/USB-C** with a data cable. Choose
+   **USB** in Bosun Desktop and connect to the Captain.
+3. Select **Update firmware (USB)** in the top bar when the bundled version is
+   newer than the installed firmware. For a manual installation or reinstallation,
+   choose **Maintenance → Install firmware (USB)**.
+4. Review the release, then choose **Update**. Keep the Captain on the same USB
+   port and keep the computer awake. MIDI and Stage pause during this operation.
+5. Wait for **Bosun updated**, then close the update window to reconnect.
+
+The updater identifies the Captain by its USB serial number and physical USB
+path. After entering BOOTSEL it verifies the flash chip's unique ID and 8 MiB
+capacity, reads the entire flash twice, and saves a verified full backup on the
+computer. It writes only the firmware area, checks the entire flash against the
+expected firmware plus original data, then verifies the running version, storage,
+active profile, profile list and global configuration after reboot.
+
+The backup and persistent update journal live under the application's data
+directory in `usb-updates/<job>/`. On Windows this is normally
+`%APPDATA%\com.bosun.app\usb-updates\`. **Show backup** opens the exact location.
+Keep the complete job directory, including `flash-before.bin` and the JSON files.
+A configuration export cannot replace this full recovery backup.
+
+The bootloader's PICOBOOT interface must be accessible. On Windows it needs
+**WinUSB**; if opening the interface fails, install that driver for the Captain's
+**RP2 Boot / PICOBOOT interface (normally Interface 1)**, following the
+[official picotool Windows driver instructions](https://github.com/raspberrypi/picotool#zadig).
+Keep the mass-storage interface's existing driver. On Linux, provide USB device
+permissions for `2e8a:0003`. These access failures stop the update before any flash
+write; reconnect the Captain to restart its original firmware.
+
+### USB recovery
+
+If writing or verification fails, Bosun attempts to restore and verify the full
+original backup. **Original firmware restored** means the update did not complete
+and the original installation is running again. The app prevents normal serial
+commands, automatic installation and window closure while its worker is active.
+
+If USB disconnects or the app/computer stops during writing, reopen Bosun Desktop.
+An unfinished write opens the recovery window automatically. Connect the **same
+Captain to the same USB port**, enter BOOTSEL using the pedal's bootloader procedure,
+then select **Restore backup**. Bosun checks the backup checksum, device identity,
+full flash readback and original running configuration before releasing the editor.
+Status polling never starts another write. Preserve the backup if recovery fails.
+
+If an interruption happened before writing began, the original flash is untouched;
+reconnect the Captain and start the update again. Direct USB does not require a
+Pi, Android, internet connection, Python or a separate picotool executable.
+
+## Raspberry Pi requirements
 
 - A Captain already running Bosun, connected by USB to the Pi.
 - The [complete Pi installation](../tools/rpi-hub/README.md#install-on-the-pi).
 - Bosun Desktop with its matching bundled native update package.
 
-Use the desktop's network connection to the Pi. Direct desktop USB and Android
-connections do not perform this update flow. For a factory pedal, follow
+Use the desktop's network connection to the Pi for this path. Android does not
+perform firmware updates. For a factory pedal, follow
 [first installation](../README.md#first-installation-from-factory-firmware).
 
-## Install the update
+## Install through the Pi
 
 1. Export a configuration backup and save pending edits on the pedal.
 2. Connect Bosun Desktop to the Pi that hosts the Captain.
@@ -28,7 +84,7 @@ supported settings and verifies the installation. Unsupported configurations
 stop the update before firmware is written. Native upgrades preserve the
 existing native configuration.
 
-## Reconnect or recover
+## Reconnect or recover a Pi update
 
 Closing the desktop or losing its connection does not cancel an installation
 that has already started. Reconnect to the same Pi and select **Check Bosun
@@ -48,6 +104,6 @@ physical bootloader access and restoration of its verified full backup.
 ## Local application builds
 
 Generate the [native update archive](../firmware-native/README.md#build-the-update-package)
-before packaging the desktop application. Without a matching archive, **Update
-Bosun** is unavailable. Use the verified Bosun release package rather than an
+before packaging the desktop application. Without a matching archive, new native
+updates are unavailable through either connection. Use the verified Bosun release package rather than an
 arbitrary UF2 or a legacy CircuitPython file bundle.

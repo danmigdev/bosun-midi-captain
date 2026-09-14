@@ -173,17 +173,19 @@ def appliance(tmp_path):
     instance = Appliance()
     instance.system = system
     instance.native = native
+    instance.source = source
     return instance
 
 
 @pytest.mark.parametrize("missing", [
-    "stage", "platform/host/storage_image.c", "src/config.c",
+    "stage", "kiosk/bosun-hdmi-recovery.py", "platform/host/storage_image.c", "src/config.c",
     "include/bosun/config.h", "third_party/littlefs/lfs.c",
 ])
 def test_missing_build_or_checkout_fails_before_any_appliance_mutation(appliance, missing):
     if missing != "stage":
         appliance.build_stage()
-        (appliance.native / missing).unlink()
+        base = appliance.source if missing.startswith("kiosk/") else appliance.native
+        (base / missing).unlink()
     result, events = appliance.run()
     assert result.returncode != 0
     assert events == []

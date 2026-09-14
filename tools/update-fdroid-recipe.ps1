@@ -9,8 +9,9 @@
   expanded Config, serialized). The recipe works around this by embedding a
   LITERAL byte-for-byte copy of that file, captured from a real release
   build. Every new version changes at least the "version" string inside it
-  (and can reorder bundle.resources' keys too - a separate, still-unpatched
-  HashMap-ordering bug in the `tauri` crate itself), so this literal needs
+  (and can reorder bundle.resources' keys too - a separate HashMap-ordering
+  issue in tauri-utils' BundleResources::Map, outside the pinned CSP fix;
+  see docs/android-reproducible-builds.md), so this literal needs
   re-extracting from a freshly published release APK EVERY TIME a new
   version is cut, or the reproducibility CI job (`fdroid build`) fails.
 

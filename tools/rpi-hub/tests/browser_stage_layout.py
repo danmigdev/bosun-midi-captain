@@ -90,7 +90,7 @@ GEOMETRY = r"""(() => {
     bpm:document.querySelector('.stage__bpm') ? rect(document.querySelector('.stage__bpm')) : null,
     bpmText:document.querySelector('.stage__bpm')?.textContent.trim(),
     tuner:optional('.stage__tuner'),
-    tunerText:document.querySelector('.stage__tuner')?.textContent.trim(),
+    tunerScreen:!!document.querySelector('.tuner-screen[open]'),
     expression:expression ? rect(expression) : null,
     expressionText:expression?.textContent.trim(),
     cards:[...document.querySelectorAll('.stage__switch')].map(rect),
@@ -496,10 +496,10 @@ def assert_geometry(state, *, expect_mode=None, expect_title=None, expect_bpm=No
     bank_box, rig_box = state['bankReadout'], state['rigReadout']
     assert bank_box['right'] < rig_box['left'], ('Bank and rig readouts must stay side by side: ' + json.dumps(state))
     assert abs(bank_box['top'] - rig_box['top']) <= .5 and abs(bank_box['height'] - rig_box['height']) <= .5, state
-    # BPM/tuner may occupy a second line on narrow screens. Both readouts
+    # BPM may occupy a second line on narrow screens. Both readouts
     # still share the first line; expression and controls span the full meta.
     wrapped_metadata = any(state[key] is not None and state[key]['top'] >= bank_box['bottom'] - .5
-                           for key in ('bpm', 'tuner', 'navigationError'))
+                           for key in ('bpm', 'navigationError'))
     for outer, inner in [('bankReadout', 'bank'), ('rigReadout', 'rigPosition')]:
         box, frame = state[outer], state[inner]
         assert frame is not None and frame['width'] >= 30, ('Bank or rig marquee collapsed: ' + json.dumps(state))
@@ -509,16 +509,14 @@ def assert_geometry(state, *, expect_mode=None, expect_title=None, expect_bpm=No
         if not wrapped_metadata:
             assert abs(box['height'] - badge['height']) <= .5, ('Bank or rig readout does not align with the expression panel: ' + json.dumps(state))
     assert '\u00b7' not in state['bankText'] and '\u00b7' not in state['rigPositionText'], state
-    metadata = [state[key] for key in ('bankReadout', 'rigReadout', 'bpm', 'tuner', 'navigationError') if state[key] is not None]
-    no_overlap(metadata, 'Bank readout, BPM, tuner or error overlap')
+    metadata = [state[key] for key in ('bankReadout', 'rigReadout', 'bpm', 'navigationError') if state[key] is not None]
+    no_overlap(metadata, 'Bank readout, BPM or error overlap')
     for box in metadata:
         assert box['left'] >= state['meta']['left'] - .5 and box['right'] <= state['meta']['right'] + .5, state
         assert box['top'] >= state['meta']['top'] - .5 and box['bottom'] <= state['meta']['bottom'] + .5, state
-    if state['tuner'] is not None:
-        assert state['tuner']['left'] >= state['meta']['left'] - .5, state
-        assert state['tuner']['right'] <= state['meta']['right'] + .5, state
+    assert state['tuner'] is None, 'Stage must not show a compact tuner'
     if expect_tuner:
-        assert state['tuner'] is not None and state['tunerText'].startswith('F#'), state
+        assert state['tunerScreen'], state
     if state['bpm'] is not None:
         assert state['bpm']['left'] >= state['meta']['left'] - .5, state
         assert state['bpm']['right'] <= state['meta']['right'] + .5, state
