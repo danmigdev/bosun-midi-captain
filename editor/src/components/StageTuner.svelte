@@ -9,6 +9,9 @@
   } = $props();
   let reading = $derived(tunerReading(note, deviance));
   let pointer = $derived(500 + reading.position * 460);
+  // Highlight the inner tenth of the meter before the pitch reaches the
+  // existing in-tune window; use the same cue on either side of the centre.
+  let near = $derived(reading.valid && Math.abs(reading.position) <= 0.1);
   let dialog: HTMLDialogElement;
   let previousFocus: HTMLElement | null = null;
 
@@ -27,6 +30,7 @@
 </script>
 
 <dialog bind:this={dialog} class="tuner-screen" class:tuner-screen--center={reading.direction === "center"}
+  class:tuner-screen--near={near}
   class:tuner-screen--waiting={!reading.valid} aria-label="Tuner"
   oncancel={(event) => { event.preventDefault(); onclose(); }}>
   <div class="tuner-screen__sheet">
@@ -46,6 +50,7 @@
         <span class="tuner-screen__accidental tuner-screen__flat" class:active={reading.direction === "flat"} aria-hidden="true">♭</span>
         <svg class="tuner-screen__meter" viewBox="0 0 1000 180" preserveAspectRatio="none" role="img"
           aria-label={reading.valid ? `${reading.note}${reading.accidental}: ${reading.status}` : "Waiting for pitch feedback"}>
+          <rect x="454" y="24" width="92" height="132" rx="12" class="tuner-screen__approach" />
           <rect x="484" y="24" width="32" height="132" rx="12" class="tuner-screen__target" />
           <line x1="40" y1="100" x2="960" y2="100" class="tuner-screen__rail" />
           {#each Array.from({ length: 41 }, (_, i) => i) as i}
@@ -72,19 +77,33 @@
 
 <style>
   .tuner-screen {
-    --tuner-accent: #ffb454;
+    --tuner-accent: #ff8198;
+    --tuner-glow: transparent;
+    --tuner-wash: #15222b;
+    --tuner-border: #42545f;
     position: fixed; inset: 0; margin: 0; padding: 0;
     width: 100%; height: 100%; max-width: none; max-height: none;
     box-sizing: border-box; overflow: hidden;
-    border: 2px solid #42545f; border-radius: var(--stage-corner-radius, 24px);
+    border: 2px solid var(--tuner-border); border-radius: var(--stage-corner-radius, 24px);
     color: #edf5f7;
-    background: radial-gradient(ellipse at 65% 50%, #152b30 0%, #0b151b 40%, #080c10 80%);
+    background: radial-gradient(ellipse at 65% 50%, var(--tuner-wash) 0%, #0b151b 50%, #080c10 85%);
     font-family: var(--stage-tuner-font, var(--stage-font, "Inter", -apple-system, sans-serif));
   }
   .tuner-screen::backdrop { background: #000; }
   /* The modal is the initial focus container, not an interactive control. */
   .tuner-screen:focus { outline: none; }
-  .tuner-screen--center { --tuner-accent: #8befa2; }
+  .tuner-screen--near {
+    --tuner-accent: #58d9ef;
+    --tuner-glow: #58d9ef55;
+    --tuner-wash: #123c47;
+    --tuner-border: #58d9ef;
+  }
+  .tuner-screen--center {
+    --tuner-accent: #5dffa0;
+    --tuner-glow: #5dffa066;
+    --tuner-wash: #105332;
+    --tuner-border: #5dffa0;
+  }
   .tuner-screen--waiting { --tuner-accent: #9aafb8; }
   .tuner-screen__sheet {
     display: flex; flex-direction: column; height: 100%; box-sizing: border-box;
@@ -104,18 +123,24 @@
     font-size: calc(min(76vh, 25vw) * var(--stage-tuner-scale, 2) / 2);
     line-height: .95; font-weight: 700; letter-spacing: -.055em;
     color: var(--stage-tuner-color, var(--tuner-accent));
+    text-shadow: 0 0 28px var(--tuner-glow);
   }
   .tuner-screen__note sup { font-size: .42em; align-self: flex-start; line-height: 1.3; letter-spacing: 0; }
   .tuner-screen__instrument { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 1vw; min-width: 0; }
-  .tuner-screen__accidental { color: #9cafb9; font-size: min(34vh, 9vw); line-height: 1; }
-  .tuner-screen__accidental.active { color: var(--tuner-accent); }
+  .tuner-screen__accidental { color: var(--tuner-accent); font-size: min(34vh, 9vw); line-height: 1; }
+  .tuner-screen__accidental.active { text-shadow: 0 0 14px var(--tuner-accent); }
   .tuner-screen__meter { display: block; width: 100%; height: min(56vh, 25vw); overflow: visible; }
-  .tuner-screen__target { fill: #8befa20b; stroke: #8befa22b; stroke-width: 1; }
-  .tuner-screen--center .tuner-screen__target { fill: #8befa225; stroke: #8befa266; }
+  .tuner-screen__approach { fill: #58d9ef08; stroke: #58d9ef30; stroke-width: 1; }
+  .tuner-screen--near .tuner-screen__approach { fill: #58d9ef20; stroke: #58d9ef90; stroke-width: 2; }
+  .tuner-screen--center .tuner-screen__approach { fill: #5dffa020; stroke: #5dffa080; }
+  .tuner-screen__target { fill: #5dffa018; stroke: #5dffa066; stroke-width: 1; }
+  .tuner-screen--center .tuner-screen__target { fill: #5dffa060; stroke: #5dffa0; stroke-width: 3; }
   .tuner-screen__rail { stroke: #29404a; stroke-width: 2; }
   .tuner-screen__tick { fill: #536771; }
-  .tuner-screen__tick--center { fill: #8befa280; }
+  .tuner-screen__tick--center { fill: #5dffa0b3; }
   .tuner-screen__tick--lit, .tuner-screen__needle { fill: var(--tuner-accent); }
+  .tuner-screen--near .tuner-screen__needle { stroke: #d4faff; stroke-width: 1; }
+  .tuner-screen--center .tuner-screen__needle { stroke: #e8fff0; stroke-width: 2; }
   @media (orientation: portrait) {
     .tuner-screen__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 3vh; }
     .tuner-screen__note { font-size: calc(min(52vh, 72vw) * var(--stage-tuner-scale, 2) / 2); }
