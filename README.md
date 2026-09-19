@@ -18,7 +18,7 @@ See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch edit
 
 Download the package for your system from [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
 
-These instructions cover **Bosun 0.6.9**, including the visual setup guide,
+These instructions cover **Bosun 0.6.10**, including the visual setup guide,
 direct native installation and configurable bank layouts. Keep the app,
 Captain firmware and Pi on matching versions. To build
 from source, use the [desktop build guide](editor/SETUP.md) or
@@ -33,7 +33,7 @@ from source, use the [desktop build guide](editor/SETUP.md) or
 
 Windows requires WebView2. Allow the Android USB permission prompt when connecting the pedal directly. Use a desktop computer for initial pedal setup and firmware updates.
 
-**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.9/Bosun-0.6.9-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.9](docs/releases/0.6.9.md).
+**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.10/Bosun-0.6.10-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.10](docs/releases/0.6.10.md).
 
 <a id="connections"></a>
 

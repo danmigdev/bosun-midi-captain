@@ -1,6 +1,6 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.9 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.9) includes `Bosun-0.6.9-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.10 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.10) includes `Bosun-0.6.10-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
 These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper PROFILER Player**. Other Captain or Kemper models need their own compatibility check. Use **Desktop 0.6.8 or later** for stock PaintAudio 5.15; 0.6.7 cannot discover it. The corrected installer passed a complete Windows installation from 5.15, including configuration restoration. See the [hardware test and release status](stock-installation-test.md). macOS/Linux operation, other stock versions and installation on a fresh Pi card remain unverified.
 

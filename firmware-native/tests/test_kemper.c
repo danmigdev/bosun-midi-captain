@@ -213,11 +213,11 @@ static void generation_and_live_cc_fences(void) {
 
 static void crunch_wah_and_discovery(void) {
     static const uint8_t pages[] = {50,51,52,53,56,58,60,61};
-    static const uint8_t on_pages[] = {50,51,52,53,56,58,74,75};
-    static const uint8_t addresses[] = {3,3,3,3,3,3,2,2};
+    static const uint8_t on_pages[] = {50,51,52,53,56,58,60,61};
+    static const uint8_t addresses[] = {3,3,3,3,3,3,3,3};
     static const uint8_t controllers[] = {17,18,19,20,22,24,27,29};
-    /* Every physical slot: type discovery and on/off use different pages for
-     * Delay/Reverb. Fixed Wah OFF alone cannot establish VOL. */
+    /* Every physical slot uses its current effect-module address for type
+     * and on/off queries. Fixed Wah OFF alone cannot establish VOL. */
     for (unsigned slot = 0; slot < 8; ++slot) {
         bosun_kemper k; wire w;
         ready(&k, &w);
@@ -644,7 +644,56 @@ static void morph_commands_are_not_feedback(void) {
     assert(w.count == before);
 }
 
+static void delay_reverb_query_and_notification_addresses(void) {
+    /* Captured Player behaviour: legacy notifications are correct, but a
+     * request to 74/2 returns OFF even with the current 60/3 reporting ON. */
+    for (unsigned block = BOSUN_KEMPER_DELAY; block <= BOSUN_KEMPER_REVERB; ++block) {
+        uint8_t bit = (uint8_t)(1u << block);
+        uint8_t page = block == BOSUN_KEMPER_DELAY ? 60 : 61;
+        uint8_t legacy = block == BOSUN_KEMPER_DELAY ? 74 : 75;
+        bosun_kemper k; wire w = {0};
+        bosun_kemper_init(&k, 1, bit, send_packet, &w);
+        assert(bosun_kemper_query_blocks(&k, bit));
+        assert(queries(&w, page, 3) == 1 && !queries(&w, legacy, 2));
+        sense(&k, 100); pc(&k, 1, 100); name(&k, "CLEAN", 120);
+        bosun_kemper_tick(&k, 600); param(&k, page, 3, 0, 610);
+        assert(k.state.rig_name_fresh);
+        assert(bosun_kemper_select_rig(&k, 1, 3, 2000));
+        bosun_kemper_tick(&k, 2005); pc(&k, 2, 2100); name(&k, "CRUNCH", 2120);
+        assert(bosun_kemper_command(&k, BOSUN_KEMPER_EFFECT, (uint8_t)block, 1));
+        param(&k, legacy, 2, 1, 2301); /* ON while the rig is still settling. */
+        bosun_kemper_tick(&k, 2500);
+        assert(k.reconcile_pending == bit);
+        param(&k, page, 3, 1, 2510);
+        assert(k.state.effects[block] && (k.state.effect_known & bit));
+        assert(k.state.rig_name_fresh && !strcmp(k.state.rig_name, "CRUNCH"));
+        assert(!queries(&w, legacy, 2));
+
+        /* A newer live notification must beat replies to older requests. */
+        assert(bosun_kemper_begin_rig(&k, 4, 4000));
+        bosun_kemper_tick(&k, 4500); bosun_kemper_tick(&k, 4900);
+        param(&k, legacy, 2, 1, 4901);
+        assert(k.state.effects[block] && !k.reconcile_pending);
+        assert(k.guard_budget[block] == 2);
+        param(&k, page, 3, 0, 4902); param(&k, page, 3, 0, 4903);
+        assert(k.state.effects[block] && !k.guard_budget[block]);
+        param(&k, legacy, 2, 0, 4904);
+        assert(!k.state.effects[block]);
+        param(&k, legacy, 2, 1, 4905);
+        assert(k.state.effects[block]);
+
+        /* Old modern-query replies stay quarantined across rig changes. */
+        assert(bosun_kemper_begin_rig(&k, 5, 5000));
+        param(&k, page, 3, 0, 5001);
+        assert(!(k.state.effect_known & bit));
+        bosun_kemper_tick(&k, 5500); bosun_kemper_tick(&k, 6100);
+        param(&k, page, 3, 0, 6101);
+        assert((k.state.effect_known & bit) && !k.state.effects[block]);
+    }
+}
+
 int main(void) {
+    delay_reverb_query_and_notification_addresses();
     morph_commands_are_not_feedback();
     codecs_and_beacon(); tuner_and_defensive_input(); pc_echo_and_rig_names();
     generation_and_live_cc_fences(); crunch_wah_and_discovery();

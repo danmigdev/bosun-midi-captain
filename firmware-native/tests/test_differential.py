@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FIRMWARE = ROOT / "firmware/lib"
 BLOCKS = ("A", "B", "C", "D", "X", "Mod", "Delay", "Reverb")
 TYPE_PAGES = (50, 51, 52, 53, 56, 58, 60, 61)
-ON_PAGES = (50, 51, 52, 53, 56, 58, 74, 75)
-ON_ADDR = (3, 3, 3, 3, 3, 3, 2, 2)
+ON_PAGES = (50, 51, 52, 53, 56, 58, 60, 61)
+ON_ADDR = (3, 3, 3, 3, 3, 3, 3, 3)
 CCS = (17, 18, 19, 20, 22, 24, 27, 29)
 ARGS = None
 
@@ -104,6 +104,11 @@ class PythonMidi:
 class PythonKemper:
     def __init__(self, mask=0, channel=1):
         self.plugin = load_python("_native_oracle.kemper", FIRMWARE / "plugins/kemper.py")
+        # Native intentionally corrects the frozen CP query addresses. Keep
+        # the reference state machine for differential coverage, but use the
+        # documented current parameter map. Legacy broadcast handling has
+        # dedicated native regression tests because its semantics differ.
+        self.plugin._BLOCK_ONOFF.update(Delay=(60, 3), Reverb=(61, 3))
         self.device = {"kemper": {}, "midi_channel": channel}
         self.now = 0
         self.current_bank = self.current_slot = 1
@@ -398,7 +403,7 @@ class DifferentialTests(unittest.TestCase):
         self.tick(oracle, 600)
         self.handle(oracle, 601, 0xc0, (11,))
         self.param(oracle, 604, 56, 3, 1)
-        self.param(oracle, 607, 75, 2, 0)
+        self.param(oracle, 607, 61, 3, 0)
         self.select(oracle, 700, 1, 3)
         self.tick(oracle, 705)
         self.name(oracle, 720, "Clean")
@@ -409,7 +414,7 @@ class DifferentialTests(unittest.TestCase):
         self.handle(oracle, 1801, 0xc0, (2,))
         self.handle(oracle, 1802, 0xb0, (22, 127))
         self.param(oracle, 1803, 56, 3, 0)
-        self.param(oracle, 1804, 75, 2, 1)
+        self.param(oracle, 1804, 61, 3, 1)
         self.tick(oracle, 2300)
 
     def test_kemper_all_wah_slots_bypass_poll_and_timeout_match_python(self):

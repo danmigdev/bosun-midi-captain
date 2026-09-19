@@ -579,6 +579,40 @@ static void test_remote_validation_and_kemper_latch(void) {
     edge(30, 1); assert(!runtime.switches[0].latched_on); expect(sent - 1, 0xb0, 29, 0, 3);
 }
 
+static void test_delay_after_rapid_rig_change(void) {
+    fixture("{\"kemper\":{}}", "{}");
+    patch(1, 2, "{\"name\":\"CLEAN\",\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":1,\"rig\":2}]}}");
+    patch(1, 3, "{\"name\":\"CRUNCH\",\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":1,\"rig\":3}]},\"bindings\":[{\"switch\":\"2\",\"mode\":\"latched\",\"actions\":{\"toggle_on\":{\"messages\":[{\"type\":\"kemper_effect_toggle\",\"slot\":\"Delay\",\"value\":\"on\"}]},\"toggle_off\":{\"messages\":[{\"type\":\"kemper_effect_toggle\",\"slot\":\"Delay\",\"value\":\"off\"}]}}}]}");
+    tick(100, 0);
+    assert(bosun_runtime_switch_patch(&runtime, 1, 2, true) == BOSUN_STORE_OK);
+    tick(100, 0); tick(105, 0);
+    tick(200, 0);
+    assert(bosun_runtime_switch_patch(&runtime, 1, 3, true) == BOSUN_STORE_OK);
+    tick(200, 0); tick(205, 0);
+    edge(300, 2); /* Real debounced switch 2 press, while Crunch settles. */
+    expect(sent - 1, 0xb0, 27, 127, 3);
+    edge(320, 0);
+    midi_param(74, 2, 1, 330); /* Player's live ON notification. */
+    tick(700, 0);
+    bool queried = false;
+    for (size_t i = 0; i < sent; ++i) if (packets[i].length == 11 && packets[i].data[6] == 0x41) {
+        assert(packets[i].data[8] != 74 && packets[i].data[8] != 75);
+        if (packets[i].data[8] == 60 && packets[i].data[9] == 3) queried = true;
+    }
+    assert(queried);
+    midi_param(60, 3, 1, 710); /* Current parameter confirms actual ON state. */
+    assert(runtime.switches[1].latched_on);
+    char json[4096]; bosun_json_token_t tokens[256];
+    bosun_json_doc_t doc = context_doc(json, sizeof json, tokens);
+    assert(bosun_json_equal(&doc, bosun_json_get(&doc, 0, "kemper_block_Delay"), "on"));
+    bool on = false;
+    assert(bosun_json_boolean(&doc, bosun_json_get(&doc, bosun_json_get(&doc, 0, "switches"), "2"), &on) && on);
+    /* The next physical press must send OFF, not repeat ON after a bad mirror. */
+    edge(800, 2); expect(sent - 1, 0xb0, 27, 0, 3); edge(820, 0);
+    midi_param(74, 2, 0, 830);
+    assert(!runtime.switches[1].latched_on && !runtime.kemper.state.effects[BOSUN_KEMPER_DELAY]);
+}
+
 static void test_morph_expression_and_raw_cc(void) {
     fixture("{\"kemper\":{},\"expression\":[{\"jack\":1,\"enabled\":true,\"calibration\":{\"min\":0,\"max\":65535},\"message\":{\"type\":\"kemper_morph\"}}]}", "{}");
     bosun_runtime_tick(&runtime, 0, 0, 0, 0);
@@ -605,6 +639,7 @@ int main(void) {
     assert(mkdtemp(root) && bosun_store_mount(root));
     test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_bank_count_navigation(); test_expression(); test_midi();
     test_kemper_context_and_follow();
+    test_delay_after_rapid_rig_change();
     test_morph_expression_and_raw_cc();
     test_kemper_bank_snapshot_follow();
     test_kemper_slow_bank_snapshot();

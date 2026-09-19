@@ -3,9 +3,10 @@
 #include <string.h>
 
 static const uint8_t effect_cc[8] = {17,18,19,20,22,24,27,29};
-static const uint8_t effect_page[8] = {50,51,52,53,56,58,74,75};
-static const uint8_t effect_address[8] = {3,3,3,3,3,3,2,2};
-static const uint8_t type_page[8] = {50,51,52,53,56,58,60,61};
+/* Current effect modules: type at address 0, on/off at address 3.
+ * Player still broadcasts Delay/Reverb at 74/2 and 75/2, but querying
+ * those legacy addresses can return OFF while the actual effect is ON. */
+static const uint8_t effect_page[8] = {50,51,52,53,56,58,60,61};
 static const char *const note_names[12] = {
     "C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"
 };
@@ -60,7 +61,7 @@ bool bosun_kemper_query_blocks(bosun_kemper *k, uint8_t mask) {
     bool success = true;
     for (unsigned i = 0; i < 8; ++i)
         if (mask & (1u << i))
-            if (!request(k, effect_page[i], effect_address[i])) success = false;
+            if (!request(k, effect_page[i], 3)) success = false;
     return success;
 }
 
@@ -169,8 +170,8 @@ static void query_wah(bosun_kemper *k, uint32_t now) {
         }
     }
     uint8_t page = target == 8 ? 5 :
-        target >= 16 ? type_page[target - 16] : effect_page[target];
-    uint8_t address = target == 8 ? 21 : target >= 16 ? 0 : effect_address[target];
+        effect_page[target >= 16 ? target - 16 : target];
+    uint8_t address = target == 8 ? 21 : target >= 16 ? 0 : 3;
     k->wah_query_generation = k->generation;
     k->wah_query_valid = k->wah_pending = true;
     k->wah_target = target;
@@ -421,6 +422,26 @@ static void tuner(bosun_kemper *k, bool active) {
     }
 }
 
+static void receive_live_block(bosun_kemper *k, unsigned i, bool on, uint32_t now) {
+    uint8_t bit = (uint8_t)(1u << i);
+    bool queried = (k->reconcile_queried & bit) && !due(now, k->query_retire_ms);
+    bool wah_pending = k->wah_pending && k->wah_target == i;
+    cache_block(k, i, on);
+    /* MIDI input is drained before tick; a live update at the deadline is
+     * current even if tick has not cleared settle_active yet. */
+    if (!k->settle_active || due(now, k->settle_until_ms)) publish_block(k, i, on);
+    k->reconcile_pending &= (uint8_t)~bit;
+    if (!k->reconcile_pending) commit_name(k, now);
+    if (queried || wah_pending) {
+        k->guard_until_ms[i] = now + 1200;
+        k->guard_budget[i] = (uint8_t)((queried ?
+            (k->reconcile_attempt ? k->reconcile_attempt : 1) : 0) + (wah_pending ? 1 : 0));
+        if (on) k->guard_on |= bit;
+        else k->guard_on &= (uint8_t)~bit;
+    }
+    receive_wah(k, on, (uint8_t)i, true, now);
+}
+
 static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
                           uint32_t now) {
     if (length < 6 || data[0] != 0 || data[1] != 0x20 || data[2] != 0x33) return;
@@ -458,7 +479,7 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
     if (page == 5 && address == 21) { receive_wah(k, value, 8, false, now); return; }
     if (address == 0) {
         for (unsigned i = 0; i < 8; ++i)
-            if (page == type_page[i]) { receive_wah(k, value, (uint8_t)(i + 16), false, now); return; }
+            if (page == effect_page[i]) { receive_wah(k, value, (uint8_t)(i + 16), false, now); return; }
     }
     if (page == 4 && address == 0) {
         /* Python round uses ties-to-even, including raw .5 BPM values. */
@@ -480,8 +501,15 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
         }
         return;
     }
+    if (address == 2 && (page == 74 || page == 75)) {
+        /* These are notifications, never replies to our current queries.
+         * Give them the same stale-reply protection as live effect CCs. */
+        receive_live_block(k, page == 74 ? BOSUN_KEMPER_DELAY : BOSUN_KEMPER_REVERB,
+            value != 0, now);
+        return;
+    }
     for (unsigned i = 0; i < 8; ++i) {
-        if (page != effect_page[i] || address != effect_address[i]) continue;
+        if (page != effect_page[i] || address != 3) continue;
         uint8_t bit = (uint8_t)(1u << i);
         bool on = value != 0;
         expire_orphans(k, now);
@@ -514,24 +542,7 @@ static void receive_cc(bosun_kemper *k, uint8_t cc, uint8_t value, uint32_t now)
     if (cc == 31) { tuner(k, value >= 64); return; }
     for (unsigned i = 0; i < 8; ++i) {
         if (cc != effect_cc[i]) continue;
-        uint8_t bit = (uint8_t)(1u << i);
-        bool on = value >= 64;
-        bool queried = (k->reconcile_queried & bit) && !due(now, k->query_retire_ms);
-        bool wah_pending = k->wah_pending && k->wah_target == i;
-        cache_block(k, i, on);
-        /* MIDI input is drained before tick; a live CC at the deadline is
-         * already current even if tick has not cleared settle_active yet. */
-        if (!k->settle_active || due(now, k->settle_until_ms)) publish_block(k, i, on);
-        k->reconcile_pending &= (uint8_t)~bit;
-        if (!k->reconcile_pending) commit_name(k, now);
-        if (queried || wah_pending) {
-            k->guard_until_ms[i] = now + 1200;
-            k->guard_budget[i] = (uint8_t)((queried ?
-                (k->reconcile_attempt ? k->reconcile_attempt : 1) : 0) + (wah_pending ? 1 : 0));
-            if (on) k->guard_on |= bit;
-            else k->guard_on &= (uint8_t)~bit;
-        }
-        receive_wah(k, on, (uint8_t)i, true, now);
+        receive_live_block(k, i, value >= 64, now);
         return;
     }
 }
