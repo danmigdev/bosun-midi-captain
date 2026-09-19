@@ -24,7 +24,10 @@ Keep the complete backup directory, including the recovery helper and manifest.
 If writing is interrupted, reconnect the same Captain to the same USB port in
 BOOTSEL and use **Restore backup**. Recovery checks the complete restored flash;
 the original factory firmware cannot report its running state to Bosun.
-End-to-end factory hardware validation is still pending.
+A complete Windows test from PaintAudio 5.15 passed with the corrected installer.
+Use Desktop **0.6.8 or later**, which includes the stock USB detection fix;
+0.6.7 cannot discover that stock firmware. See the
+[hardware test and release status](stock-installation-test.md).
 
 Already-native Captains use the USB update below, which preserves native
 configuration. Existing Bosun CircuitPython installations use Pi migration.

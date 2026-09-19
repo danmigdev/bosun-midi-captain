@@ -39,8 +39,10 @@ The helper deliberately supplies its own CDC descriptors: the SDK's default
 `flash_start_xip()`, the helper reads command 0x4b from the actual flash and uses
 that UID in both USB enumeration and INFO/ARM. USB starts only afterwards.
 
-Software checks are not a substitute for the pending Windows hardware trial:
-start from a factory Captain, verify automatic/manual BOOTSEL entry and CDC
-enumeration, install, reconnect, create a profile and verify MIDI. Also exercise
-interrupted-write recovery on a test device with a separately retained known-good
-backup. Do not label this path hardware-verified until that trial is complete.
+The [Windows hardware trial](../../docs/stock-installation-test.md) verified
+automatic BOOTSEL entry, RAM-helper CDC enumeration, full backup and readback,
+installation from official PaintAudio 5.15, native startup and configuration
+restoration. The required Desktop discovery fix ships in 0.6.8; it is not
+present in the published 0.6.7 binaries. Interrupted-write recovery still needs a separate controlled
+hardware trial with a separately retained known-good backup. Do not generalize
+the successful case to untested firmware versions, platforms or Captain models.

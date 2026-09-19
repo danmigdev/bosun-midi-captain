@@ -26,7 +26,7 @@
   {#if discovery?.devices.length}
     <label>Captain to install<select bind:value={selected} onchange={() => confirmed = false}><option value="">Select a device</option>{#each discovery.devices as d}<option value={d.id}>{d.label}</option>{/each}</select></label>
     <label class="confirm"><input type="checkbox" bind:checked={confirmed} /> This is my 10-switch RP2040 MIDI Captain with factory firmware. I want to install Bosun and create new profiles.</label>
-  {:else}<p role="status">Waiting for the Captain. If it does not appear, unplug USB, hold the top-left footswitch and reconnect. Release the switch when RPI-RP2 appears.</p>{/if}
+  {:else}<p role="status">Waiting for the Captain. Connect it normally with a USB data cable and close other serial apps. Bosun requests the USB bootloader after you choose Install. Holding footswitch 1 opens USB Setup, not RPI-RP2.</p>{/if}
   <p>Bosun saves and verifies a complete backup before writing. The backup preserves factory settings; you create Bosun profiles after installation.</p>
   <p>Keep the Captain on the same USB port and keep your computer and pedal powered until the process finishes.</p>
   {#if error}<p role="alert">{error}</p>{/if}

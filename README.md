@@ -16,7 +16,7 @@ See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch edit
 
 Download the package for your system from [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
 
-These instructions cover **Bosun 0.6.7**, including the visual setup guide,
+These instructions cover **Bosun 0.6.8**, including the visual setup guide,
 direct native installation and configurable bank layouts. Keep the app,
 Captain firmware and Pi on matching versions. To build
 from source, use the [desktop build guide](editor/SETUP.md) or
@@ -31,7 +31,7 @@ from source, use the [desktop build guide](editor/SETUP.md) or
 
 Windows requires WebView2. Allow the Android USB permission prompt when connecting the pedal directly. Use a desktop computer for initial pedal setup and firmware updates.
 
-**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.7/Bosun-0.6.7-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.7](docs/releases/0.6.7.md).
+**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.8/Bosun-0.6.8-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.8](docs/releases/0.6.8.md).
 
 <a id="connections"></a>
 
@@ -160,7 +160,7 @@ The installer loads a temporary helper into RAM using standard USB mass storage 
 
 Create a **Kemper Player** profile afterwards, assign your switches and save. Factory settings are preserved in the backup, not converted into Bosun profiles. Existing native installations should use **Update firmware (USB)** to preserve profiles; existing CircuitPython Bosun profiles still use the Pi migration path.
 
-**Validation status:** the new first-installation path has software tests and build checks, but has not yet been validated end to end on a factory Captain. The macOS and Linux apps remain untested.
+**Validation status:** Desktop **0.6.8 includes the fix for stock PaintAudio 5.15 detection**. The corrected installer passed a complete Windows stock-to-native installation and configuration-restore test. Use 0.6.8 instead of 0.6.7 for first installation from that stock firmware. See the [hardware test and release status](docs/stock-installation-test.md). Other stock versions and macOS/Linux runtime operation remain unverified.
 
 <a id="configure-your-sounds"></a>
 

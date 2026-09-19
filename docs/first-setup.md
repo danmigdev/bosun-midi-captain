@@ -1,8 +1,8 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.7 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.7) includes `Bosun-0.6.7-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.8 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.8) includes `Bosun-0.6.8-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
-These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper PROFILER Player**. Other Captain or Kemper models need their own compatibility check. The macOS and Linux apps have not been tested. The new Desktop first-installation path is experimental: software tests and build checks pass, but end-to-end validation on a factory Captain and installation on a fresh Pi card remain pending.
+These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper PROFILER Player**. Other Captain or Kemper models need their own compatibility check. Use **Desktop 0.6.8 or later** for stock PaintAudio 5.15; 0.6.7 cannot discover it. The corrected installer passed a complete Windows installation from 5.15, including configuration restoration. See the [hardware test and release status](stock-installation-test.md). macOS/Linux operation, other stock versions and installation on a fresh Pi card remain unverified.
 
 ## 1. Choose what you want
 
@@ -56,7 +56,7 @@ Power the Pi and Player with their own supplies. HDMI supplies video, not displa
 2. Connect **Captain USB-B directly to the computer**, using a data cable. This temporary connection is needed even if your final setup uses Android or a Pi.
 3. Open **Setup guide → Prepare the Captain → Install native firmware**. Confirm the supported model, selected device and displayed native version, then press **Install**.
 4. Bosun saves and verifies the full original firmware and files before writing. Keep the computer and Captain powered and the USB cable connected. The firmware installs directly as native Bosun; no old Bosun or CircuitPython installation is needed.
-5. If asked to enter BOOTSEL: unplug USB, hold the **top-left footswitch**, and reconnect to the **same USB port**. Release the switch when the `RPI-RP2` drive appears. The installer continues automatically.
+5. Bosun requests the USB bootloader automatically. Keep the Captain on the **same USB port**. If this fails, follow your current firmware's bootloader procedure. PaintAudio 5 supplies `MIDICAPTAINBOOT.HTML`: open it in Chrome or Edge, choose **BOOT**, and select the Captain serial device. The installer continues when `RPI-RP2` appears. Holding footswitch **1** while powering on opens **USB Setup**, not the ROM bootloader.
 6. Wait for **Bosun installed**, close the installer, and connect in the editor. Create a **Kemper Player** profile, assign the footswitches and save.
 
 Factory settings remain in the full backup; they are not translated into Bosun profiles. Already-native devices use **Update firmware (USB)** instead of first installation. Existing Bosun CircuitPython profiles use the existing Pi migration procedure.

@@ -16,6 +16,16 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const FLASH_ID_CODE: &[u8; 152] = include_bytes!("../vendor/picotool/flash_id.bin");
 const RAM: u32 = 0x1500_0000; // XIP SRAM, as used by picotool while XIP is disabled.
 
+pub(crate) fn factory_usb_id(vid: u16, pid: u16) -> bool {
+    // PaintAudio FW 5 uses Arduino/TinyUSB's 239a:cafe identity. This also
+    // appears on other boards: model confirmation and flash checks still apply.
+    matches!((vid, pid), (0x239a, 0x80f4) | (0x239a, 0xcafe))
+}
+
+fn runtime_usb_id(vid: u16, pid: u16, first_install: bool) -> bool {
+    (vid, pid) == (0x239a, 0x80f4) || (first_install && factory_usb_id(vid, pid))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UsbIdentity {
     pub serial: String,
@@ -25,6 +35,12 @@ pub struct UsbIdentity {
 
 impl UsbIdentity {
     pub fn from_serial_port(port: &str) -> Result<Self, String> {
+        Self::runtime_identity(port, false)
+    }
+    pub fn from_factory_port(port: &str) -> Result<Self, String> {
+        Self::runtime_identity(port, true)
+    }
+    fn runtime_identity(port: &str, first_install: bool) -> Result<Self, String> {
         let ports = serialport::available_ports().map_err(|e| e.to_string())?;
         let info = ports
             .into_iter()
@@ -33,7 +49,7 @@ impl UsbIdentity {
         let serialport::SerialPortType::UsbPort(usb) = info.port_type else {
             return Err("Select the Captain USB data port".into());
         };
-        if (usb.vid, usb.pid) != (0x239a, 0x80f4) {
+        if !runtime_usb_id(usb.vid, usb.pid, first_install) {
             return Err("Selected port is not a MIDI Captain".into());
         }
         let serial = usb
@@ -47,7 +63,7 @@ impl UsbIdentity {
             .wait()
             .map_err(|e| e.to_string())?
             .filter(|d| {
-                (d.vendor_id(), d.product_id()) == (0x239a, 0x80f4)
+                (d.vendor_id(), d.product_id()) == (usb.vid, usb.pid)
                     && d.serial_number()
                         .is_some_and(|s| s.eq_ignore_ascii_case(&serial))
             })
@@ -67,12 +83,18 @@ impl UsbIdentity {
             && device.port_chain() == self.ports
     }
     pub fn serial_ports(&self) -> Vec<String> {
+        self.runtime_ports(false)
+    }
+    pub fn factory_ports(&self) -> Vec<String> {
+        self.runtime_ports(true)
+    }
+    fn runtime_ports(&self, first_install: bool) -> Vec<String> {
         serialport::available_ports()
             .unwrap_or_default()
             .into_iter()
             .filter_map(|p| match p.port_type {
                 serialport::SerialPortType::UsbPort(u)
-                    if (u.vid, u.pid) == (0x239a, 0x80f4)
+                    if runtime_usb_id(u.vid, u.pid, first_install)
                         && u.serial_number
                             .as_deref()
                             .is_some_and(|s| s.eq_ignore_ascii_case(&self.serial)) =>
@@ -351,6 +373,21 @@ impl Picoboot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stock_fw5_is_discoverable_only_for_first_installation() {
+        // USB device descriptor extracted from PaintAudio's official 10S 5.15 UF2.
+        let descriptor = [
+            0x12, 1, 0, 2, 0, 0, 0, 64, 0x9a, 0x23, 0xfe, 0xca, 0, 1, 1, 2, 3, 1,
+        ];
+        let vid = u16::from_le_bytes([descriptor[8], descriptor[9]]);
+        let pid = u16::from_le_bytes([descriptor[10], descriptor[11]]);
+        assert!(factory_usb_id(vid, pid));
+        assert!(runtime_usb_id(vid, pid, true));
+        assert!(!runtime_usb_id(vid, pid, false));
+        assert!(runtime_usb_id(0x239a, 0x80f4, false));
+        assert!(!runtime_usb_id(0x133e, 0x0004, true)); // Never touch the Kemper.
+        assert!(!runtime_usb_id(0x2e8a, 0x000a, true)); // Unrelated Pico serial.
+    }
     #[test]
     fn command_layout_matches_bootrom_wire_format() {
         let p = packet(42, 0x84, &range(FLASH_BASE, 4096), 4096);

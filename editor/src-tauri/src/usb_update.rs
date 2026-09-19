@@ -413,13 +413,13 @@ impl Worker {
             "Checking the selected Captain before first installation",
         )?;
         if !self.job.port.is_empty() {
-            if UsbIdentity::from_serial_port(&self.job.port)? != self.job.identity {
+            if UsbIdentity::from_factory_port(&self.job.port)? != self.job.identity {
                 return Err("Captain USB identity changed".into());
             }
             // Native Bosun has separate console and data CDC ports. Probe every
             // port of this identity so choosing its console cannot bypass the guard.
-            for port in self.job.identity.serial_ports() {
-                if UsbIdentity::from_serial_port(&port).ok().as_ref() != Some(&self.job.identity) {
+            for port in self.job.identity.factory_ports() {
+                if UsbIdentity::from_factory_port(&port).ok().as_ref() != Some(&self.job.identity) {
                     continue;
                 }
                 if let Ok(runtime) = Runtime::open_retry(&port) {
@@ -432,7 +432,7 @@ impl Worker {
                 }
             }
         }
-        self.publish("bootloader", 0, "Starting the Captain installer. If it does not restart automatically, unplug its USB cable, hold the top-left footswitch and reconnect it to the SAME computer USB port. Release the switch when RPI-RP2 appears.")?;
+        self.publish("bootloader", 0, "Requesting the Captain's USB bootloader. Keep it on the SAME USB port. If automatic entry fails, use your current firmware's documented bootloader procedure; PaintAudio 5 provides MIDICAPTAINBOOT.HTML. Holding footswitch 1 opens USB Setup, not the RPI-RP2 bootloader.")?;
         touch_bootloader(&self.job.identity, &self.job.port);
         let mut helper = crate::factory_install::Helper::wait(&self.job.identity, &assets.loader)?;
         self.job.identity.serial = helper.uid.clone();
@@ -515,11 +515,14 @@ impl Worker {
 }
 
 fn touch_bootloader(identity: &UsbIdentity, port: &str) {
-    if UsbIdentity::from_serial_port(port).ok().as_ref() != Some(identity) {
+    if UsbIdentity::from_factory_port(port).ok().as_ref() != Some(identity) {
         return;
     }
-    // CircuitPython's supported 1200-baud reset, sent ONLY to the chosen device.
+    // Both CircuitPython and PaintAudio 5 accept the 1200-baud reset. The OEM
+    // browser helper holds its selected port open for 800 ms before closing it.
     if let Ok(handle) = serial2::SerialPort::open(port, 1200) {
+        let _ = handle.set_dtr(true);
+        thread::sleep(Duration::from_millis(800));
         let _ = handle.set_dtr(false);
     }
 }

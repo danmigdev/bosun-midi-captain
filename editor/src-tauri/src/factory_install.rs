@@ -150,7 +150,7 @@ pub fn candidates() -> Result<Vec<Candidate>, String> {
                     ports: d.port_chain().to_vec(),
                 },
             });
-        } else if (d.vendor_id(), d.product_id()) == (0x239a, 0x80f4) {
+        } else if crate::picoboot::factory_usb_id(d.vendor_id(), d.product_id()) {
             let Some(serial) = d.serial_number() else {
                 continue;
             };
@@ -162,10 +162,21 @@ pub fn candidates() -> Result<Vec<Candidate>, String> {
                 bus: d.bus_id().into(),
                 ports: d.port_chain().to_vec(),
             };
-            if let Some(port) = identity.serial_ports().first() {
+            if let Some(port) = identity
+                .factory_ports()
+                .iter()
+                .find(|port| UsbIdentity::from_factory_port(port).ok().as_ref() == Some(&identity))
+            {
                 found.push(Candidate {
                     id,
-                    label: format!("MIDI Captain — {port} — {serial}"),
+                    label: format!(
+                        "{} — {port} — {serial}",
+                        if d.product_id() == 0xcafe {
+                            "Factory USB device — confirm your MIDI Captain"
+                        } else {
+                            "MIDI Captain"
+                        }
+                    ),
                     port: port.clone(),
                     identity,
                 });
