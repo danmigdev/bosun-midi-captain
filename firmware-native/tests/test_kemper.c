@@ -609,7 +609,43 @@ static void bank_snapshot_late_final_and_supersession(void) {
     }
 }
 
+static void morph_commands_are_not_feedback(void) {
+    wire w = {0}; bosun_kemper k;
+    bosun_kemper_init(&k, 2, 0, send_packet, &w);
+    assert(k.state.morph_value == -1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 83));
+    assert(w.count == 1 && w.packets[0][0] == 0xb1 && w.packets[0][1] == 11 && w.packets[0][2] == 83);
+    assert(k.state.morph_value == 83);
+    assert(bosun_kemper_command_channel(&k, 3, BOSUN_KEMPER_MORPH, 0, 0));
+    assert(k.channel == 2 && k.state.morph_value == 83);
+    w.fail = true;
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 127));
+    assert(k.state.morph_value == -1); w.fail = false;
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 127));
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH_TRIGGER, 0, 1));
+    assert(k.state.morph_value == -1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH_TRIGGER, 0, 0));
+    assert(w.packets[w.count-2][1] == 80 && w.packets[w.count-2][2] == 127);
+    assert(w.packets[w.count-1][1] == 80 && w.packets[w.count-1][2] == 0);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 0));
+    assert(bosun_kemper_begin_rig(&k, 3, 100));
+    param(&k, 0, 11, 16383, 120); /* Stale pedal SysEx must not invent a position. */
+    assert(k.state.morph_value == -1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 127));
+    const uint8_t external[] = {80, 127};
+    bosun_kemper_handle(&k, 2, 0xb0, external, sizeof external, 150);
+    assert(k.state.morph_value == -1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 127));
+    sense(&k, 200); bosun_kemper_tick(&k, 15201);
+    assert(!k.state.connected && k.state.morph_value == -1);
+    size_t before = w.count;
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, 128));
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_MORPH, 0, -1));
+    assert(w.count == before);
+}
+
 int main(void) {
+    morph_commands_are_not_feedback();
     codecs_and_beacon(); tuner_and_defensive_input(); pc_echo_and_rig_names();
     generation_and_live_cc_fences(); crunch_wah_and_discovery();
     wah_timeout_generation_and_slot_fence(); names_bounded_and_pc_wrap();

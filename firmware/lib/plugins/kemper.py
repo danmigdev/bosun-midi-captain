@@ -121,7 +121,7 @@ def manifest_message_types():
             "summary": "BPM {bpm}",
         },
         "kemper_morph": {
-            "label": "Morph Pedal",
+            "label": "Set Morph Position",
             "params": {
                 "value":   {"type": "int", "min": 0, "max": 127, "default": 64, "label": "Value"},
                 "channel": _CHANNEL_PARAM,
@@ -129,7 +129,7 @@ def manifest_message_types():
             "summary": "Morph {value}",
         },
         "kemper_morph_trigger": {
-            "label": "Morph Trigger",
+            "label": "Morph Button (press/release)",
             "params": {
                 "state":   {"type": "enum", "values": ["on", "off"], "default": "on", "label": "State"},
                 "channel": _CHANNEL_PARAM,
@@ -516,7 +516,7 @@ def dispatch(msg, midi):
         midi.send_cc(ch, 93, bpm % 128)
 
     elif t == "kemper_morph":
-        midi.send_cc(ch, 4, int(msg.get("value", 64)))
+        midi.send_cc(ch, 11, int(msg.get("value", 64)))
 
     elif t == "kemper_morph_trigger":
         midi.send_cc(ch, 80, 127 if msg.get("state", "on") == "on" else 0)
@@ -1264,6 +1264,7 @@ def update_context(msg, ctx):
 
 
 TFT_FIELDS = {
+    "kemper_morph":          {"label": "Morph last commanded position (native)", "sample": "SET 65%"},
     "expression_mode":      {"label": "Expression pedal mode (VOL/WAH)", "sample": "VOL"},
     "kemper_rig":            {"label": "Current Kemper rig (1-125)",      "sample": 23},
     "kemper_bank":           {"label": "Kemper bank (1-25)",              "sample": 5},

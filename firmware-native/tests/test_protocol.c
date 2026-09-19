@@ -12,8 +12,9 @@ static bosun_json_token_t reply_tokens[4096];
 static bosun_json_doc_t reply;
 static char output[BOSUN_PROTOCOL_TX_BYTES], large[BOSUN_PROTOCOL_RX_BYTES + 2048];
 static unsigned sent;
+static bool fail_midi;
 static bool send_midi(void *context, const uint8_t *data, size_t length) {
-    (void)context; (void)data; (void)length; ++sent; return true;
+    (void)context; (void)data; (void)length; ++sent; return !fail_midi;
 }
 static void read_reply(const char *type, const char *id) {
     size_t length; const uint8_t *bytes = bosun_protocol_output(&protocol, &length);
@@ -432,6 +433,41 @@ static void ui_events(void) {
     bosun_protocol_tick(&protocol, 300); read_reply("CONTEXT", NULL);
 }
 
+static void morph_control(void) {
+    assert(bosun_config_activate(&config, "test", false) == BOSUN_STORE_OK);
+    const char device[] = "{\"kemper\":{}}";
+    assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&config, "test", 1, 1, "{}", 2, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&config, 1, 1) == BOSUN_STORE_OK);
+    bosun_runtime_init(&runtime, &config, send_midi, NULL);
+    bosun_protocol_init(&protocol, &runtime); bosun_protocol_session(&protocol, true);
+    protocol.read_switches = read_switches; physical_switch_mask = 0;
+    runtime.kemper.state.connected = runtime.kemper.state.rig_name_fresh = true;
+    sent = 0;
+    const char position[] = "{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":100}";
+    request(position, "ACK"); assert(sent == 1 && runtime.kemper.state.morph_value == 127);
+    request("{\"type\":\"GET_CONTEXT\"}", "CONTEXT");
+    assert(strstr(output, "\"kemper_morph_source\":\"commanded\"") && strstr(output, "\"kemper_morph_value\":127"));
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"trigger\"}", "ACK");
+    assert(sent == 3 && runtime.kemper.state.morph_value == -1);
+    fail_midi = true;
+    request(position, "ERROR"); is_error("midi_send_failed");
+    assert(runtime.kemper.state.morph_value == -1); fail_midi = false;
+    unsigned before = sent;
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":101}", "ERROR");
+    is_error("invalid_request"); assert(sent == before);
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":1,\"action\":\"position\",\"percent\":0}", "ERROR");
+    is_error("stale_state"); assert(sent == before);
+    physical_switch_mask = 1; request(position, "ERROR"); is_error("busy"); assert(sent == before);
+    physical_switch_mask = 0; runtime.preview_active = true;
+    request(position, "ERROR"); is_error("busy"); assert(sent == before); runtime.preview_active = false;
+    runtime.kemper.state.connected = false; request(position, "ERROR"); is_error("busy"); assert(sent == before);
+    runtime.kemper.state.connected = true;
+    request(position, "ACK"); assert(runtime.kemper.state.morph_value == 127);
+    bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
+    assert(runtime.kemper.state.morph_value == -1);
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-protocol-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -571,7 +607,7 @@ int main(void) {
     assert(!protocol.tx_length && !protocol.rx_length);
     request("{\"type\":\"PING\"}", "ACK");
     assert(sent == 0);
-    monitor_and_learn(); rig_info(); ui_events(); activate_switch(); active_patch_profile_and_draft();
+    monitor_and_learn(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));

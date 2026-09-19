@@ -22,6 +22,7 @@
   import StageThemeEditor from "./StageThemeEditor.svelte";
   import StageBankPicker from "./StageBankPicker.svelte";
   import StageTuner from "./StageTuner.svelte";
+  import StageMorph from "./StageMorph.svelte";
   import { readBankSelectionMode, saveBankSelectionMode, type BankSelectionMode } from "../lib/stage-behavior";
   import "../lib/stage-controls.css";
 
@@ -71,6 +72,13 @@
 
   // --- live state ---
   let context = $state<Record<string, unknown>>({});
+  async function controlMorph(action: "position" | "trigger", percent?: number) {
+    if (!connected || !deviceInfo?.profile || context.kemper_morph_ready !== "on"
+        || typeof context.kemper_generation !== "number") throw new Error("Rig is not ready");
+    await cmd.morphControl({ bank: deviceInfo.bank, slot: deviceInfo.slot,
+      profile: deviceInfo.profile, generation: context.kemper_generation }, action, percent);
+    await cmd.getContext();
+  }
   let unsubFw: (() => void) | null = null;
   type KemperReconcile = {
     value: "on" | "off";
@@ -888,6 +896,7 @@
     const profile = deviceInfo?.profile;
     const location = bank != null && slot != null ? `${bank}/${slot}` : "";
     if (location !== _patchLocation || profile !== _patchProfile) {
+      const profileChanged = profile !== _patchProfile;
       clearKemperReconciles();
       if (_announcedPatchLocation && location !== _announcedPatchLocation) {
         _announcedPatchLocation = "";
@@ -897,7 +906,7 @@
       // Never render a new CONTEXT snapshot against the previous patch's
       // bindings while GET_PATCH for the new location is in flight.
       fullPatch = null;
-      if (contextLocation !== location) context = {};
+      if (profileChanged || contextLocation !== location) context = {};
       latched = {};
       if (connected && location) pollContext();
     }
@@ -1100,6 +1109,14 @@
       </button>
     </div>
   </div>
+
+  {#if "kemper_morph_source" in context}
+    <StageMorph {context} {connected}
+      ready={connected && !!deviceInfo?.profile && context.kemper_morph_ready === "on"
+        && !preselectedBank && !bankChangePending && pendingSwitch === null}
+      identity={`${deviceInfo?.profile}/${deviceInfo?.bank}/${deviceInfo?.slot}/${context.kemper_generation}`}
+      oncommand={controlMorph} />
+  {/if}
 
   {#if preselectedBank}
     <div class="stage__preselection-bar">

@@ -579,11 +579,33 @@ static void test_remote_validation_and_kemper_latch(void) {
     edge(30, 1); assert(!runtime.switches[0].latched_on); expect(sent - 1, 0xb0, 29, 0, 3);
 }
 
+static void test_morph_expression_and_raw_cc(void) {
+    fixture("{\"kemper\":{},\"expression\":[{\"jack\":1,\"enabled\":true,\"calibration\":{\"min\":0,\"max\":65535},\"message\":{\"type\":\"kemper_morph\"}}]}", "{}");
+    bosun_runtime_tick(&runtime, 0, 0, 0, 0);
+    assert(runtime.kemper.state.morph_value == -1);
+    bosun_runtime_tick(&runtime, 10, 0, 65535, 0);
+    expect(sent - 1, 0xb0, 11, 32, 3);
+    assert(runtime.kemper.state.morph_value == 32);
+    assert(submit("{\"type\":\"cc\",\"cc\":11,\"value\":127}", false));
+    tick(11, 0); assert(runtime.kemper.state.morph_value == 127);
+    assert(submit("{\"type\":\"cc\",\"cc\":11,\"value\":0,\"channel\":2}", false));
+    tick(12, 0); assert(runtime.kemper.state.morph_value == 127);
+    assert(submit("{\"type\":\"kemper_morph_trigger\",\"state\":\"on\"}", false));
+    tick(13, 0); assert(runtime.kemper.state.morph_value == -1);
+    expect(sent - 1, 0xb0, 80, 127, 3);
+    assert(submit("{\"type\":\"kemper_morph_trigger\",\"state\":\"off\"}", false));
+    tick(14, 0); expect(sent - 1, 0xb0, 80, 0, 3);
+    assert(submit("{\"type\":\"kemper_morph\",\"value\":64}", false));
+    fail_send = true; tick(15, 0);
+    assert(runtime.kemper.state.morph_value == -1); fail_send = false;
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-runtime-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
     test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_bank_count_navigation(); test_expression(); test_midi();
     test_kemper_context_and_follow();
+    test_morph_expression_and_raw_cc();
     test_kemper_bank_snapshot_follow();
     test_kemper_slow_bank_snapshot();
     test_remote_modes(); test_remote_guards(); test_remote_momentary_atomic();

@@ -73,6 +73,10 @@ static void resolve(const char *field, const bosun_config_t *config,
         if (kemper) snprintf(out, capacity, "%u", kemper->bank);
     } else if (!strcmp(field, "kemper_rig_in_bank")) {
         if (kemper) snprintf(out, capacity, "%u", kemper->rig_in_bank);
+    } else if (!strcmp(field, "kemper_morph")) {
+        if (kemper && kemper->morph_value >= 0)
+            snprintf(out, capacity, "SET %u%%", (unsigned)(kemper->morph_value * 100 + 63) / 127);
+        else snprintf(out, capacity, "?");
     } else if (!strcmp(field, "kemper_bpm")) {
         if (kemper) snprintf(out, capacity, "%u", kemper->bpm);
     } else if (!strcmp(field, "kemper_connected")) {

@@ -42,6 +42,8 @@ export function helpForMessageType(type: string): string | undefined {
     note_on: "Send a MIDI Note On to start a note.",
     note_off: "Send a MIDI Note Off to stop a note.",
     delay: "Pause for a set time before the next message in the chain.",
+    kemper_morph: "Set the Morph pedal position: 0% is Base, 100% is Morph. This sends CC11 and does not use the Kemper's button rise/fall timing.",
+    kemper_morph_trigger: "Emulate the Kemper Morph Button with CC80. Pair Press with Release; these are button actions, not Morph on/off. The rig's Morph settings control timing and momentary behaviour.",
     captain_patch: "Load a specific Captain patch by bank and slot.",
     captain_bank_step: "Jump to the same slot in another bank.",
     captain_preview_step:

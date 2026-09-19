@@ -196,6 +196,10 @@ def test_context_disconnect_and_link_down_fail_only_live_waiters_then_recover():
 
 
 @pytest.mark.parametrize("mutation,before_context,after_context", [
+    ({"type": "MORPH_CONTROL", "id": "morph", "action": "position", "percent": 100,
+      "bank": 1, "slot": 1, "profile": "kemper", "generation": 2},
+     {"bank": 1, "slot": 1, "kemper_morph_value": 0},
+     {"bank": 1, "slot": 1, "kemper_morph_value": 127}),
     ({"type": "SWITCH_PATCH", "id": "switch", "bank": 2, "slot": 1},
      {"bank": 1, "slot": 1}, {"bank": 2, "slot": 1}),
     ({"type": "ACTIVATE_SWITCH", "id": "activate", "switch": "3", "bank": 1, "slot": 1},

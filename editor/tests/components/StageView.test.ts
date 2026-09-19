@@ -100,6 +100,26 @@ const DISPLAY_ORDER = ["1", "2", "3", "4", "UP", "A", "B", "C", "D", "DOWN"];
 
 const DEVICE = { fw: "0.5.4", device: "midi_captain_10" };
 
+it("routes Morph controls with the current profile and rig generation", async () => {
+  renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1, profile: "kemper", stage_input: true } });
+  const context = { bank: 1, slot: 1, kemper_generation: 7, kemper_morph_source: "commanded",
+    kemper_morph_value: 83, kemper_morph_revision: 1, kemper_morph_ready: "on" };
+  await pushFirmwareMessage({ type: "CONTEXT", context });
+  expect(screen.getByText("Set 65%")).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("button", { name: "Morph controls" }));
+  await fireEvent.click(screen.getByRole("button", { name: "Base", exact: true }));
+  const command = await waitFor(() => {
+    const calls = invokeMock.mock.calls.filter(([name]) => name === "send_command")
+      .map(([, args]) => JSON.parse(args.line));
+    const message = calls.find(m => m.type === "MORPH_CONTROL");
+    expect(message).toBeDefined(); return message;
+  });
+  expect(command).toMatchObject({ profile: "kemper", bank: 1, slot: 1, generation: 7, action: "position", percent: 0 });
+  await pushFirmwareMessage({ type: "ACK", id: command.id });
+  await pushFirmwareMessage({ type: "CONTEXT", context: { ...context, kemper_morph_value: 0, kemper_morph_revision: 2 } });
+  expect(screen.getByText("Set 0%")).toBeInTheDocument();
+});
+
 function patch(bank: number, slot: number, name: string): PatchSummary {
   return { bank, slot, name, dirty: false };
 }

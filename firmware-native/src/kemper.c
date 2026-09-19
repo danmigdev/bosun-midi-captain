@@ -27,15 +27,27 @@ static bool transmit(bosun_kemper *k, const uint8_t *data, size_t length) {
     return false;
 }
 
+void bosun_kemper_morph_clear(bosun_kemper *k) {
+    if (!k) return;
+    k->state.morph_value = -1;
+    ++k->state.morph_revision;
+    ++k->state.revision;
+}
+
+void bosun_kemper_morph_sent(bosun_kemper *k, uint8_t channel,
+                            uint8_t cc, uint8_t value, bool success) {
+    if (!k || channel != k->channel || (cc != 11 && cc != 80)) return;
+    bosun_kemper_morph_clear(k);
+    if (success && cc == 11 && value <= 127) k->state.morph_value = value;
+}
+
 static bool voice_channel(bosun_kemper *k, uint8_t channel,
                           uint8_t status, uint8_t a, uint8_t b) {
     uint8_t packet[3];
     size_t n = bosun_midi_encode(packet, sizeof(packet), channel, status, a, b);
-    return n && transmit(k, packet, n);
-}
-
-static bool voice(bosun_kemper *k, uint8_t status, uint8_t a, uint8_t b) {
-    return voice_channel(k, k->channel, status, a, b);
+    bool sent = n && transmit(k, packet, n);
+    if (status == 0xb0) bosun_kemper_morph_sent(k, channel, a, b, sent);
+    return sent;
 }
 
 static bool request(bosun_kemper *k, uint8_t page, uint8_t address) {
@@ -220,6 +232,7 @@ static void reset_reconcile(bosun_kemper *k, uint32_t now, uint32_t delay) {
 }
 
 static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
+    bosun_kemper_morph_clear(k);
     quarantine(k, now);
     retire_pc(k, now);
     ++k->generation;
@@ -273,6 +286,7 @@ void bosun_kemper_init(bosun_kemper *k, uint8_t channel,
     k->send_context = context;
     k->state.rig = k->state.bank = k->state.rig_in_bank = 1;
     k->state.tuner_deviance = 8192;
+    k->state.morph_value = -1;
     k->wah_fixed = -1;
     k->bootstrap_name_pending = true;
 }
@@ -436,6 +450,11 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
     if (fn != 1 || length < 11) return;
     uint8_t page = data[7], address = data[8];
     uint16_t value = (uint16_t)((data[9] << 7) | data[10]);
+    if (page == 0 && (address == 11 || address == 80)) {
+        /* These may retain an earlier rig's pedal value. Treat them only as
+         * a reason to retire our command, never as confirmed Morph progress. */
+        bosun_kemper_morph_clear(k); return;
+    }
     if (page == 5 && address == 21) { receive_wah(k, value, 8, false, now); return; }
     if (address == 0) {
         for (unsigned i = 0; i < 8; ++i)
@@ -489,6 +508,9 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
 }
 
 static void receive_cc(bosun_kemper *k, uint8_t cc, uint8_t value, uint32_t now) {
+    /* External pedal/button traffic invalidates our last command. A pedal
+     * value (including SysEx page 0/11) is not reliable Morph-state feedback. */
+    if (cc == 11 || cc == 80) { bosun_kemper_morph_clear(k); return; }
     if (cc == 31) { tuner(k, value >= 64); return; }
     for (unsigned i = 0; i < 8; ++i) {
         if (cc != effect_cc[i]) continue;
@@ -613,6 +635,7 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
     }
     commit_name(k, now);
     if (k->state.connected && now - k->last_sensed_ms > 15000) {
+        bosun_kemper_morph_clear(k);
         k->state.connected = false;
         k->init_sent = false;
         ++k->state.revision;
@@ -632,47 +655,49 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
     k->init_sent = true;
 }
 
-bool bosun_kemper_command(bosun_kemper *k, bosun_kemper_command_type command,
+static bool command_channel(bosun_kemper *k, uint8_t channel, bosun_kemper_command_type command,
                           uint8_t index, int value) {
     if (!k) return false;
     uint8_t boolean = value ? 127 : 0;
     switch (command) {
     case BOSUN_KEMPER_EFFECT:
-        return index < 8 && voice(k, 0xb0, effect_cc[index], boolean);
+        return index < 8 && voice_channel(k, channel, 0xb0, effect_cc[index], boolean);
     case BOSUN_KEMPER_FIXED: {
         static const uint8_t addresses[] = {11,6,16,21,1};
-        return index < 5 && voice(k, 0xb0, 99, 5) &&
-            voice(k, 0xb0, 98, addresses[index]) && voice(k, 0xb0, 6, 0) &&
-            voice(k, 0xb0, 38, value ? 1 : 0);
+        return index < 5 && voice_channel(k, channel, 0xb0, 99, 5) &&
+            voice_channel(k, channel, 0xb0, 98, addresses[index]) && voice_channel(k, channel, 0xb0, 6, 0) &&
+            voice_channel(k, channel, 0xb0, 38, value ? 1 : 0);
     }
-    case BOSUN_KEMPER_TUNER: return voice(k, 0xb0, 31, boolean);
-    case BOSUN_KEMPER_TAP: return voice(k, 0xb0, 30, 127);
+    case BOSUN_KEMPER_TUNER: return voice_channel(k, channel, 0xb0, 31, boolean);
+    case BOSUN_KEMPER_TAP: return voice_channel(k, channel, 0xb0, 30, 127);
     case BOSUN_KEMPER_TEMPO:
         if (value < 40) value = 40;
         if (value > 250) value = 250;
-        return voice(k, 0xb0, 92, (uint8_t)(value / 128)) &&
-            voice(k, 0xb0, 93, (uint8_t)(value % 128));
-    case BOSUN_KEMPER_MORPH: return voice(k, 0xb0, 4, (uint8_t)value);
-    case BOSUN_KEMPER_MORPH_TRIGGER: return voice(k, 0xb0, 80, boolean);
-    case BOSUN_KEMPER_WAH: return voice(k, 0xb0, 1, (uint8_t)value);
-    case BOSUN_KEMPER_VOLUME: return voice(k, 0xb0, 7, (uint8_t)value);
+        return voice_channel(k, channel, 0xb0, 92, (uint8_t)(value / 128)) &&
+            voice_channel(k, channel, 0xb0, 93, (uint8_t)(value % 128));
+    case BOSUN_KEMPER_MORPH:
+        return value >= 0 && value <= 127 && voice_channel(k, channel, 0xb0, 11, (uint8_t)value);
+    case BOSUN_KEMPER_MORPH_TRIGGER: return voice_channel(k, channel, 0xb0, 80, boolean);
+    case BOSUN_KEMPER_WAH: return voice_channel(k, channel, 0xb0, 1, (uint8_t)value);
+    case BOSUN_KEMPER_VOLUME: return voice_channel(k, channel, 0xb0, 7, (uint8_t)value);
     case BOSUN_KEMPER_LOOPER: {
         static const uint8_t cc[] = {88,89,91,93,94};
-        return index < 5 && voice(k, 0xb0, cc[index], 127);
+        return index < 5 && voice_channel(k, channel, 0xb0, cc[index], 127);
     }
-    case BOSUN_KEMPER_ROTARY: return voice(k, 0xb0, 47, boolean);
-    case BOSUN_KEMPER_STEP: return voice(k, 0xb0, value < 0 ? 49 : 48, 0);
+    case BOSUN_KEMPER_ROTARY: return voice_channel(k, channel, 0xb0, 47, boolean);
+    case BOSUN_KEMPER_STEP: return voice_channel(k, channel, 0xb0, value < 0 ? 49 : 48, 0);
     }
     return false;
+}
+
+bool bosun_kemper_command(bosun_kemper *k, bosun_kemper_command_type command,
+                          uint8_t index, int value) {
+    return k && command_channel(k, k->channel, command, index, value);
 }
 
 bool bosun_kemper_command_channel(bosun_kemper *k, uint8_t channel,
                                   bosun_kemper_command_type command,
                                   uint8_t index, int value) {
-    if (!k || channel < 1 || channel > 16) return false;
-    uint8_t saved = k->channel;
-    k->channel = channel;
-    bool success = bosun_kemper_command(k, command, index, value);
-    k->channel = saved;
-    return success;
+    return k && channel >= 1 && channel <= 16 &&
+        command_channel(k, channel, command, index, value);
 }

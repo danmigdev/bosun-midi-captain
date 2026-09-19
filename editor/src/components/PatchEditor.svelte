@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { morphButtonBinding, morphPercent, morphValue } from "../lib/morph";
   import {
     ACTION_KEYS_BY_MODE,
     cmd,
@@ -203,6 +204,18 @@
       actions: { press: { messages: [] } },
     });
     persistPatch();
+  }
+
+  function createMorphBinding(sw: string) {
+    if (working.bindings.some(b => b.switch === sw)) return;
+    const channel = Number(device?.midi_channel ?? 1);
+    working.bindings.push(morphButtonBinding(sw,
+      Number.isInteger(channel) && channel >= 1 && channel <= 16 ? channel : 1));
+    persistPatch();
+  }
+
+  function paramNumber(msg: MidiMessage, name: string, param: ParamSchema, value: number): unknown {
+    return msg.type === "kemper_morph" && name === "value" ? morphValue(value) : coerce(param, value);
   }
 
   function unbind(sw: string) {
@@ -525,12 +538,12 @@
               {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
                 {#if paramVisible(param, msg)}
                   <label class="param">
-                    <span>{param.label ?? pname}</span>
+                    <span>{msg.type === "kemper_morph" && pname === "value" ? "Position (%)" : (param.label ?? pname)}</span>
                     {#if param.type === "int"}
-                      <input type="number" min={param.min} max={param.max}
-                             value={msg[pname] as number}
+                      <input type="number" min={param.min} max={msg.type === "kemper_morph" && pname === "value" ? 100 : param.max}
+                             value={msg.type === "kemper_morph" && pname === "value" ? morphPercent(Number(msg[pname])) : msg[pname] as number}
                              oninput={(e) => {
-                               msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                               msg[pname] = paramNumber(msg, pname, param, (e.target as HTMLInputElement).valueAsNumber);
                                persistPatch();
                              }} />
                     {:else if param.type === "enum"}
@@ -540,7 +553,7 @@
                                 persistPatch();
                               }}>
                         {#each param.values ?? [] as v}
-                          <option value={String(v)}>{v}</option>
+                          <option value={String(v)}>{msg.type === "kemper_morph_trigger" && pname === "state" ? (v === "on" ? "Press" : "Release") : v}</option>
                         {/each}
                       </select>
                     {:else if param.type === "bool"}
@@ -603,12 +616,12 @@
               {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
                 {#if paramVisible(param, msg)}
                   <label class="param">
-                    <span>{param.label ?? pname}</span>
+                    <span>{msg.type === "kemper_morph" && pname === "value" ? "Position (%)" : (param.label ?? pname)}</span>
                     {#if param.type === "int"}
-                      <input type="number" min={param.min} max={param.max}
-                             value={msg[pname] as number}
+                      <input type="number" min={param.min} max={msg.type === "kemper_morph" && pname === "value" ? 100 : param.max}
+                             value={msg.type === "kemper_morph" && pname === "value" ? morphPercent(Number(msg[pname])) : msg[pname] as number}
                              oninput={(e) => {
-                               msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                               msg[pname] = paramNumber(msg, pname, param, (e.target as HTMLInputElement).valueAsNumber);
                                persistPatch();
                              }} />
                     {:else if param.type === "enum"}
@@ -618,7 +631,7 @@
                                 persistPatch();
                               }}>
                         {#each param.values ?? [] as v}
-                          <option value={String(v)}>{v}</option>
+                          <option value={String(v)}>{msg.type === "kemper_morph_trigger" && pname === "state" ? (v === "on" ? "Press" : "Release") : v}</option>
                         {/each}
                       </select>
                     {:else if param.type === "bool"}
@@ -702,12 +715,12 @@
                   {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
                     {#if pname !== "value" && paramVisible(param, msg)}
                       <label class="param">
-                        <span>{param.label ?? pname}</span>
+                        <span>{msg.type === "kemper_morph" && pname === "value" ? "Position (%)" : (param.label ?? pname)}</span>
                         {#if param.type === "int"}
-                          <input type="number" min={param.min} max={param.max}
-                                 value={msg[pname] as number}
+                          <input type="number" min={param.min} max={msg.type === "kemper_morph" && pname === "value" ? 100 : param.max}
+                                 value={msg.type === "kemper_morph" && pname === "value" ? morphPercent(Number(msg[pname])) : msg[pname] as number}
                                  oninput={(e) => {
-                                   msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                                   msg[pname] = paramNumber(msg, pname, param, (e.target as HTMLInputElement).valueAsNumber);
                                    persistPatch();
                                  }} />
                         {:else if param.type === "enum"}
@@ -717,7 +730,7 @@
                                     persistPatch();
                                   }}>
                             {#each param.values ?? [] as v}
-                              <option value={String(v)}>{v}</option>
+                              <option value={String(v)}>{msg.type === "kemper_morph_trigger" && pname === "state" ? (v === "on" ? "Press" : "Release") : v}</option>
                             {/each}
                           </select>
                         {:else if param.type === "bool"}
@@ -806,6 +819,9 @@
               </select>
             {/if}
             <button onclick={() => createBinding(sw)}>+ Create binding</button>
+            {#if availableTypesByName.kemper_morph_trigger}
+              <button onclick={() => createMorphBinding(sw)}>+ Morph Button</button>
+            {/if}
           </div>
         {/if}
         {#if expanded.has(sw) && b}
@@ -866,6 +882,9 @@
               {/if}
             </div>
 
+            {#if Object.values(b.actions).some(action => action.messages.some(msg => msg.type === "kemper_morph_trigger"))}
+              <p>Morph Button: pair Press with Release. The Kemper rig controls rise/fall timing and momentary behaviour; the switch LED indicates the button action, not confirmed Morph state.</p>
+            {/if}
             {#each ACTION_KEYS_BY_MODE[b.mode] as actionKey}
               <fieldset class="action">
                 <legend>{actionKey}</legend>
@@ -884,12 +903,12 @@
                       {#each Object.entries(typesByName[msg.type].params) as [pname, param]}
                         {#if paramVisible(param, msg)}
                           <label class="param">
-                            <span>{param.label ?? pname}</span>
+                            <span>{msg.type === "kemper_morph" && pname === "value" ? "Position (%)" : (param.label ?? pname)}</span>
                             {#if param.type === "int"}
-                              <input type="number" min={param.min} max={param.max}
-                                     value={msg[pname] as number}
+                              <input type="number" min={param.min} max={msg.type === "kemper_morph" && pname === "value" ? 100 : param.max}
+                                     value={msg.type === "kemper_morph" && pname === "value" ? morphPercent(Number(msg[pname])) : msg[pname] as number}
                                      oninput={(e) => {
-                                       msg[pname] = coerce(param, (e.target as HTMLInputElement).valueAsNumber);
+                                       msg[pname] = paramNumber(msg, pname, param, (e.target as HTMLInputElement).valueAsNumber);
                                        commit(b, `m.${bank}.${slot}.${sw}.${actionKey}.${mi}.${pname}`);
                                      }} />
                             {:else if param.type === "enum"}
@@ -899,7 +918,7 @@
                                         commit(b);
                                       }}>
                                 {#each param.values ?? [] as v}
-                                  <option value={String(v)}>{v}</option>
+                                  <option value={String(v)}>{msg.type === "kemper_morph_trigger" && pname === "state" ? (v === "on" ? "Press" : "Release") : v}</option>
                                 {/each}
                               </select>
                             {:else if param.type === "bool"}

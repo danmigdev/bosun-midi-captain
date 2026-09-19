@@ -26,6 +26,9 @@ typedef struct {
     char tuner_note[3];
     uint32_t revision, external_rig_changes;
     uint16_t bpm, tuner_deviance;
+    /* Last successfully sent CC11, never a measurement of the Morph ramp. */
+    int16_t morph_value;
+    uint32_t morph_revision;
     uint8_t rig, bank, rig_in_bank, effect_known;
     bool effects[BOSUN_KEMPER_BLOCKS];
     bool connected, tuner_active, rig_name_fresh;
@@ -102,5 +105,8 @@ bool bosun_kemper_command_channel(bosun_kemper *kemper, uint8_t channel,
     bosun_kemper_command_type command, uint8_t index, int value);
 bool bosun_kemper_transition_active(const bosun_kemper *kemper);
 const char *bosun_kemper_expression_label(bosun_expression_mode mode);
+void bosun_kemper_morph_clear(bosun_kemper *kemper);
+void bosun_kemper_morph_sent(bosun_kemper *kemper, uint8_t channel,
+    uint8_t cc, uint8_t value, bool success);
 
 #endif

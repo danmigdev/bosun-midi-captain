@@ -363,6 +363,36 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     begin(p, "ACK");
     if (!strcmp(p->type, "PING")) string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
     else if (!strcmp(p->type, "GET_DEVICE_INFO")) device_info(p);
+    else if (!strcmp(p->type, "MORPH_CONTROL")) {
+        char action[16]; int32_t generation, percent = 0;
+        if (!coordinates(p, &bank, &slot, false) || !*profile ||
+            !text_arg(p, "action", action, sizeof action, false) ||
+            !bosun_json_integer(&p->request, get(p, "generation"), &generation) || generation < 0 ||
+            (strcmp(action, "position") && strcmp(action, "trigger")) ||
+            (!strcmp(action, "position") &&
+             (!bosun_json_integer(&p->request, get(p, "percent"), &percent) || percent < 0 || percent > 100)))
+            { error(p, "invalid_request"); goto done; }
+        if (strcmp(profile, c->profile) || bank != c->bank || slot != c->slot ||
+            (uint32_t)generation != rt->kemper.generation)
+            { error(p, "stale_state"); goto done; }
+        if (!rt->kemper_enabled) { error(p, "unsupported_profile"); goto done; }
+        if (!rt->kemper.state.connected || !rt->kemper.state.rig_name_fresh ||
+            bosun_kemper_transition_active(&rt->kemper) || rt->preview_active ||
+            rt->config_revision != c->revision || rt->patch_revision != c->patch_revision ||
+            rt->queue_count || rt->waiting || (p->read_switches && p->read_switches()))
+            { error(p, "busy"); goto done; }
+        bool success;
+        if (!strcmp(action, "position")) {
+            success = bosun_kemper_command(&rt->kemper, BOSUN_KEMPER_MORPH, 0,
+                (percent * 127 + 50) / 100);
+        } else {
+            /* One complete tap; always attempt release, including after a
+             * failed press. No held button is owned by a browser connection. */
+            success = bosun_kemper_command(&rt->kemper, BOSUN_KEMPER_MORPH_TRIGGER, 0, 1);
+            success = bosun_kemper_command(&rt->kemper, BOSUN_KEMPER_MORPH_TRIGGER, 0, 0) && success;
+        }
+        if (!success) { error(p, "midi_send_failed"); goto done; }
+    }
     else if (!strcmp(p->type, "ACTIVATE_SWITCH")) {
         char name[8];
         if (!coordinates(p, &bank, &slot, false) || !text_arg(p, "switch", name, sizeof name, false))
@@ -547,6 +577,7 @@ void bosun_protocol_session(bosun_protocol_t *p, bool connected) {
     p->context_revision = p->kemper_revision = UINT32_MAX;
     p->runtime->midi_monitor = p->runtime->midi_learn = false;
     p->runtime->learn.fresh = false;
+    bosun_kemper_morph_clear(&p->runtime->kemper);
     p->ui_pending = 0; p->ui_observed = false;
     memset(p->binding_pending, 0, sizeof p->binding_pending);
     memset(p->saved_pending, 0, sizeof p->saved_pending);

@@ -1,6 +1,6 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.8 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.8) includes `Bosun-0.6.8-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.9 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.9) includes `Bosun-0.6.9-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
 These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper PROFILER Player**. Other Captain or Kemper models need their own compatibility check. Use **Desktop 0.6.8 or later** for stock PaintAudio 5.15; 0.6.7 cannot discover it. The corrected installer passed a complete Windows installation from 5.15, including configuration restoration. See the [hardware test and release status](stock-installation-test.md). macOS/Linux operation, other stock versions and installation on a fresh Pi card remain unverified.
 
@@ -98,3 +98,5 @@ For Android or Desktop acting as the MIDI host, check **Bridge ON** and leave Bo
 **The Captain is missing.** Check the cable supports data, close other serial apps and use a direct computer USB connection for installation. Follow the wizard's BOOTSEL instructions if needed. Disconnect unrelated RP2040 boards during installation.
 
 **Stage opens but does not follow the Player.** Check the chosen wiring diagram, the Kemper Player profile and the bridge. Seeing the page alone does not verify the MIDI connection.
+
+For Morph footswitches, expression pedals and the Stage bar, follow the [Morph guide](morph.md).

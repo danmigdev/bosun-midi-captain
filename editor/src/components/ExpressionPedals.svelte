@@ -133,6 +133,9 @@
 </script>
 
 <div class="exps">
+  {#if msgTypes.some(t => t.type === "kemper_morph")}
+    <p>Choose Set Morph Position to control Morph with this pedal (heel = Base, toe = Morph). Stage shows the last position sent by Bosun.</p>
+  {/if}
   {#each expression as exp, i (exp.jack ?? i)}
     {@const msg = ensureMessage(exp)}
     <div class="exp" class:disabled={!exp.enabled}>

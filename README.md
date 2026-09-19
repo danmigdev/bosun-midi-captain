@@ -4,6 +4,8 @@ Bosun is open-source alternative firmware for the 10-switch PaintAudio MIDI Capt
 
 **Stage** adds an external Kemper Player display: see live rig names and effect states on a phone, tablet, browser or Raspberry Pi screen. Connect over USB, or use a Pi hub for access over your local network or Wi-Fi hotspot.
 
+Stage also includes a **Morph bar** with optional controls. It shows the last commanded position, clearly marked **Set**, or **?** when unknown. See [Morph controls and display](docs/morph.md).
+
 The maintained pedal firmware runs natively in C. The supported update target is the RP2040 MIDI Captain with 8 MiB flash.
 
 [Download](#download-and-install) · [Connections](#connections) · [Editor](#configure-your-sounds) · [Stage display](#stage) · [Screenshots](#desktop-app-screenshots)
@@ -16,7 +18,7 @@ See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch edit
 
 Download the package for your system from [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
 
-These instructions cover **Bosun 0.6.8**, including the visual setup guide,
+These instructions cover **Bosun 0.6.9**, including the visual setup guide,
 direct native installation and configurable bank layouts. Keep the app,
 Captain firmware and Pi on matching versions. To build
 from source, use the [desktop build guide](editor/SETUP.md) or
@@ -31,7 +33,7 @@ from source, use the [desktop build guide](editor/SETUP.md) or
 
 Windows requires WebView2. Allow the Android USB permission prompt when connecting the pedal directly. Use a desktop computer for initial pedal setup and firmware updates.
 
-**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.8/Bosun-0.6.8-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.8](docs/releases/0.6.8.md).
+**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.9/Bosun-0.6.9-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.9](docs/releases/0.6.9.md).
 
 <a id="connections"></a>
 

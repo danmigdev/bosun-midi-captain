@@ -322,6 +322,8 @@ export function defaultMessageFromSchema(type: string, schema: MessageSchema): M
 
 /** Render a message's summary using its schema template, falling back to JSON. */
 export function summarizeMessage(msg: MidiMessage, schema?: MessageSchema): string {
+  if (msg.type === "kemper_morph") return `Morph position ${Math.round(Number(msg.value ?? 64) * 100 / 127)}%`;
+  if (msg.type === "kemper_morph_trigger") return `Morph Button ${msg.state === "off" ? "release" : "press"}`;
   if (schema?.summary) {
     return schema.summary.replace(/\{(\w+)\}/g, (_, k) => String(msg[k] ?? ""));
   }
@@ -914,6 +916,10 @@ export const cmd = {
   getManifestAwait: () => sendAndAwait<{ type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }>(
                     { type: "GET_MANIFEST" }, 10000),
   getContext:     () => send({ type: "GET_CONTEXT",    id: nextId() }),
+  morphControl:   (target: { bank: number; slot: number; profile: string; generation: number },
+                    action: "position" | "trigger", percent?: number) =>
+                    sendAndAwait({ type: "MORPH_CONTROL", ...target, action,
+                      ...(action === "position" ? { percent } : {}) }, 3000),
   listPatches,
   getPatch:       (bank: number, slot: number) => send({ type: "GET_PATCH", id: nextId(), bank, slot }),
   switchPatch:    (bank: number, slot: number) => send({ type: "SWITCH_PATCH",    id: nextId(), bank, slot }),

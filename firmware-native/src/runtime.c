@@ -198,7 +198,12 @@ static bool transmit(void *context, const uint8_t *data, size_t length) {
 static bool voice(bosun_runtime_t *rt, uint8_t channel, uint8_t status, uint8_t first, uint8_t second) {
     uint8_t bytes[3];
     size_t length = bosun_midi_encode(bytes, sizeof(bytes), channel, status, first, second);
-    return length && transmit(rt, bytes, length);
+    bool sent = length && transmit(rt, bytes, length);
+    if (rt->kemper_enabled && status == 0xb0)
+        bosun_kemper_morph_sent(&rt->kemper, channel, first, second, sent);
+    if (rt->kemper_enabled && channel == rt->kemper.channel && status == 0xc0)
+        bosun_kemper_morph_clear(&rt->kemper);
+    return sent;
 }
 
 static uint32_t setting(const bosun_json_doc_t *doc, int object, const char *key, int32_t fallback) {
@@ -343,6 +348,7 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
             rt->kemper.state.rig_in_bank = (uint8_t)rt->config->slot;
         }
     } else {
+        if (rt->kemper.channel != channel) bosun_kemper_morph_clear(&rt->kemper);
         rt->kemper.channel = channel;
         bosun_kemper_set_bound_blocks(&rt->kemper, bound);
     }
@@ -832,6 +838,12 @@ bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
         !string_field(w, "preview", rt->preview_active ? "on" : "") ||
         !string_field(w, "expression_mode", rt->kemper_enabled ? bosun_kemper_expression_label(k->expression_mode) : "")) return false;
     if (rt->kemper_enabled) {
+        if (!integer_field(w, "kemper_generation", rt->kemper.generation) ||
+            !integer_field(w, "kemper_morph_revision", k->morph_revision) ||
+            !string_field(w, "kemper_morph_source", k->morph_value >= 0 ? "commanded" : "unknown") ||
+            !integer_field(w, "kemper_morph_value", k->morph_value) ||
+            !string_field(w, "kemper_morph_ready", k->connected && k->rig_name_fresh &&
+                !bosun_kemper_transition_active(&rt->kemper) && !rt->preview_active ? "on" : "off")) return false;
         if ((rt->preview_active || k->rig_name_fresh) &&
             !string_field(w, "kemper_rig_name", rt->preview_active ? rt->preview_name : k->rig_name)) return false;
         if (!integer_field(w, "kemper_bank", rt->preview_active ? rt->preview_bank : k->bank) ||

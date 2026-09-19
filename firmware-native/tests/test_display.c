@@ -180,7 +180,18 @@ static void momentary_hold_repaints_without_configuration_change(void) {
     assert(frame(3) == BOSUN_DISPLAY_OK && colored(0xffff) == 0);
     assert(display.labels[0].length == 0);
 }
+static void morph_text_distinguishes_command_from_unknown(void) {
+    load("{\"tft\":{\"layout\":[{\"field\":\"kemper_morph\",\"size\":2}]}}", "{}");
+    kemper.morph_value = 83;
+    assert(frame(0) == BOSUN_DISPLAY_OK);
+    assert(display.labels[0].length == 7 && !memcmp(display.labels[0].glyphs, "SET 65%", 7));
+    kemper.morph_value = -1; ++kemper.revision;
+    assert(frame(1) == BOSUN_DISPLAY_OK);
+    assert(display.labels[0].length == 1 && display.labels[0].glyphs[0] == '?');
+}
+
 int main(void) {
+    morph_text_distinguishes_command_from_unknown();
     assert(sizeof(bosun_display_t) < 4096);
     geometry_and_colors();
     expression_labels_are_text_only();

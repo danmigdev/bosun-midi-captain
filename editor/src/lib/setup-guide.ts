@@ -27,6 +27,7 @@ export const setups: Setup[] = [
     check: "Stage follows the Player on your phone. Disconnect Android from Wi-Fi: the Captain still controls the Player through the Pi." },
 ];
 export const faq = [
+  ["How do I control and display Morph?", "Use Bosun 0.6.9 or later with matching native Captain firmware, hub and Stage. Tap Stage's BASE-to-MORPH bar for position controls or Trigger Morph. In the patch editor, + Morph Button creates paired press/release actions on an unbound switch. Expression pedals can use Set Morph Position. Set 65% means Bosun last sent that position; ? means unknown. Kemper does not provide complete Morph feedback, so the bar is not measured progress."],
   ["Do I need CircuitPython or an older Bosun version first?", "No. First installation uses the native firmware included with Bosun Desktop. Download the latest release and check the version shown before installing. Opening the wizard does not flash the Captain: you must press Install."],
   ["Can Android replace the Raspberry Pi?", "Yes. With a compatible USB hub and OTG adapter, Android runs the MIDI bridge and displays Stage. Keep Bosun running. Captain firmware installation still requires Desktop. Android does not share the Captain over the network as the Pi does."],
   ["What are a USB hub, the Bosun hub and Stage?", "A USB hub adds ports. The Bosun MIDI bridge forwards messages between Captain and Player. The Raspberry Pi service also shares the Captain over your network. Stage shows rigs, effects and controls. A USB hub alone does not route MIDI."],
