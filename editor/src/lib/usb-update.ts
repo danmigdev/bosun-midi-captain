@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { IS_ANDROID } from "./platform";
 
 export type UsbUpdateJob = {
+  mode?: "install" | "update";
   id: string;
   phase: "preflight" | "bootloader" | "backup" | "writing" | "rebooting" | "restoring" | "done" | "restored" | "failed" | "recovery-required";
   message: string;
@@ -28,4 +29,8 @@ export function startUsbUpdate(port: string): Promise<UsbUpdateJob> {
 export function recoverUsbUpdate(): Promise<void> {
   if (IS_ANDROID) return Promise.reject(new Error("USB firmware recovery requires Bosun Desktop"));
   return invoke("usb_update_recover");
+}
+export function startFactoryInstall(candidateId: string): Promise<UsbUpdateJob> {
+  if (IS_ANDROID || !candidateId) return Promise.reject(new Error("Select a Captain in Bosun Desktop"));
+  return invoke("factory_install_start", { candidateId, confirmedModel: true });
 }

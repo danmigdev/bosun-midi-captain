@@ -21,10 +21,12 @@ powershell -ExecutionPolicy Bypass -File tools/download-assets.ps1
 The asset download prepares the resources still required by the installer and
 migration tooling. It does not install firmware on a connected pedal.
 
-Build the native firmware update archive using the
-[native firmware build instructions](../firmware-native/README.md#build-the-update-package)
-before packaging an application that must provide **Update Bosun**. The desktop
-and Android packaging scripts validate an existing archive but do not create it.
+Prepare the pinned Pico SDK and ARM build tools using the
+[native firmware build instructions](../firmware-native/README.md), then run
+`bash tools/build-factory-installer.sh` from a Linux environment (WSL on Windows).
+This builds the matching native firmware archive, RAM-only USB helper and empty
+native storage image, with a verified manifest. It does not access a connected
+pedal. The portable packager requires these resources and checks their hashes.
 
 ## Run and package
 
@@ -41,13 +43,20 @@ powershell -ExecutionPolicy Bypass -File tools/package-portable.ps1
 ```
 
 The output is `dist/Bosun-<version>-portable-x64.zip`. To retain several builds,
-add `-OutputSuffix <name>`. The script refreshes and verifies bundled resources.
+add `-OutputSuffix <name>`. The script builds Stage and the offline setup guide,
+packages the Pi installer, and refreshes and verifies bundled resources.
 Use `-SkipBuild` only to package a binary that has already been built from the
 intended source checkout.
 
 For frontend-only development, run `npm run dev` from `editor/`. Build the
 standalone Stage with `npm run build:stage`; its output is `editor/dist-stage/`.
 See [Raspberry Pi installation](../tools/rpi-hub/README.md) for serving Stage.
+
+Build the standalone setup guide with `npm --prefix editor run build:guide`;
+open `dist/setup-guide/setup-guide.html` offline in a browser. It shares its
+screens and wiring diagrams with the Desktop wizard. After building Stage,
+`python tools/package-pi-setup.py` prepares the package exported by Desktop.
+For macOS/Linux source builds, run these steps before `npx tauri build` too.
 
 ## Connect
 
@@ -58,9 +67,12 @@ Hub. Select a discovered hub or enter its hostname/IP address and TCP port
 on the local network. Manual connection remains available if broadcasts are
 blocked.
 
-Disconnect before changing the saved endpoint. Firmware installation and
-migration to native firmware use the
-[Update Bosun procedure](../docs/firmware-updates.md) through the Pi.
+Disconnect before changing the saved endpoint. **Setup guide** offers direct
+factory-to-native installation over USB. Existing native firmware can be
+updated over USB or through the Pi; existing CircuitPython configurations
+migrate through the Pi. See [firmware installation and updates](../docs/firmware-updates.md)
+for the different requirements and recovery procedures. Factory installation
+is experimental; macOS and Linux application operation remains untested.
 
 For Android requirements and APK installation, see
 [Android setup](src-tauri/android-config.md).

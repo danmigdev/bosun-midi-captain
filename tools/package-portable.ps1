@@ -103,11 +103,19 @@ function Invoke-FirmwarePackageVerification {
 # the build so a mixed/stale archive can never be emitted.
 New-Item -ItemType Directory -Force -Path $resourceDigestDir | Out-Null
 Write-Host "[resources] Syncing canonical firmware resources ..."
+Invoke-NativeTool { npm.cmd --prefix $editor run build:stage }
+if ($LASTEXITCODE -ne 0) { throw 'Stage build failed' }
+Invoke-NativeTool { npm.cmd --prefix $editor run build:guide }
+if ($LASTEXITCODE -ne 0) { throw 'Setup guide build failed' }
+Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-pi-setup.py') }
+if ($LASTEXITCODE -ne 0) { throw 'Pi setup packaging failed' }
 Sync-FirmwareResources -DigestFile $resourceDigestBefore
 Invoke-NativeTool { & $pythonExe $vendorVerifyScript --destination (Join-Path $resources "lib") --check }
 if ($LASTEXITCODE -ne 0) { throw "Pinned Adafruit vendor verification failed" }
 $resourceDigest = (Get-Content -LiteralPath $resourceDigestBefore -Raw).Trim()
 $nativePackage = Join-Path $resources 'update/bosun-update.zip'
+Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-factory-installer.py') --verify --package $nativePackage --output (Join-Path $resources 'installer') }
+if ($LASTEXITCODE -ne 0) { throw 'Build current native installer assets first: bash tools/build-factory-installer.sh' }
 $nativeDigest = $null
 if (Test-Path -LiteralPath $nativePackage) {
     Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-native-update.py') --verify $nativePackage }
@@ -202,6 +210,7 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 # Executable, renamed to the product name for a tidy portable folder.
 Copy-Item $exeSrc (Join-Path $stageDir "$product.exe")
 Write-Host "[ok  ] $product.exe"
+Copy-Item -LiteralPath (Join-Path $repoRoot 'dist/setup-guide/setup-guide.html') -Destination (Join-Path $stageDir 'Setup-guide.html')
 
 # Installer assets, side by side with the exe.
 $uf2 = Join-Path $resources "circuitpython.uf2"
@@ -211,7 +220,7 @@ if (-not (Test-Path $uf2)) {
 Copy-Item $uf2 $stageDir
 Write-Host "[ok  ] circuitpython.uf2"
 
-foreach ($tree in @("firmware", "lib", "update")) {
+foreach ($tree in @("firmware", "lib", "update", "installer", "pi")) {
     $src = Join-Path $resources $tree
     if (-not (Test-Path $src)) {
         throw "Missing resource '$tree' at $src. Run tools\download-assets.ps1 first."
@@ -241,13 +250,22 @@ $product $version - portable build
 Windows 11 already includes the WebView2 runtime. On older Windows, install
 the free Microsoft WebView2 runtime if the window stays blank.
 
-Keep $product.exe together with circuitpython.uf2, firmware\, lib\ and update\: the
-firmware installer reads them from beside the executable.
+Keep the complete extracted folder together, including installer\, update\ and pi\.
+Open Setup guide in the app, or Setup-guide.html in your browser, for wiring
+diagrams, step-by-step setup and FAQs.
+
+First installation from factory firmware goes directly to the bundled native
+release, with a verified full backup and standard USB drivers. A Raspberry Pi
+is optional. The wizard can also export the Pi setup package after you prepare
+its microSD using Raspberry Pi Imager.
 
 Native firmware can be updated via Maintenance > Install firmware (USB),
 or through a configured Raspberry Pi. Direct USB requires the Captain's
-PICOBOOT interface to use WinUSB. Bosun keeps its recovery backup in the
+PICOBOOT interface to use WinUSB for native-to-native updates. Bosun keeps its recovery backup in the
 application data directory and shows its location in the update window.
+
+The new factory-to-native flow still requires an end-to-end hardware test.
+macOS and Linux applications have not been tested.
 "@
 Set-Content -Path (Join-Path $stageDir "README.txt") -Value $readme -Encoding utf8
 

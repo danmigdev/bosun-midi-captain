@@ -67,6 +67,11 @@ bool bosun_config_dirty(const bosun_config_t *config, unsigned bank, unsigned sl
  * LIMIT resets count to zero. A caller may choose a smaller bounded capacity. */
 bosun_store_result_t bosun_config_coordinates_list(const bosun_config_t *config,
     bosun_patch_key_t *keys, size_t capacity, size_t *count);
+/* Profile bank range applies to navigation only; editor/backup inventories stay
+ * complete. Filter before applying capacity, including unsaved new patches. */
+unsigned bosun_config_bank_count(const bosun_config_t *config);
+bosun_store_result_t bosun_config_navigation_list(const bosun_config_t *config,
+    bosun_patch_key_t *keys, size_t capacity, size_t *count);
 bool bosun_config_has_patch(const bosun_config_t *config, unsigned bank, unsigned slot);
 bosun_store_result_t bosun_config_patch_name(const bosun_config_t *config, unsigned bank,
     unsigned slot, char *output, size_t capacity);

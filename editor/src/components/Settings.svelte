@@ -2,12 +2,15 @@
   import { untrack } from "svelte";
   import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
+  import { getBankCount, getRigsPerBank, MAX_BANKS, MAX_RIGS_PER_BANK } from "../lib/bank-layout";
   import ExpressionPedals from "./ExpressionPedals.svelte";
   import ColorField from "./ColorField.svelte";
 
   type DeviceConfig = {
     device_name?: string;
     midi_channel?: number;
+    rigs_per_bank?: number;
+    bank_count?: number;
     long_press_ms?: number;
     double_tap_window_ms?: number;
     auto_momentary_on_hold?: boolean;
@@ -65,6 +68,8 @@
   function withDefaults(d: DeviceConfig | null): DeviceConfig {
     const w: DeviceConfig = d ? (structuredClone($state.snapshot(d) as DeviceConfig)) : {};
     if (w.midi_channel === undefined) w.midi_channel = 1;
+    w.rigs_per_bank = getRigsPerBank(w);
+    w.bank_count = getBankCount(w);
     if (!w.autosave) w.autosave = { enabled: false, debounce_ms: 2000 };
     if (!w.leds) w.leds = { brightness: 64, dim: 64 };
     // Back-compat: migrate a legacy dim_percent (0-100) to dim (0-255).
@@ -136,6 +141,7 @@
   });
 
   async function save() {
+    if (!bankCountValid) return;
     saving = true; saveErr = "";
     try {
       await cmd.putGlobal(working as Record<string, unknown>);
@@ -156,6 +162,8 @@
 
   const ROTATIONS = [0, 90, 180, 270];
   const SWITCH_NAMES = ["1","2","3","4","up","A","B","C","D","down"];
+  let bankCountValid = $derived(typeof working.bank_count === "number" && Number.isInteger(working.bank_count)
+    && working.bank_count >= 1 && working.bank_count <= MAX_BANKS);
 
   // Bank navigation lives in long_press_actions as captain_bank_step
   // messages. The selects below read the current mapping reactively
@@ -248,6 +256,32 @@
         The channel the pedal uses to talk to and listen from your device (e.g.
         the Kemper Player). It's device-wide, not tied to a plugin - match your
         device's MIDI channel.
+      </p>
+    </section>
+
+    <section class="block">
+      <h3>Banks</h3>
+      <label>Number of banks
+        <input type="number" min="1" max={MAX_BANKS} step="1" bind:value={working.bank_count} />
+      </label>
+      <p class="hint">
+        Navigate banks 1 through this number, skipping empty banks and wrapping
+        at the ends. For example, 2 cycles between banks 1 and 2. Higher banks
+        stay available in the editor. Physical bank navigation requires the
+        Captain firmware that supports this setting.
+      </p>
+      {#if !bankCountValid}<p class="err" role="alert">Enter a whole number from 1 to {MAX_BANKS}.</p>{/if}
+      <label>Rigs per bank
+        <select bind:value={working.rigs_per_bank}>
+          {#each Array(MAX_RIGS_PER_BANK) as _, index}
+            <option value={index + 1}>{index + 1}</option>
+          {/each}
+        </select>
+      </label>
+      <p class="hint">
+        Saved separately for this profile. Use 5 for Kemper Player, or match
+        your device's bank layout. New patches fill these slots before starting
+        the next bank. Existing patches and their MIDI commands stay unchanged.
       </p>
     </section>
 
@@ -432,7 +466,7 @@
     {/each}
 
     <footer class="saverow">
-      <button class="primary" onclick={save} disabled={saving}>
+      <button class="primary" onclick={save} disabled={saving || !bankCountValid}>
         {saving ? "Saving…" : "Save settings"}
       </button>
       {#if savedAt}<span class="ok">saved at {savedAt}</span>{/if}

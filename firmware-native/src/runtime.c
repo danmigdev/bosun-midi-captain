@@ -285,6 +285,8 @@ static uint8_t binding_blocks(const bosun_json_doc_t *doc, int binding, uint8_t 
 
 void bosun_runtime_config_changed(bosun_runtime_t *rt) {
     if (!rt || !rt->config) return;
+    if (rt->preview_active && rt->preview_bank > bosun_config_bank_count(rt->config))
+        rt->preview_active = false;
     if (rt->initialized && strcmp(rt->profile, rt->config->profile)) {
         /* A profile switch ends macros and gestures belonging to the old
          * target, including delayed commands and pending double taps. */
@@ -430,7 +432,7 @@ static bool inventory(bosun_runtime_t *rt, bool setlist) {
     rt->navigation_count = 0;
     if (!setlist) {
         size_t count = 0;
-        if (storage_result(rt, bosun_config_coordinates_list(rt->config, rt->navigation,
+        if (storage_result(rt, bosun_config_navigation_list(rt->config, rt->navigation,
             BOSUN_RUNTIME_NAV_PATCHES, &count)) != BOSUN_STORE_OK) return false;
         rt->navigation_count = (uint16_t)count;
     } else {
@@ -468,7 +470,7 @@ static bool navigate(bosun_runtime_t *rt, const bosun_runtime_command_t *c) {
             if (rt->navigation[i].bank == bank) current = (int)banks;
             ++banks;
         }
-        if (current < 0 && preview) {
+        if (current < 0 && preview && bank <= bosun_config_bank_count(rt->config)) {
             current = 0;
             while (current + 1 < (int)banks && rt->navigation[starts[current]].bank < bank) ++current;
         }
@@ -482,7 +484,7 @@ static bool navigate(bosun_runtime_t *rt, const bosun_runtime_command_t *c) {
         int current = -1;
         for (unsigned i = 0; i < count; ++i)
             if (rt->navigation[i].bank == bank && rt->navigation[i].slot == slot) { current = (int)i; break; }
-        if (current < 0 && !setlist) {
+        if (current < 0 && !setlist && bank <= bosun_config_bank_count(rt->config)) {
             current = 0;
             while (current + 1 < (int)count && (rt->navigation[current].bank < bank ||
                 (rt->navigation[current].bank == bank && rt->navigation[current].slot < slot))) ++current;

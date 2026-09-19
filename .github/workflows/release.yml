@@ -112,11 +112,15 @@ jobs:
             --release "$BOSUN_RELEASE" --firmware-version "$BOSUN_FIRMWARE_VERSION"
           python tools/verify-release-version.py --tag "$RELEASE_TAG" \
             --package editor/src-tauri/resources/update/bosun-update.zip
+          bash tools/build-factory-installer.sh
+          python tools/test_factory_installer.py
       - name: Share the required native package with desktop builds
         uses: actions/upload-artifact@v4
         with:
           name: bosun-native-update
-          path: editor/src-tauri/resources/update/bosun-update.zip
+          path: |
+            editor/src-tauri/resources/update/bosun-update.zip
+            editor/src-tauri/resources/installer/
           if-no-files-found: error
           retention-days: 14
 
@@ -190,7 +194,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bosun-native-update
-          path: editor/src-tauri/resources/update
+          path: editor/src-tauri/resources
+
+      - name: Prepare the Raspberry Pi package and standalone setup guide
+        shell: bash
+        run: |
+          npm --prefix editor run build:stage
+          npm --prefix editor run build:guide
+          python tools/package-pi-setup.py
+          python tools/package-factory-installer.py --verify \
+            --package editor/src-tauri/resources/update/bosun-update.zip \
+            --output editor/src-tauri/resources/installer
 
       - name: Verify the native package before building Tauri
         shell: bash
@@ -240,13 +254,28 @@ jobs:
           echo "file=$f" >> "$GITHUB_OUTPUT"
           echo "artifact -> $f"
 
+      - name: Collect the guide, Pi package, Stage and native firmware
+        if: matrix.name == 'windows'
+        run: python tools/package-release-extras.py
+
+      - name: Upload shared release downloads
+        if: matrix.name == 'windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Bosun ${{ steps.ver.outputs.label }}
+          files: dist/release-extras/*
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: ${{ github.event_name == 'push' }}
+          prerelease: false
+          fail_on_unmatched_files: true
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           name: Bosun ${{ steps.ver.outputs.label }}
           files: ${{ steps.art.outputs.file }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          draft: false
+          draft: ${{ github.event_name == 'push' }}
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -432,7 +461,33 @@ jobs:
           # touched v0.6.0's real bosun.apk asset, which stayed broken/
           # unsigned throughout (found 2026-08-16 while chasing that bug).
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          draft: false
+          draft: ${{ github.event_name == 'push' }}
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Verify all downloads and publish
+    needs: [verify, native-package, build, android]
+    if: github.event_name == 'push' || github.event.inputs.platform == 'all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download, verify completeness and publish with checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --dir release-assets
+          python tools/release-checksums.py --tag "$RELEASE_TAG" --directory release-assets
+          gh release upload "$RELEASE_TAG" release-assets/SHA256SUMS.txt --clobber
+          notes="docs/releases/${RELEASE_TAG#v}.md"
+          test -s "$notes"
+          gh release edit "$RELEASE_TAG" --title "Bosun ${RELEASE_TAG#v}" \
+            --notes-file "$notes" --draft=false --latest

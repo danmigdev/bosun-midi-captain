@@ -24,6 +24,8 @@ function renderGrid(
     deviceInfo?: { bank: number; slot: number } | null;
     dirtyIds?: Array<{ bank: number; slot: number }>;
     linkConfig?: LinkConfig;
+    rigsPerBank?: number;
+    bankCount?: number;
     onToggleLock?: (slot: number) => void;
     onOpen?: (bank: number, slot: number) => void;
     onCreate?: (bank: number, slot: number) => void;
@@ -34,6 +36,8 @@ function renderGrid(
     deviceInfo: opts.deviceInfo ?? null,
     dirtyIds: opts.dirtyIds ?? [],
     linkConfig: opts.linkConfig,
+    rigsPerBank: opts.rigsPerBank,
+    bankCount: opts.bankCount,
     onToggleLock: opts.onToggleLock,
     onOpen: opts.onOpen ?? vi.fn(),
     onCreate: opts.onCreate ?? vi.fn(),
@@ -41,6 +45,36 @@ function renderGrid(
 }
 
 describe("PatchesGrid", () => {
+  it("keeps saved banks above the navigation limit accessible without new-patch placeholders", async () => {
+    const onOpen = vi.fn();
+    renderGrid([patch(1, 1, "Clean"), patch(3, 1, "Stored lead")], { bankCount: 2, rigsPerBank: 3, onOpen });
+    expect(screen.getByText(/Banks above 2 are excluded/)).toBeInTheDocument();
+    expect(screen.getByTitle("Create patch at 1/2")).toBeInTheDocument();
+    expect(screen.queryByTitle("Create patch at 3/2")).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByText("Stored lead"));
+    expect(onOpen).toHaveBeenCalledWith(3, 1);
+  });
+
+  it("shows three columns for a three-rig device, then updates when the profile layout changes", async () => {
+    const { container, rerender } = renderGrid([patch(1, 1, "Clean")], { rigsPerBank: 3 });
+    expect(container.querySelectorAll(".colhead")).toHaveLength(3);
+    expect(screen.getByTitle("Create patch at 1/3")).toBeInTheDocument();
+    expect(screen.queryByTitle("Create patch at 1/4")).not.toBeInTheDocument();
+    await rerender({ rigsPerBank: 5 });
+    expect(container.querySelectorAll(".colhead")).toHaveLength(5);
+    expect(screen.getByTitle("Create patch at 1/5")).toBeInTheDocument();
+  });
+
+  it("keeps existing higher slots accessible without offering new patches outside the layout", () => {
+    const onOpen = vi.fn();
+    const { container } = renderGrid([patch(1, 1, "Clean"), patch(2, 10, "Saved ten")], { rigsPerBank: 3, onOpen });
+    expect(container.querySelectorAll(".colhead")).toHaveLength(10);
+    fireEvent.click(screen.getByText("Saved ten"));
+    expect(onOpen).toHaveBeenCalledWith(2, 10);
+    expect(screen.queryByTitle("Create patch at 1/10")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Create patch at 2/4")).not.toBeInTheDocument();
+  });
+
   it("renders bank headers and one tile per patch", () => {
     renderGrid([
       patch(1, 1, "Lead"),

@@ -381,7 +381,7 @@ static unsigned number_name(const char *name, bool file) {
     }
     return i && (file ? !strcmp(name + i, ".json") : name[i] == 0) ? n : 0;
 }
-static bosun_store_result_t catalog(const char *profile, bool drafts,
+static bosun_store_result_t catalog(const char *profile, bool drafts, unsigned last_bank,
                                     bosun_patch_key_t *keys, size_t capacity, size_t *count) {
     bosun_dirent_t *banks = scratch.catalog.banks, *slots = scratch.catalog.slots;
     size_t nb = 0, ns = 0; char path[BOSUN_PATH_MAX], sub[BOSUN_PATH_MAX];
@@ -392,7 +392,7 @@ static bosun_store_result_t catalog(const char *profile, bool drafts,
     if (r != BOSUN_STORE_OK) return r;
     for (size_t b = 0; b < nb; ++b) {
         unsigned bank = number_name(banks[b].name, false);
-        if (!banks[b].directory || !bank) continue;
+        if (!banks[b].directory || !bank || bank > last_bank) continue;
         int n = snprintf(sub, sizeof sub, "%s/%s", path, banks[b].name);
         if (n < 0 || (size_t)n >= sizeof sub) return BOSUN_STORE_LIMIT;
         r = bosun_store_list(sub, slots, BOSUN_STORE_LIST_MAX, &ns);
@@ -413,7 +413,7 @@ bosun_store_result_t bosun_config_activate(bosun_config_t *c, const char *profil
     if (r != BOSUN_STORE_OK) return r;
     if (!bosun_json_string(&d, bosun_json_get(&d, 0, "kind"), kind, sizeof kind)) strcpy(kind, "unknown");
     bosun_patch_key_t draft_keys[BOSUN_DIRTY_PATCHES]; size_t count = 0;
-    r = catalog(profile, true, draft_keys, BOSUN_DIRTY_PATCHES, &count);
+    r = catalog(profile, true, 99, draft_keys, BOSUN_DIRTY_PATCHES, &count);
     if (r != BOSUN_STORE_OK) return r;
     /* Keep the old raw documents in the two existing workspaces. Future
      * documents are read and validated in-place; failures restore both old
@@ -514,15 +514,16 @@ static void sort_keys(bosun_patch_key_t *keys, size_t count) {
         keys[k] = key;
     }
 }
-bosun_store_result_t bosun_config_coordinates_list(const bosun_config_t *c,
+static bosun_store_result_t coordinates_list(const bosun_config_t *c, unsigned last_bank,
     bosun_patch_key_t *keys, size_t capacity, size_t *count) {
     if (count) *count = 0;
     if (!c || !count || (!keys && capacity)) return BOSUN_STORE_INVALID;
     if (capacity > BOSUN_PATCH_CATALOG_MAX) return BOSUN_STORE_LIMIT;
     if (!*c->profile) return BOSUN_STORE_OK;
-    bosun_store_result_t r = catalog(c->profile, false, keys, capacity, count);
+    bosun_store_result_t r = catalog(c->profile, false, last_bank, keys, capacity, count);
     if (r != BOSUN_STORE_OK) { *count = 0; return r; }
     for (unsigned i = 0; i < c->dirty_count; ++i) {
+        if (c->dirty[i].bank > last_bank) continue;
         bool found = false;
         for (size_t k = 0; k < *count; ++k) if (keys[k].bank == c->dirty[i].bank && keys[k].slot == c->dirty[i].slot) found = true;
         if (!found) {
@@ -532,6 +533,18 @@ bosun_store_result_t bosun_config_coordinates_list(const bosun_config_t *c,
     }
     sort_keys(keys, *count);
     return BOSUN_STORE_OK;
+}
+unsigned bosun_config_bank_count(const bosun_config_t *c) {
+    int32_t value = c ? bosun_config_int(&c->device_doc, 0, "bank_count", 99) : 99;
+    return value >= 1 && value <= 99 ? (unsigned)value : 99;
+}
+bosun_store_result_t bosun_config_coordinates_list(const bosun_config_t *c,
+    bosun_patch_key_t *keys, size_t capacity, size_t *count) {
+    return coordinates_list(c, 99, keys, capacity, count);
+}
+bosun_store_result_t bosun_config_navigation_list(const bosun_config_t *c,
+    bosun_patch_key_t *keys, size_t capacity, size_t *count) {
+    return coordinates_list(c, bosun_config_bank_count(c), keys, capacity, count);
 }
 bool bosun_config_has_patch(const bosun_config_t *c, unsigned bank, unsigned slot) {
     char path[BOSUN_PATH_MAX], byte; size_t length = 0;
@@ -558,7 +571,7 @@ bosun_store_result_t bosun_config_patches(const bosun_config_t *c, const char *p
     if (!bosun_config_profile_exists(id)) return BOSUN_STORE_NOT_FOUND;
     bosun_store_result_t r;
     if (!profile || !*profile) r = bosun_config_coordinates_list(c, keys, BOSUN_PATCH_CATALOG_MAX, &count);
-    else { r = catalog(id, false, keys, BOSUN_PATCH_CATALOG_MAX, &count); sort_keys(keys, count); }
+    else { r = catalog(id, false, 99, keys, BOSUN_PATCH_CATALOG_MAX, &count); sort_keys(keys, count); }
     if (r != BOSUN_STORE_OK) return r;
     bosun_json_puts(w, "[");
     for (size_t i = 0; i < count; ++i) {

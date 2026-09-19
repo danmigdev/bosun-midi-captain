@@ -431,6 +431,47 @@ describe("StageView", () => {
   });
 
   describe("bank navigation", () => {
+    it.each([
+      ["Next bank", 2, 1], ["Previous bank", 1, 2],
+      ["Next bank", 3, 1], ["Previous bank", 3, 2],
+    ] as const)("%s from %i wraps within two configured banks to %i", async (direction, bank, targetBank) => {
+      const inventory = [1, 2, 3].map(b => patch(b, 3, `Bank ${b}`));
+      renderStage({ deviceInfo: { ...DEVICE, bank, slot: 3 }, device: { bank_count: 2 }, patches: inventory });
+      await navigateWithFreshState(direction, bank, 3, inventory);
+      const request = await navigationRequest("SWITCH_PATCH");
+      expect(request).toMatchObject({ bank: targetBank, slot: 3 });
+      await confirmNavigation(request);
+    });
+
+    it.each([{ banks: [1, 2, 3] }, { banks: [2, 3] }])("disables navigation with no other eligible bank ($banks)", async ({ banks }) => {
+      renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1 }, device: { bank_count: 1 },
+        patches: banks.map(bank => patch(bank, 1, `Bank ${bank}`)) });
+      expect(screen.getByRole("button", { name: "Next bank" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Previous bank" })).toBeDisabled();
+      expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);
+    });
+
+    it("uses the freshly read bank limit if another client changed it", async () => {
+      const inventory = [1, 2, 3].map(bank => patch(bank, 3, `Bank ${bank}`));
+      renderStage({ deviceInfo: { ...DEVICE, bank: 2, slot: 3 }, device: { bank_count: 99 }, patches: inventory });
+      await fireEvent.click(screen.getByRole("button", { name: "Next bank" }));
+      await replyTo(await navigationRequest("GET_DEVICE_INFO"), { ...deviceReply(2, 3), bank_count: 2 });
+      await replyTo(await navigationRequest("LIST_PATCHES"), { type: "PATCH_LIST", patches: inventory });
+      const request = await navigationRequest("SWITCH_PATCH");
+      expect(request).toMatchObject({ bank: 1, slot: 3 });
+      await confirmNavigation(request);
+    });
+
+    it("keeps rig three when changing a generic device's three-rig bank", async () => {
+      const inventory = [1, 2].flatMap(bank => [1, 2, 3].map(slot => patch(bank, slot, `${bank}/${slot}`)));
+      renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 3 },
+        device: { rigs_per_bank: 3 }, patches: inventory });
+      await navigateWithFreshState("Next bank", 1, 3, inventory);
+      const request = await navigationRequest("SWITCH_PATCH");
+      expect(request).toMatchObject({ bank: 2, slot: 3 });
+      await confirmNavigation(request);
+    });
+
     const inventory = [
       patch(9, 7, "Nine seven"), patch(25, 3, "Twenty-five"),
       patch(2, 3, "Two"), patch(9, 3, "Nine three"), patch(25, 1, "Twenty-five one"),
@@ -675,6 +716,15 @@ describe("StageView", () => {
       expect(banks.map(bank => bank.getAttribute("aria-label"))).toEqual(["Bank 2", "Bank 25", "Bank 99"]);
       expect(within(dialog).getByRole("button", { name: "Bank 2", exact: true })).toHaveAttribute("aria-current", "true");
       expect(within(dialog).getByRole("button", { name: "Bank 25", exact: true })).not.toHaveAttribute("aria-current", "true");
+      expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);
+    });
+
+    it("offers only banks within the configured limit in the Stage picker", async () => {
+      const limited = [1, 2, 25].map(bank => patch(bank, 3, `Bank ${bank}`));
+      renderStage({ deviceInfo: info, device: { bank_count: 2 }, patches: limited });
+      const dialog = await openPicker(limited);
+      const banks = within(dialog).getAllByRole("button", { name: /^Bank \d+$/ });
+      expect(banks.map(bank => bank.getAttribute("aria-label"))).toEqual(["Bank 1", "Bank 2"]);
       expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);
     });
 
@@ -971,6 +1021,15 @@ describe("StageView", () => {
         await replyTo(await navigationRequest("GET_DEVICE_INFO", 2), replyInfo(currentBank, currentSlot));
         await replyTo(await navigationRequest("LIST_PATCHES", 2), replyInventory(fresh));
       }
+
+      it("cancels an excluded preselection when the configured bank limit is reduced", async () => {
+        const { rerender } = await renderPreselection();
+        await preselectBank();
+        expect(screen.getByRole("button", { name: "Cancel bank preselection" })).toBeInTheDocument();
+        await rerender({ device: { ...nav, bank_count: 2 } });
+        expect(screen.queryByRole("button", { name: "Cancel bank preselection" })).not.toBeInTheDocument();
+        expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);
+      });
 
       it("defaults to immediate selection and leaves the existing direct-bank behavior unchanged", async () => {
         await renderPreselection();

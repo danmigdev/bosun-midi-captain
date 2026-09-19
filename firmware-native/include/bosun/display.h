@@ -17,8 +17,7 @@ typedef struct {
     uint8_t glyphs[BOSUN_DISPLAY_GLYPHS];
     uint16_t length, width, height, color, scroll_span, scroll_speed;
     int16_t x, y;
-    uint8_t scale, icon;
-    bool badge;
+    uint8_t scale;
 } bosun_display_label_t;
 typedef struct {
     bosun_display_label_t labels[BOSUN_DISPLAY_LABELS];

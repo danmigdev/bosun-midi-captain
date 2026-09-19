@@ -211,11 +211,13 @@
                 globalDevice = { ...(globalDevice ?? {}), tft_labels: msg.tft_labels };
               }
               if (isRecord(msg.preset_navigation)) {
-                // StageView only consumes this subtree. Avoiding the full
+                // StageView uses this compact config. Avoiding the full
                 // multi-KB GLOBAL stream removes several seconds from boot.
                 globalDevice = {
                   ...(globalDevice ?? {}),
                   preset_navigation: msg.preset_navigation,
+                  // Absent on older firmware; discard the previous profile's limit.
+                  bank_count: msg.bank_count,
                 };
                 hasGlobal = true;
                 if (globalRetry) clearTimeout(globalRetry);

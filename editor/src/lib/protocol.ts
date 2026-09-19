@@ -404,6 +404,7 @@ export type FirmwareMessage =
       /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
       stage_input?: boolean;
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
+      bank_count?: number;
       preset_navigation?: Record<string, unknown>;
       tft_colors?: Record<string, unknown>;
       tft_labels?: Record<string, unknown> }

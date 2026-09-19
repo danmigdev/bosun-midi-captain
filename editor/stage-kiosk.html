@@ -4,9 +4,69 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Bosun Stage</title>
+    <!-- BOSUN BOOT STYLE BEGIN -->
+    <style>
+      html, body { margin: 0; background: #0f141a; }
+      #bosun-boot-splash {
+        position: fixed; inset: 0; z-index: 10000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #0f141a; color: #e4e6eb; font-family: "DejaVu Sans", sans-serif;
+        text-align: center;
+      }
+      #bosun-boot-splash img { width: min(38vh, 192px); height: min(38vh, 192px); }
+      #bosun-boot-splash strong { margin-top: 12px; font-size: 36px; line-height: 1.2; }
+      #bosun-boot-splash small { margin-top: 8px; color: #9aa1ad; font-size: 18px; }
+      #bosun-boot-progress { width: 220px; height: 6px; margin-top: 20px; border-radius: 3px;
+        background: #2a2e36; overflow: hidden; }
+      #bosun-boot-progress-fill { display: block; width: 90%; height: 100%; border-radius: inherit;
+        background: #6fd99b; }
+      #bosun-boot-percent { margin-top: 10px; font-size: 14px; color: #9aa1ad; }
+      #bosun-boot-status { position: absolute; bottom: 5%; font-size: 14px; color: #9aa1ad; }
+    </style>
+    <!-- BOSUN BOOT STYLE END -->
   </head>
   <body>
     <div id="app"></div>
+    <!-- BOSUN BOOT SPLASH BEGIN -->
+    <!-- Inline image and CSS keep the first browser frame independent of the JS bundle. -->
+    <div id="bosun-boot-splash" role="status" aria-label="Bosun is starting">
+      <img src="__BOSUN_BOOT_LOGO__" alt="" />
+      <strong>Bosun</strong>
+      <small>v__BOSUN_VERSION__</small>
+      <div id="bosun-boot-progress" role="progressbar" aria-label="Bosun startup"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="90">
+        <span id="bosun-boot-progress-fill"></span>
+      </div>
+      <span id="bosun-boot-percent" aria-hidden="true">90%</span>
+      <span id="bosun-boot-status"></span>
+    </div>
+    <script>
+      (() => {
+        const splash = document.getElementById("bosun-boot-splash");
+        const app = document.getElementById("app");
+        const progress = document.getElementById("bosun-boot-progress");
+        const percent = document.getElementById("bosun-boot-percent");
+        let finished = false;
+        // A missing pedal must not leave an unexplained logo indefinitely.
+        const statusTimer = setTimeout(() => {
+          document.getElementById("bosun-boot-status").textContent =
+            app.querySelector(".kiosk-waiting") ? "Waiting for the pedal…" : "Starting Stage…";
+        }, 15000);
+        const observer = new MutationObserver(() => {
+          if (finished || !app.querySelector(".stage")) return;
+          finished = true;
+          observer.disconnect();
+          clearTimeout(statusTimer);
+          progress.setAttribute("aria-valuenow", "100");
+          document.getElementById("bosun-boot-progress-fill").style.width = "100%";
+          percent.textContent = "100%";
+          // Give the mounted Stage a frame to lay out before exposing it.
+          requestAnimationFrame(() => requestAnimationFrame(() => splash.remove()));
+        });
+        observer.observe(app, { childList: true, subtree: true });
+      })();
+    </script>
+    <!-- BOSUN BOOT SPLASH END -->
     <script type="module" src="/src/kiosk/main.ts"></script>
   </body>
 </html>

@@ -58,6 +58,18 @@ class StorageImage(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), second.read_bytes())
         self.assertEqual(self.snapshot(), original)
 
+    def test_empty_factory_volume_is_verified_and_never_overwrites(self):
+        command = [str(ARGS.builder), "--empty", "--output", str(self.output)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=40)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["empty"])
+        before = self.output.read_bytes()
+        self.assertEqual(len(before), 524288)
+        self.assertIn(b"littlefs", before[:8192])
+        again = subprocess.run(command, capture_output=True, text=True, timeout=40)
+        self.assertNotEqual(again.returncode, 0)
+        self.assertEqual(self.output.read_bytes(), before)
+
     def test_existing_output_and_symlink_are_never_replaced(self):
         self.output.write_bytes(b"keep original")
         self.run_builder(success=False)

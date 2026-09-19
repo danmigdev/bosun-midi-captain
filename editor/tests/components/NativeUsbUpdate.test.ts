@@ -3,10 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/sv
 import NativeUsbUpdate from "../../src/components/NativeUsbUpdate.svelte";
 import type { UsbUpdateJob } from "../../src/lib/usb-update";
 
-const mocks = vi.hoisted(() => ({ start: vi.fn(), recover: vi.fn(), status: vi.fn() }));
+const mocks = vi.hoisted(() => ({ start: vi.fn(), factory: vi.fn(), recover: vi.fn(), status: vi.fn() }));
 vi.mock("../../src/lib/usb-update", async importOriginal => ({
   ...await importOriginal<typeof import("../../src/lib/usb-update")>(),
-  startUsbUpdate: mocks.start, recoverUsbUpdate: mocks.recover, usbUpdateStatus: mocks.status,
+  startUsbUpdate: mocks.start, startFactoryInstall: mocks.factory, recoverUsbUpdate: mocks.recover, usbUpdateStatus: mocks.status,
 }));
 const job = (phase: UsbUpdateJob["phase"], id = "new"): UsbUpdateJob => ({
   id, phase, port: "COM9", previous_version: "0.6.5-native", version: "0.6.6-native", percent: 0,
@@ -21,6 +21,14 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype,"showModal",{ configurable: true, value() { this.setAttribute("open", ""); } });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
+it("starts factory installation only after Install and keeps status polling read-only", async () => {
+  mocks.factory.mockResolvedValue({...job("preflight"),mode:"install"});
+  const options={...props(),candidateId:"pinned-device"}; render(NativeUsbUpdate,options);
+  expect(mocks.factory).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole("button",{name:"Install",exact:true}));
+  await waitFor(() => expect(mocks.factory).toHaveBeenCalledExactlyOnceWith("pinned-device"));
+  expect(mocks.start).not.toHaveBeenCalled();
+});
 
 it("requires an explicit update click and sends the selected USB port once", async () => {
   const options = props(); render(NativeUsbUpdate, options);

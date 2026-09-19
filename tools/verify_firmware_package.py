@@ -27,7 +27,7 @@ class VerificationError(RuntimeError):
 
 RESOURCE_FILE = "circuitpython.uf2"
 RESOURCE_TREES = ("firmware", "lib")
-OPTIONAL_RESOURCE_TREES = ("update",)
+OPTIONAL_RESOURCE_TREES = ("update", "installer", "pi")
 # Git/checkouts can give adjacent tracked files slightly different mtimes.
 # Treat only a clearly newer source as evidence that its deploy-preferred
 # compiled sibling was not regenerated.

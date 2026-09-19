@@ -6,7 +6,7 @@
 // device.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import KioskApp from "../../src/kiosk/KioskApp.svelte";
 import { wsLink } from "../../src/kiosk/ws-link";
 
@@ -102,6 +102,35 @@ const sw = (container: HTMLElement, id: string) =>
   )!;
 
 describe("kiosk integration", () => {
+  it("applies and refreshes the bank limit from the compact firmware projection without GET_GLOBAL", async () => {
+    mountKiosk();
+    await bringLinkUp();
+    const deviceInfo = (bank_count?: number) => ({
+      type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.6.5-native", device: "MIDI Captain", current: { bank: 1, slot: 1 },
+      profile: "generic", preset_navigation: {}, bank_count,
+    });
+    reply(deviceInfo(1));
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic",
+      patches: [1, 2].map(bank => ({ bank, slot: 1, name: `Bank ${bank}`, dirty: false })) });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next bank" })).toBeDisabled());
+    const infos = sentCount("GET_DEVICE_INFO");
+    reply({ type: "EVENT", event: "global_changed" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBe(infos + 1));
+    reply(deviceInfo(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next bank" })).toBeEnabled());
+    reply({ type: "EVENT", event: "global_changed" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBe(infos + 2));
+    reply(deviceInfo(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next bank" })).toBeDisabled());
+    reply({ type: "EVENT", event: "global_changed" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBe(infos + 3));
+    reply(deviceInfo()); // missing setting restores the default, rather than leaking the previous limit
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next bank" })).toBeEnabled());
+    expect(sentCount("GET_GLOBAL")).toBe(0);
+    expect(sentCount("SWITCH_PATCH")).toBe(0);
+  });
+
   it("passes Stage input capability and guarded taps through the real WebSocket path, retaining confirmed latch state after refresh", async () => {
     const { container } = mountKiosk();
     await bringLinkUp();

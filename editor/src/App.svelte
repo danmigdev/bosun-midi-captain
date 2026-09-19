@@ -6,6 +6,7 @@
   import FirmwarePushOverlay from "./components/FirmwarePushOverlay.svelte";
   import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
   import NativeUsbUpdate from "./components/NativeUsbUpdate.svelte";
+  import SetupWizard from "./components/SetupWizard.svelte";
   import { usbUpdateStatus, usbUpdateTerminal, type UsbUpdateJob } from "./lib/usb-update";
   import MaintenancePanel from "./components/MaintenancePanel.svelte";
   import MidiMonitor from "./components/MidiMonitor.svelte";
@@ -25,6 +26,7 @@
   } from "./lib/ui-scale";
   import { type LinkConfig, resolveLinkedPatches, applyLockToggle } from "./lib/patch-links";
   import PatchActions from "./components/PatchActions.svelte";
+  import { getBankCount, getRigsPerBank } from "./lib/bank-layout";
   import Settings from "./components/Settings.svelte";
   import PluginRecipe from "./components/PluginRecipe.svelte";
   import ProfilePicker from "./components/ProfilePicker.svelte";
@@ -118,6 +120,17 @@
   }
 
   let showInstaller = $state(false);
+  let showSetupWizard = $state(false);
+  let installCandidate = $state<string | undefined>();
+  let installVersion = $state("");
+  function openFactoryInstall(candidate: string, version: string) {
+    showInstaller = false;
+    usbJob = null;
+    installCandidate = candidate;
+    installVersion = version;
+    usbUpdatePort = "";
+    showUsbUpdate = true;
+  }
   // True when the installer was auto-opened because an unflashed pedal was
   // detected (vs. the user clicking "Install firmware" themselves). Drives the
   // installer's confirmation gate.
@@ -292,6 +305,7 @@
   function openUsbUpdate() {
     if (!canUseUsbUpdate || showFirmwarePush || showUnifiedUpdate || showUsbUpdate) return;
     usbJob = null;
+    installCandidate = undefined;
     usbUpdatePort = connectedPortName;
     usbInstalled = deviceInfo?.fw;
     showUsbUpdate = true;
@@ -309,6 +323,9 @@
   }
   async function closeUsbUpdate() {
     showUsbUpdate = false;
+    const firstInstall = usbJob?.mode === "install";
+    installCandidate = undefined;
+    if (firstInstall && usbJob?.phase !== "done") return;
     if (usbLocked || connected) return;
     const port = usbJob?.port || usbUpdatePort;
     if (!port) return;
@@ -396,6 +413,8 @@
   let _manifestTimer: ReturnType<typeof setTimeout> | undefined;
 
   let globalDevice = $state<Record<string, unknown> | null>(null);
+  let rigsPerBank = $derived(getRigsPerBank(globalDevice));
+  let bankCount = $derived(getBankCount(globalDevice));
   let midiLearnTable = $state<MidiLearnTable>({ pc_to_patch: [] });
   let captures = $state<PatchCapture[]>([]);
   const _bankMsbCache = new Map<string, number>();
@@ -907,33 +926,6 @@
     if (unflashedPollHandle) clearInterval(unflashedPollHandle);
   });
 
-  // The installer finished copying the firmware. A running bosun hides its
-  // drive, so the wizard can't confirm success - we close it and connect to the
-  // pedal once it has rebooted (the self-heal hard reset brings the data port
-  // up a few seconds later).
-  async function handleInstalled() {
-    connectionMode = "usb";
-    manualMode = false;
-    showInstaller = false;
-    installerAutoPrompt = false;
-    installDismissed = false;
-    busy = true;
-    error = "";
-    try {
-      const ok = await tryReconnect(20_000);
-      if (ok) {
-        await refetchAll();
-        showToast("ok", "Firmware installed. Pedal connected.");
-      } else {
-        error = "Firmware installed, but the pedal didn't reconnect in time - click Connect.";
-      }
-    } catch (e) {
-      error = "Firmware installed; reconnect failed: " + String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
   // Detect a pedal that needs bosun installed and offer to install it.
   // Confirmation-gated, never silent. Covers all install-needing states:
   //   - in the RP2040 bootloader (RPI-RP2 mass storage, no serial port)
@@ -943,7 +935,7 @@
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
   // pedal doesn't (prompt).
   async function pollForUnflashedPedal() {
-    if (usbLocked || showUsbUpdate || connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
+    if (usbLocked || showUsbUpdate || showSetupWizard || connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
     // Don't let a new probe start while the previous one is still running:
     // auto_connect can take several seconds, longer than the poll interval,
     // and overlapping opens contend for the same serial port (spurious fails).
@@ -952,7 +944,7 @@
     try {
       let dev;
       try { dev = await detectPedal(); } catch { return; }
-      if (usbLocked || showUsbUpdate || connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
+      if (usbLocked || showUsbUpdate || showSetupWizard || connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
 
       const inBootloader = !!dev.bootloader_drive;
       const cpNeedsFirmware = !!dev.circuitpy_drive && !dev.has_captain_firmware;
@@ -990,13 +982,13 @@
             _androidRetryCooldownUntil = Date.now() + ANDROID_RETRY_COOLDOWN_MS;
           }
         }
-        if (connected || showInstaller) return;
+        if (connected || showInstaller || showSetupWizard || showUsbUpdate || usbLocked) return;
         _stockSerialMisses += 1;
         if (_stockSerialMisses < STOCK_SERIAL_RETRIES_BEFORE_PROMPT) return;
       }
 
       installerAutoPrompt = true;
-      showInstaller = true;
+      showSetupWizard = true;
     } finally {
       _pollInFlight = false;
     }
@@ -1247,7 +1239,7 @@
     }
   });
 
-  // Lazy-fetch device config the first time Settings OR Stage opens. Stage
+  // Lazy-fetch device config for Settings, Stage and the patch bank layout. Stage
   // needs it too: preset_navigation (the rig-select row's switch->slot
   // mapping) lives in globalDevice, and refetchAll()'s own GET_GLOBAL is
   // gated behind `hasProfile` resolving from LIST_PROFILES - a fresh
@@ -1255,10 +1247,12 @@
   // could reach Stage with globalDevice still null, showing "-" on every
   // preset-nav switch despite a correct, saved mapping (2026-08-14).
   let settingsRequested = $state(false);
+  let settingsLoadError = $state("");
   $effect(() => {
-    if ((page === "settings" || page === "stage") && connected && !hubUpdateOnly && !globalDevice && !settingsRequested) {
+    if (!connected || globalDevice) { settingsRequested = false; settingsLoadError = ""; return; }
+    if ((page === "settings" || page === "stage" || page === "patches") && connected && !hubUpdateOnly && !globalDevice && !settingsRequested) {
       settingsRequested = true;
-      cmd.getGlobal().catch(() => {});
+      cmd.getGlobal().catch((e) => { settingsLoadError = String(e); });
     }
   });
 
@@ -1667,6 +1661,7 @@
               title="Enlarge UI (Ctrl +)" aria-label="Enlarge UI">A+</button>
     </div>
 
+    <button class="topbtn" onclick={() => showSetupWizard = true} disabled={usbLocked || busy}>Setup guide</button>
     <button class="themetoggle" onclick={toggleTheme}
             title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
             aria-label="Toggle theme">
@@ -1700,6 +1695,7 @@
     <main class="welcome">
       <div class="card">
         <h1>Connect your pedal</h1>
+        <p><button class="linkbtn" onclick={() => showSetupWizard = true} disabled={busy}>Setup guide · diagrams and FAQ</button></p>
         <form onsubmit={(event) => { event.preventDefault(); void doConnect(); }}>
         <NetworkConnection bind:mode={connectionMode} bind:host={networkHost} bind:port={networkPort} {busy} />
         <button class="big" type="submit" disabled={busy}>
@@ -1730,8 +1726,7 @@
         {#if error}<p class="err" role="alert">{error}</p>{/if}
 
         <!-- Fresh pedal with no firmware? The installer walks you through
-             putting the Pico in bootloader mode and flashing CircuitPython +
-             the bosun firmware. Desktop-only: firmware installation via USB
+             selecting the Captain and installing native Bosun with a verified backup. Desktop-only: firmware installation via USB
              mass storage / UF2 bootloader is not available on Android. -->
         {#if !IS_ANDROID && connectionMode === "usb"}
           <hr class="divider" />
@@ -1800,10 +1795,21 @@
         {:else if page === "patches"}
           <header class="pageHead">
             <h2>Patches</h2>
-            <PatchActions {patches} currentPatchEnvelope={currentPatch} />
+            <PatchActions {patches} currentPatchEnvelope={currentPatch} {rigsPerBank} {bankCount} ready={!!globalDevice} />
           </header>
+          {#if !globalDevice}
+            {#if settingsLoadError}
+              <p role="alert">Could not load this profile's bank layout.</p>
+              <button onclick={() => { settingsLoadError = ""; settingsRequested = false; }}>Retry profile settings</button>
+            {:else}
+              <p class="muted">Loading profile bank layout…</p>
+            {/if}
+          {/if}
           <PatchesGrid
             {patches}
+            {rigsPerBank}
+            {bankCount}
+            canCreate={!!globalDevice}
             deviceInfo={deviceInfo ? { bank: deviceInfo.bank, slot: deviceInfo.slot } : null}
             {dirtyIds}
             linkConfig={(globalDevice?.patch_link as LinkConfig | undefined)}
@@ -2086,8 +2092,7 @@
 
   {#if showInstaller}
     <Installer
-      requireConfirm={installerAutoPrompt}
-      onInstalled={handleInstalled}
+      onStart={openFactoryInstall}
       onClose={() => {
         showInstaller = false;
         // If the user dismissed an auto-prompt, don't reopen until replug.
@@ -2104,8 +2109,8 @@
   {/if}
 
   {#if showUsbUpdate && !IS_ANDROID}
-    <NativeUsbUpdate port={usbUpdatePort} installed={usbInstalled} version={bundledUpdate?.firmware_version || usbJob?.version || ""}
-                     job={usbJob} canStart={() => canUseUsbUpdate && connectedPortName === usbUpdatePort}
+    <NativeUsbUpdate port={usbUpdatePort} installed={usbInstalled} version={installCandidate ? installVersion : bundledUpdate?.firmware_version || usbJob?.version || ""}
+                     candidateId={installCandidate} job={usbJob} canStart={() => installCandidate ? !usbLocked && !busy : canUseUsbUpdate && connectedPortName === usbUpdatePort}
                      onPreparing={prepareUsbUpdate} onJob={acceptUsbJob} onClose={closeUsbUpdate} />
   {/if}
 
@@ -2116,7 +2121,12 @@
       onClose={() => showFirmwarePush = false} />
   {/if}
 
-  {#if showOnboarding}
+  {#if showSetupWizard && !usbLocked}
+    <SetupWizard {connected} hasProfile={hasActiveProfile} onClose={() => { showSetupWizard = false; if (installerAutoPrompt) installDismissed = true; installerAutoPrompt = false; }}
+      onInstall={() => { showSetupWizard = false; showInstaller = true; }}
+      onConfigure={() => { showSetupWizard = false; showOnboarding = true; }} />
+  {/if}
+  {#if showOnboarding && !showSetupWizard && !showInstaller && !showUsbUpdate && !usbLocked}
     <Onboarding
       {connected}
       hasActiveProfile={!!activeProfile}

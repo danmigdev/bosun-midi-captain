@@ -237,6 +237,24 @@ static bool publish(const char *path) {
 }
 
 int main(int argc, char **argv) {
+    /* Explicit factory provisioning: an empty, mountable native volume. Never
+     * infer this mode from a missing or invalid migration directory. */
+    if (argc == 4 && !strcmp(argv[1], "--empty") && !strcmp(argv[2], "--output")) {
+        memset(flash, 0xff, sizeof flash);
+        bool valid = bosun_store_format() == BOSUN_STORE_OK &&
+            bosun_store_mkdir("/config") == BOSUN_STORE_OK &&
+            bosun_store_mkdir("/config/profiles") == BOSUN_STORE_OK;
+        memcpy(original, flash, sizeof flash);
+        size_t count = 0;
+        bosun_dirent_t entries[1];
+        valid = valid && bosun_store_mount(NULL) &&
+            bosun_config_init(&config) == BOSUN_STORE_OK && !*config.profile &&
+            bosun_store_list("/config/profiles", entries, 1, &count) == BOSUN_STORE_OK &&
+            count == 0 && !memcmp(original, flash, sizeof flash);
+        if (!valid || !publish(argv[3])) return 1;
+        puts("{\"empty\":true,\"storage_bytes\":524288,\"verified\":true}");
+        return 0;
+    }
     if (argc != 5 || strcmp(argv[1], "--config-root") || strcmp(argv[3], "--output")) {
         fprintf(stderr, "Usage: %s --config-root EXISTING_CONFIG_DIRECTORY --output NEW_IMAGE.bin\n", argv[0]);
         return 2;

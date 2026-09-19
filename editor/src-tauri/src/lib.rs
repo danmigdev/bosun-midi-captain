@@ -21,6 +21,8 @@ mod firmware_package;
 mod picoboot;
 #[cfg(not(target_os = "android"))]
 mod usb_update;
+#[cfg(not(target_os = "android"))]
+mod factory_install;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -81,9 +83,12 @@ pub fn run() {
             firmware_update::bundled_update_manifest,
             firmware_update::read_bundled_update,
             usb_update::usb_update_start,
+            usb_update::factory_install_start,
+            factory_install::factory_install_discover,
             usb_update::usb_update_status,
             usb_update::usb_update_recover,
             export::pick_export_folder,
+            export::export_pi_setup,
             export::write_export_file,
             export::default_backup_folder,
             export::open_in_file_manager,

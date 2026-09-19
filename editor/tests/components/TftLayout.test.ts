@@ -81,10 +81,10 @@ describe("TftLayout expression indicator", () => {
     const badge = container.querySelectorAll<HTMLElement>(".prevlabel")[1];
     expect(badge.style.left).toBe("234px");
     expect(badge.style.top).toBe("234px");
-    expect(badge.style.height).toBe("28px");
+    expect(badge.style.height).toBe("24px");
     expect(badge.style.transform).toBe("translate(-100%, -100%)");
-    expect(badge.querySelector("svg")).toHaveAttribute("width", "32");
-    expect(badge.querySelector("svg")).toHaveAttribute("height", "24");
+    expect(badge).toHaveTextContent("VOL");
+    expect(badge.querySelector("svg")).toBeNull();
     await fireEvent.change(row.getByLabelText("H-align"), { target: { value: "left" } });
     await fireEvent.change(row.getByLabelText("V-align"), { target: { value: "top" } });
     await fireEvent.input(row.getByLabelText("X offset"), { target: { value: "17" } });
@@ -105,19 +105,16 @@ describe("TftLayout expression indicator", () => {
     const { container } = render(TftLayout, { device: deviceWith([title]), manifest: null });
     const field = await screen.findByLabelText("Field");
     await fireEvent.change(field, { target: { value: "expression_mode" } });
-    await waitFor(() => expect(container.querySelectorAll(".pedalIcon")).toHaveLength(1));
-    expect(container.querySelector(".preview")?.textContent).toContain("VOL");
-    expect(container.querySelector(".pedalIcon")).toHaveAttribute("data-mode", "VOL");
-    const volumePath = container.querySelector(".pedalIcon path")?.getAttribute("d");
+    await waitFor(() => expect(container.querySelector(".preview")).toHaveTextContent("VOL"));
+    expect(container.querySelector(".preview svg")).toBeNull();
     const mode = screen.getByLabelText("Pedal preview");
     await fireEvent.change(mode, { target: { value: "WAH" } });
     expect(container.querySelector(".preview")?.textContent).toContain("WAH");
-    expect(container.querySelector(".pedalIcon")).toHaveAttribute("data-mode", "WAH");
-    expect(container.querySelector(".pedalIcon path")?.getAttribute("d")).not.toBe(volumePath);
+    expect(container.querySelector(".preview svg")).toBeNull();
     await fireEvent.change(mode, { target: { value: "" } });
     expect(container.querySelector(".preview")?.textContent).toContain("---");
     expect(container.querySelector(".preview")?.textContent).not.toContain("WAH");
-    expect(container.querySelector(".pedalIcon")).toHaveStyle("visibility: hidden");
+    expect(container.querySelector(".preview svg")).toBeNull();
     expect(commands.putGlobal).not.toHaveBeenCalled();
   });
 
@@ -144,7 +141,8 @@ describe("TftLayout expression indicator", () => {
     const custom = { ...pedal, x: 11, y: -39, halign: "center", size: 3, color: "#abcdef", font: "custom.bdf", prefix: "EXP ", suffix: "!", future_display_option: 23 };
     const original = deviceWith([title, custom, { ...pedal, color: "#ff0000" }]);
     const { container } = render(TftLayout, { device: original, manifest: null });
-    await waitFor(() => expect(container.querySelectorAll(".pedalIcon")).toHaveLength(2));
+    await waitFor(() => expect(container.querySelectorAll(".prevlabel")).toHaveLength(3));
+    expect(container.querySelector(".preview svg")).toBeNull();
     expect(container.querySelector(".preview")?.textContent).toContain("EXP VOL!");
     await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
     await waitFor(() => expect(commands.putGlobal).toHaveBeenCalledWith(original));

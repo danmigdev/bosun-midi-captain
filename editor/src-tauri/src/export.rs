@@ -9,6 +9,21 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub async fn export_pi_setup(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = app.path().resolve("pi/bosun-pi-setup.tar.gz",tauri::path::BaseDirectory::Resource).map_err(|e| e.to_string())?;
+        if !source.is_file() { return Err("Raspberry Pi package missing. Download the complete latest Bosun Desktop release.".into()); }
+        let Some(target) = rfd::FileDialog::new().set_title("Save Raspberry Pi setup package")
+            .set_file_name("bosun-pi-setup.tar.gz").save_file() else { return Ok(None); };
+        if target == source { return Err("Choose a location outside the application resources".into()); }
+        std::fs::copy(&source,&target).map_err(|e| e.to_string())?;
+        Ok(Some(target.to_string_lossy().into_owned()))
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// Open a native folder picker dialog. Desktop-only (uses `rfd`).
 /// On Android, returns the app's external documents directory.
 #[tauri::command]

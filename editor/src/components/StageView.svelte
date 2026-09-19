@@ -14,6 +14,7 @@
     type PatchSummary,
   } from "../lib/protocol";
   import { DEFAULT_LAYOUT } from "../lib/pedal-layout";
+  import { getBankCount } from "../lib/bank-layout";
   import { ledColorFor } from "../lib/led-color";
   import {
     readSavedStageTheme, saveStageTheme, stageThemeToCssVars, type StageTheme,
@@ -33,6 +34,7 @@
     onExit: () => void;
   };
   let { deviceInfo, manifest, device, connected, patches, onExit }: Props = $props();
+  let bankCount = $derived(getBankCount(device));
 
   // Preset-navigation row (e.g. rig-select switches): a device-level
   // overlay, not a patch binding, so it never shows up in fullPatch.bindings
@@ -260,7 +262,7 @@
     if (!preselectedBank) return null;
     const bank = preselectedBank.bank;
     const slot = preselectionSlots.get(sw);
-    return bankInventory.find(p => p.bank === bank && p.slot === slot) ?? null;
+    return validPatches(bankInventory).find(p => p.bank === bank && p.slot === slot) ?? null;
   }
 
   function canSelectPreselectedRig(sw: string) {
@@ -274,8 +276,8 @@
     if (await changeBank({ bank: patch.bank, slot: patch.slot })) preselectedBank = null;
   }
 
-  function validPatches(inventory: PatchSummary[]) {
-    return inventory.filter(p => Number.isInteger(p.bank) && p.bank >= 1 && p.bank <= 99
+  function validPatches(inventory: PatchSummary[], limit = bankCount) {
+    return inventory.filter(p => Number.isInteger(p.bank) && p.bank >= 1 && p.bank <= limit
       && Number.isInteger(p.slot) && p.slot >= 1 && p.slot <= 10);
   }
 
@@ -290,8 +292,8 @@
     }));
   });
 
-  function bankDestination(bank: number, current: { bank: number; slot: number }, inventory: PatchSummary[]) {
-    const slots = validPatches(inventory).filter(p => p.bank === bank).map(p => p.slot).sort((a, b) => a - b);
+  function bankDestination(bank: number, current: { bank: number; slot: number }, inventory: PatchSummary[], limit = bankCount) {
+    const slots = validPatches(inventory, limit).filter(p => p.bank === bank).map(p => p.slot).sort((a, b) => a - b);
     return slots.length ? { bank, slot: slots.includes(current.slot) ? current.slot : slots[0] } : null;
   }
 
@@ -375,17 +377,17 @@
   let navigationPosition = $derived(deviceInfo && preselectedBank
     ? { bank: preselectedBank.bank, slot: deviceInfo.slot } : deviceInfo);
 
-  function bankTarget(delta: -1 | 1, current: { bank: number; slot: number } | null = navigationPosition, inventory = bankInventory) {
+  function bankTarget(delta: -1 | 1, current: { bank: number; slot: number } | null = navigationPosition, inventory = bankInventory, limit = bankCount) {
     if (!current || !Number.isInteger(current.bank) || current.bank < 1 || current.bank > 99
         || !Number.isInteger(current.slot) || current.slot < 1 || current.slot > 10) return null;
-    const valid = validPatches(inventory);
+    const valid = validPatches(inventory, limit);
     const banks = [...new Set(valid.map(p => p.bank))].sort((a, b) => a - b);
     if (!banks.length) return null;
     const index = banks.indexOf(current.bank);
     const bank = banks[index < 0 ? (delta > 0 ? 0 : banks.length - 1)
       : (index + delta + banks.length) % banks.length];
     if (bank === current.bank) return null;
-    return bankDestination(bank, current, valid);
+    return bankDestination(bank, current, valid, limit);
   }
 
   let previousBank = $derived(bankTarget(-1));
@@ -443,11 +445,13 @@
       // A clean patch deleted by another editor may not emit an event. Keep
       // this confirmed list for button availability until the parent refreshes.
       refreshedInventory = { source: patches, profile: deviceInfo?.profile, patches: inventory.patches };
+      // Another client may have changed the limit before GLOBAL reaches this UI.
+      const limit = info.bank_count === undefined ? bankCount : getBankCount(info);
       const target = exactRig
-        ? validPatches(inventory.patches).find(p => p.bank === selection.bank && p.slot === selection.slot)
-        : direct ? bankDestination(selection.bank, info.current, inventory.patches)
+        ? validPatches(inventory.patches, limit).find(p => p.bank === selection.bank && p.slot === selection.slot)
+        : direct ? bankDestination(selection.bank, info.current, inventory.patches, limit)
         : bankTarget(selection, preselectedBank
-          ? { bank: preselectedBank.bank, slot: info.current.slot } : info.current, inventory.patches);
+          ? { bank: preselectedBank.bank, slot: info.current.slot } : info.current, inventory.patches, limit);
       if (!target) {
         if (exactRig) fail("Rig is no longer available.");
         else if (direct) fail("Bank is no longer available.");
@@ -829,6 +833,7 @@
 
   $effect(() => {
     if (preselectedBank && (!connected || deviceInfo?.profile !== preselectedBank.profile
+        || preselectedBank.bank > bankCount
         || deviceInfo?.bank !== preselectedBank.originBank || deviceInfo?.slot !== preselectedBank.originSlot)) {
       preselectedBank = null;
     }
@@ -1165,6 +1170,7 @@
 
 <style>
   .stage {
+    --stage-label-font-size: clamp(0.8rem, 3.2vw, 3rem);
     /* Stage is a dark instrument display in either editor shell theme.
        Saved section fonts/colours and inline TFT colours still win below. */
     --stage-display-bg: #080c10;
@@ -1338,7 +1344,7 @@
     min-width: 0;
   }
   .stage__bank, .stage__rig {
-    font-size: calc(clamp(1rem, 3.5vw, 2.5rem) * var(--stage-bank-scale, 1));
+    font-size: calc(var(--stage-label-font-size) * var(--stage-bank-scale, 1));
     color: var(--stage-bank-color, #ffffff);
     font-family: var(--stage-bank-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     letter-spacing: 0.02em;
@@ -1560,7 +1566,7 @@
   }
 
   .stage__switch-label {
-    font-size: calc(clamp(0.8rem, 3.2vw, 3rem) * var(--stage-switch-label-scale, 1));
+    font-size: calc(var(--stage-label-font-size) * var(--stage-switch-label-scale, 1));
     color: var(--stage-switch-label-color, #ffffff);
     font-family: var(--stage-switch-label-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-align: center;
@@ -1617,6 +1623,7 @@
   /* ===== LANDSCAPE: immersive full-screen ===== */
   @media (orientation: landscape) {
     .stage {
+      --stage-label-font-size: min(8.5vh, 2.8vw, 4.5rem);
       padding: max(clamp(8px, 1.8vh, 18px), calc(var(--stage-corner-radius) * 0.32));
       gap: clamp(6px, 1.4vh, 12px);
     }
@@ -1636,10 +1643,10 @@
       flex: 1.4 1 0;
     }
     .stage__meta {
-      flex: 1.15 1 0;
+      flex: 1.55 1 0;
     }
+    .stage__bank-readout { flex-grow: 1.3; }
     .stage__bank, .stage__rig {
-      font-size: calc(min(5.5vh, 2.4vw, 3rem) * var(--stage-bank-scale, 1));
       color: var(--stage-bank-color, #ffffff);
       letter-spacing: 0.02em; line-height: 1.2;
     }
@@ -1664,7 +1671,6 @@
       padding-top: clamp(24px, 4.8vh, 46px);
     }
     .stage__switch-label {
-      font-size: calc(min(8.5vh, 2.8vw, 4.5rem) * var(--stage-switch-label-scale, 1));
       color: var(--stage-switch-label-color, #ffffff);
       line-height: 1.1;
     }

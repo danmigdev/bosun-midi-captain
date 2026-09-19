@@ -45,6 +45,12 @@ body,
   overflow: hidden;
 }
 
+html[data-kiosk-cursor="hidden"],
+html[data-kiosk-cursor="hidden"] * {
+  /* A transparent bitmap keeps a cursor surface for the Pi compositor. */
+  cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=") 0 0, none !important;
+}
+
 body {
   font-family: "Inter", -apple-system, system-ui, sans-serif;
   color: var(--text);

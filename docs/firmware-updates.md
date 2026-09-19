@@ -5,6 +5,30 @@ Raspberry Pi. The Pi updater also migrates supported CircuitPython configuration
 supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player or
 Generic MIDI profiles. CircuitPython is no longer maintained separately.
 
+## First installation from factory firmware
+
+Open **Setup guide** in Desktop and select your configuration, then **Install
+native firmware**. This installs the native version bundled with the current
+Desktop release directly on the supported 10-switch, 8 MiB RP2040 Captain.
+No older Bosun release, CircuitPython bootstrap or Pi is needed. Follow the
+[illustrated first-installation guide](first-setup.md#2-install-native-firmware-on-the-captain).
+
+This experimental path loads a temporary installer into RAM through the
+`RPI-RP2` drive and uses standard USB serial drivers. Loading the helper does
+not write flash. The app verifies the physical flash identity and capacity,
+reads the complete original flash twice, and durably saves a verified backup
+before writing. The new native installation starts with empty Bosun profiles;
+factory settings remain in the backup and are not converted.
+
+Keep the complete backup directory, including the recovery helper and manifest.
+If writing is interrupted, reconnect the same Captain to the same USB port in
+BOOTSEL and use **Restore backup**. Recovery checks the complete restored flash;
+the original factory firmware cannot report its running state to Bosun.
+End-to-end factory hardware validation is still pending.
+
+Already-native Captains use the USB update below, which preserves native
+configuration. Existing Bosun CircuitPython installations use Pi migration.
+
 ## Direct Desktop USB
 
 This path updates an existing native installation on an **8 MiB RP2040 Captain**.
@@ -103,7 +127,8 @@ physical bootloader access and restoration of its verified full backup.
 
 ## Local application builds
 
-Generate the [native update archive](../firmware-native/README.md#build-the-update-package)
-before packaging the desktop application. Without a matching archive, new native
-updates are unavailable through either connection. Use the verified Bosun release package rather than an
-arbitrary UF2 or a legacy CircuitPython file bundle.
+Follow the [desktop build guide](../editor/SETUP.md) to generate the matching
+native update archive, RAM installer and empty native storage image before
+packaging. These resources are verified together; the factory installer cannot
+use assets built for another native firmware version. Use the verified Bosun
+release package rather than an arbitrary UF2 or a legacy CircuitPython bundle.

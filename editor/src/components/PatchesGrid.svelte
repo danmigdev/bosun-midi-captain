@@ -1,11 +1,15 @@
 <script lang="ts">
   import { patchIdOf, type PatchSummary } from "../lib/protocol";
   import { isSlotLocked, type LinkConfig } from "../lib/patch-links";
+  import { getBankCount, getRigsPerBank, DEFAULT_RIGS_PER_BANK, MAX_RIGS_PER_BANK, MAX_BANKS } from "../lib/bank-layout";
 
   type Props = {
     patches: PatchSummary[];
     deviceInfo: { bank: number; slot: number } | null;
     dirtyIds: Array<{ bank: number; slot: number }>;
+    rigsPerBank?: number;
+    bankCount?: number;
+    canCreate?: boolean;
     /** device.patch_link - drives the per-column padlock state. */
     linkConfig?: LinkConfig;
     /** Toggle a slot column's lock (patches linked across banks). */
@@ -14,7 +18,10 @@
     onCreate: (bank: number, slot: number) => void;
   };
 
-  let { patches, deviceInfo, dirtyIds, linkConfig, onToggleLock, onOpen, onCreate }: Props = $props();
+  let { patches, deviceInfo, dirtyIds, rigsPerBank = DEFAULT_RIGS_PER_BANK,
+    bankCount = MAX_BANKS, canCreate = true, linkConfig, onToggleLock, onOpen, onCreate }: Props = $props();
+  let configuredSlots = $derived(getRigsPerBank({ rigs_per_bank: rigsPerBank }));
+  let configuredBanks = $derived(getBankCount({ bank_count: bankCount }));
 
   // Non-destructive name filter. When non-empty, only patches whose name
   // matches (case-insensitive) stay visible; non-matching filled tiles and
@@ -29,11 +36,8 @@
   let matchCount = $derived(normQuery ? patches.filter(matchesQuery).length : patches.length);
 
   // Rows are exactly the banks that already contain at least one
-  // patch - empty banks are not rendered. The slot axis pads to at
-  // least MIN_SLOTS so each bank shows a few "empty next slot"
-  // affordances.
-  const MIN_SLOTS = 5;
-  const MAX_DIM   = 9;
+  // patch - empty banks are not rendered. Preserve existing slots outside
+  // the configured layout, but only offer new patches inside that layout.
 
   let banks = $derived.by(() => {
     const set = new Set<number>();
@@ -42,9 +46,9 @@
   });
 
   let slotCount = $derived.by(() => {
-    let maxSlot = MIN_SLOTS;
+    let maxSlot = configuredSlots;
     for (const p of patches) if (p.slot > maxSlot) maxSlot = p.slot;
-    return Math.min(MAX_DIM, maxSlot);
+    return Math.min(MAX_RIGS_PER_BANK, maxSlot);
   });
 
   let bySlot = $derived.by(() => {
@@ -71,6 +75,12 @@
 </div>
 
 <div class="gridscroll">
+{#if banks.some(bank => bank > configuredBanks)}
+  <p class="layout-note">Banks above {configuredBanks} are excluded from bank navigation. Their saved patches remain available here.</p>
+{/if}
+{#if slotCount > configuredSlots}
+  <p class="layout-note">This profile has {configuredSlots} rigs per bank. Existing patches in higher slots remain available.</p>
+{/if}
 <div class="grid" class:filtering={!!normQuery} style="--cols: {slotCount}">
   <!-- Column header row: slot number + per-column padlock. A closed lock
        means every patch at this slot is linked across banks - editing one
@@ -121,8 +131,9 @@
               {#if active}<span class="dot live" title="live">●</span>{/if}
             </span>
           </button>
-        {:else if !normQuery}
+        {:else if !normQuery && slot <= configuredSlots && bank <= configuredBanks}
           <button class="tile placeholder"
+                  disabled={!canCreate}
                   onclick={() => onCreate(bank, slot)}
                   title="Create patch at {bank}/{slot}">
             <span class="tile__id">{patchIdOf(bank, slot)}</span>

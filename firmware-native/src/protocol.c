@@ -312,12 +312,13 @@ static void device_info(bosun_protocol_t *p) {
     field(&p->writer, "current"); bosun_json_puts(&p->writer, "{\"bank\":");
     bosun_json_write_integer(&p->writer, c->bank); integer(&p->writer, "slot", c->slot);
     bosun_json_puts(&p->writer, "}"); string(&p->writer, "profile", c->profile);
+    integer(&p->writer, "bank_count", (int32_t)bosun_config_bank_count(c));
     field(&p->writer, "preset_navigation");
     int nav = bosun_json_get(d, 0, "preset_navigation");
     if (nav < 0 || d->tokens[nav].type != BOSUN_JSON_OBJECT || !raw(&p->writer, d, nav))
         bosun_json_puts(&p->writer, "{}");
     /* Kiosk treats preset_navigation as the fast-bootstrap capability marker
-     * and skips GET_GLOBAL, so it also needs the compact Screen projection. */
+     * and skips GET_GLOBAL, so it also needs bank_count and the Screen projection. */
     tft_projection(p, d);
     bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
 }

@@ -186,6 +186,45 @@ static void test_navigation_context(void) {
     assert(!runtime.preview_active && config.slot == 2);
 }
 
+static void test_bank_count_navigation(void) {
+    const char bindings[] = "{\"bindings\":["
+        "{\"switch\":\"1\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"captain_bank_step\"}]}}},"
+        "{\"switch\":\"2\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"captain_bank_step\",\"delta\":-1}]}}}],"
+        "\"on_enter\":{\"messages\":[{\"type\":\"pc\",\"program\":7}]}}";
+    fixture("{\"bank_count\":2}", bindings);
+    patch(2, 1, bindings); patch(3, 1, bindings);
+    edge(0, 1); assert(config.bank == 2); edge(10, 0);
+    edge(20, 1); assert(config.bank == 1); edge(30, 0);
+    edge(40, 2); assert(config.bank == 2); edge(50, 0);
+    assert(sent == 3);
+    /* Explicit patch selection remains available; the next bank step returns inside the limit. */
+    assert(bosun_runtime_switch_patch(&runtime, 3, 1, false) == BOSUN_STORE_OK);
+    assert(submit("{\"type\":\"captain_bank_step\"}", false)); tick(60, 0);
+    assert(config.bank == 1);
+    assert(bosun_runtime_switch_patch(&runtime, 3, 1, false) == BOSUN_STORE_OK);
+    assert(submit("{\"type\":\"captain_bank_step\",\"delta\":-1}", false)); tick(70, 0);
+    assert(config.bank == 2);
+    assert(submit("{\"type\":\"captain_preview_step\",\"scope\":\"bank\"}", false)); tick(80, 0);
+    assert(runtime.preview_active && runtime.preview_bank == 1 && config.bank == 2);
+    assert(submit("{\"type\":\"captain_preview_step\"}", false)); tick(81, 0);
+    assert(runtime.preview_bank == 2);
+    /* Reducing the limit cancels an excluded preview without changing the playing patch. */
+    device("{\"bank_count\":1}");
+    assert(!runtime.preview_active && config.bank == 2);
+    tick(2000, 0); assert(config.bank == 2);
+    assert(submit("{\"type\":\"captain_bank_step\"}", false)); tick(2001, 0);
+    assert(config.bank == 1);
+    size_t before = sent;
+    assert(submit("{\"type\":\"captain_bank_step\"}", false)); tick(2002, 0);
+    assert(config.bank == 1 && sent == before); /* one bank does not repeat on_enter */
+    device("{\"bank_count\":1,\"setlist\":{\"items\":[[1,1],[3,1]]}}");
+    assert(submit("{\"type\":\"captain_setlist_step\"}", false)); tick(2003, 0);
+    assert(config.bank == 3); /* explicit setlists retain their saved sequence */
+    assert(bosun_config_remove_patch(&config, 1, 1) == BOSUN_STORE_OK);
+    assert(submit("{\"type\":\"captain_bank_step\"}", false)); tick(2004, 0);
+    assert(config.bank == 3 && !runtime.preview_active); /* no eligible bank leaves the sound alone */
+}
+
 static void test_expression(void) {
     static const char settings[] = "{\"expression\":[{\"jack\":1,\"enabled\":true,\"calibration\":{\"min\":0,\"max\":65535},\"message\":{\"type\":\"cc\",\"cc\":11,\"channel\":2}},{\"jack\":2,\"enabled\":false}]}";
     fixture(settings, "{}");
@@ -543,7 +582,7 @@ static void test_remote_validation_and_kemper_latch(void) {
 int main(void) {
     char root[] = "/tmp/bosun-runtime-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
-    test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_expression(); test_midi();
+    test_queue(); test_patch_macros(); test_bindings(); test_navigation_context(); test_bank_count_navigation(); test_expression(); test_midi();
     test_kemper_context_and_follow();
     test_kemper_bank_snapshot_follow();
     test_kemper_slow_bank_snapshot();

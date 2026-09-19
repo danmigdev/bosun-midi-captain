@@ -68,6 +68,55 @@ static void test_profiles(void) {
     assert(!bosun_config_profile_exists("other") && bosun_config_profile_exists("test"));
 }
 
+static void test_profile_bank_layout(void) {
+    fixture();
+    const char three[] = "{\"rigs_per_bank\":3,\"bank_count\":2,\"midi_channel\":7}";
+    const char five[] = "{\"rigs_per_bank\":5,\"bank_count\":25,\"kemper\":{}}";
+    assert(bosun_config_put_device(&config, NULL, three, strlen(three)) == BOSUN_STORE_OK);
+    put(1, 5, "{\"name\":\"Keep existing higher slot\"}", false, 0);
+    assert(bosun_config_create("kemper", "Kemper", "kemper_player", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_put_device(&config, "kemper", five, strlen(five)) == BOSUN_STORE_OK);
+    assert(bosun_config_init(&reloaded) == BOSUN_STORE_OK);
+    assert(bosun_config_int(&reloaded.device_doc, 0, "rigs_per_bank", 0) == 3);
+    assert(bosun_config_int(&reloaded.device_doc, 0, "midi_channel", 0) == 7);
+    assert(bosun_config_bank_count(&reloaded) == 2);
+    assert(bosun_config_select(&reloaded, 1, 5) == BOSUN_STORE_OK);
+    name_is(&reloaded, "Keep existing higher slot");
+    assert(bosun_config_activate(&reloaded, "kemper", true) == BOSUN_STORE_OK);
+    assert(bosun_config_int(&reloaded.device_doc, 0, "rigs_per_bank", 0) == 5);
+    assert(bosun_config_bank_count(&reloaded) == 25);
+    assert(bosun_config_activate(&reloaded, "test", true) == BOSUN_STORE_OK);
+    assert(bosun_config_int(&reloaded.device_doc, 0, "rigs_per_bank", 0) == 3);
+    assert(bosun_config_bank_count(&reloaded) == 2);
+}
+
+static void test_navigation_bank_limit(void) {
+    fixture();
+    const char *invalid[] = {"{}", "{\"bank_count\":0}", "{\"bank_count\":100}",
+        "{\"bank_count\":-1}", "{\"bank_count\":\"2\"}", "{\"bank_count\":2.5}",
+        "{\"bank_count\":true}", "{\"bank_count\":null}"};
+    for (size_t i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        assert(bosun_config_put_device(&config, NULL, invalid[i], strlen(invalid[i])) == BOSUN_STORE_OK);
+        assert(bosun_config_bank_count(&config) == 99);
+    }
+    const char limited[] = "{\"bank_count\":2}";
+    assert(bosun_config_put_device(&config, NULL, limited, strlen(limited)) == BOSUN_STORE_OK);
+    put(1, 1, "{}", false, 0);
+    put(2, 3, "{}", true, 0);
+    /* Inactive banks must not exhaust the runtime's 128-patch buffer. */
+    for (unsigned bank = 3; bank <= 16; ++bank)
+        for (unsigned slot = 1; slot <= 10; ++slot) put(bank, slot, "{}", false, 0);
+    put(99, 10, "{\"name\":\"Keep draft\"}", true, 0);
+    bosun_patch_key_t keys[256]; size_t count = 0;
+    assert(bosun_config_navigation_list(&config, keys, 2, &count) == BOSUN_STORE_OK && count == 2);
+    assert(keys[0].bank == 1 && keys[0].slot == 1 && keys[1].bank == 2 && keys[1].slot == 3);
+    assert(bosun_config_navigation_list(&config, keys, 1, &count) == BOSUN_STORE_LIMIT && count == 0);
+    assert(bosun_config_coordinates_list(&config, keys, 256, &count) == BOSUN_STORE_OK && count == 143);
+    assert(keys[142].bank == 99 && keys[142].slot == 10);
+    assert(bosun_config_select(&config, 99, 10) == BOSUN_STORE_OK);
+    name_is(&config, "Keep draft");
+}
+
 static void test_drafts_and_save(void) {
     fixture(); put(1, 1, "{\"name\":\"Original\"}", false, 0);
     assert(bosun_config_select(&config, 1, 1) == BOSUN_STORE_OK);
@@ -169,6 +218,7 @@ int main(void) {
     char root[] = "/tmp/bosun-config-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
     test_profiles(); test_drafts_and_save(); test_checked_select_and_binding(); test_inventory_and_autosave();
+    test_profile_bank_layout(); test_navigation_bank_limit();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Config: profiles, activation rollback, persisted/draft isolation and reboot recovery, checked selection, binding preservation, save/discard/failed writes, inventory and autosave rollover passed");
     return 0;

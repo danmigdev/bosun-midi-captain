@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { startUsbUpdate, recoverUsbUpdate, usbUpdateStatus, usbUpdateRunning, usbUpdateTerminal, type UsbUpdateJob } from "../lib/usb-update";
+  import { startUsbUpdate, startFactoryInstall, recoverUsbUpdate, usbUpdateStatus, usbUpdateRunning, usbUpdateTerminal, type UsbUpdateJob } from "../lib/usb-update";
   type Props = {
     port: string; installed?: string; version: string; job: UsbUpdateJob | null;
     canStart: () => boolean; onPreparing: () => void;
+    candidateId?: string;
     onJob: (job: UsbUpdateJob | null) => void; onClose: () => void;
   };
-  let { port, installed, version, job, canStart, onPreparing, onJob, onClose }: Props = $props();
+  let { port, installed, version, job, canStart, onPreparing, onJob, onClose, candidateId }: Props = $props();
   let working = $state(false);
   let error = $state("");
   let waiting = $state(false);
@@ -42,7 +43,7 @@
       previousId = (await usbUpdateStatus())?.id;
       ignoredJobId = recover ? undefined : previousId;
       if (recover) { await recoverUsbUpdate(); onJob(await usbUpdateStatus()); }
-      else onJob(await startUsbUpdate(port));
+      else onJob(candidateId ? await startFactoryInstall(candidateId) : await startUsbUpdate(port));
     } catch (e) {
       error = String(e);
       // A lost IPC reply may still have started the worker. Status is read-only:
@@ -64,16 +65,21 @@
 
 <dialog bind:this={dialog} class="update-dialog" aria-labelledby="usb-update-title"
         oncancel={event => { event.preventDefault(); if (!running) onClose(); }}>
-  <header><h2 id="usb-update-title">{job ? labels[job.phase] : "Update Bosun over USB"}</h2></header>
+  <header><h2 id="usb-update-title">{job ? (job.mode === "install" && job.phase === "done" ? "Bosun installed" : labels[job.phase]) : candidateId ? "First Bosun installation" : "Update Bosun over USB"}</h2></header>
   <div class="content">
     {#if !job}
+      {#if candidateId}
+      <p>Install <strong>{version}</strong>. Bosun saves and verifies the original firmware, installs native firmware and prepares storage for new profiles.</p>
+      <p>Press Install to start. Keep the Captain on the same USB port and keep the computer powered on.</p>
+      {:else}
       <p>Install <strong>{version}</strong> on the Captain connected to <strong>{port}</strong>{installed ? ` (currently ${installed})` : ""}.</p>
       <p>Bosun saves a complete recovery backup on this computer, preserves your saved profiles, and checks the firmware and settings after restarting the Captain.</p>
       <p>Save your edits first. Keep the Captain on the same USB port and keep this computer awake until the update finishes. MIDI and Stage pause during the update.</p>
+      {/if}
     {:else}
       <p role="status">{job.message}</p>
       {#if usbUpdateRunning(job)}
-        {#if job.phase === "writing" || job.phase === "restoring"}
+        {#if job.phase === "writing" || job.phase === "restoring" || (job.mode === "install" && job.phase === "backup")}
           <progress max="100" value={job.percent} aria-label="USB firmware progress"></progress>
           <p>{job.percent}%</p>
         {:else}<progress aria-label="USB firmware progress"></progress>{/if}
@@ -89,7 +95,7 @@
     {#if job?.backup_path}<button onclick={showBackup}>Show backup</button>{/if}
     {#if job?.phase === "recovery-required"}<button class="primary" disabled={working} onclick={() => run(true)}>Restore backup</button>{/if}
     <button disabled={running} onclick={onClose}>{job ? "Close" : "Cancel"}</button>
-    {#if !job}<button class="primary" disabled={working || !canStart()} onclick={() => run(false)}>{working ? "Preparing…" : "Update"}</button>{/if}
+    {#if !job}<button class="primary" disabled={working || !canStart()} onclick={() => run(false)}>{working ? "Preparing…" : candidateId ? "Install" : "Update"}</button>{/if}
   </footer>
 </dialog>
 

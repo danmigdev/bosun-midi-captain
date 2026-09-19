@@ -115,6 +115,13 @@ function fullBackup(): ConfigBackup {
 // -----------------------------------------------------------------------
 
 describe("Backup roundtrip: 125 patches, every aspect preserved", () => {
+  it("preserves a generic profile's three-rig bank setting and existing MIDI data", () => {
+    const backup = fullBackup();
+    backup.kind = "generic_midi";
+    backup.device = { rigs_per_bank: 3, bank_count: 2, midi_channel: 7 };
+    expect(validateBackup(JSON.parse(JSON.stringify(backup)))).toEqual(backup);
+  });
+
   it("JSON serialize -> parse -> validate returns a deeply-equal backup", () => {
     const backup = fullBackup();
     const serialized = JSON.stringify(backup, null, 2);

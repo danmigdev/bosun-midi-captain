@@ -13,6 +13,10 @@ Native firmware updates require the supported RP2040 Captain with 8 MiB flash. T
 
 ## Install on the Pi
 
+For a guided first setup, open **Setup guide** in Bosun Desktop, choose a Pi configuration and follow **Prepare the host**. Desktop exports a package with Stage already built and generates a Windows PowerShell command to copy and install it. Use Raspberry Pi Imager to prepare Raspberry Pi OS Lite 64-bit (Trixie), networking, your account and SSH first. See the [illustrated setup guide](../../docs/first-setup.md).
+
+The source-based installation below remains available for development and manual setup.
+
 Run these commands in a terminal on the Pi. They build the Stage page and install the services; they do not flash Captain firmware.
 
 ```bash
@@ -59,6 +63,111 @@ If a firewall is enabled, allow these ports from your local network:
 Keep these services on your local network; they are not a public internet service.
 
 ## HDMI display
+
+### Optional quiet boot and Bosun loading screen
+
+After installing the appliance, run this from the complete Bosun checkout:
+
+```bash
+sudo bash tools/rpi-hub/install-boot-splash.sh
+```
+
+This routes console diagnostics (including filesystem checks and cloud-init) to
+tty3, hides normal kernel/systemd output and the tty1 login prompt, and disables
+the Pi 3's rainbow splash. The display stays black until the existing Cage and
+Chromium kiosk starts. Chromium then shows the Bosun logo and the release from
+`editor/package.json` until Stage mounts. The version refers to the checkout used
+for this installation, not the connected Captain firmware. After 15 seconds
+without a pedal, the loading screen also shows `Waiting for the pedal…`.
+
+Without the optional early framebuffer screen below, there is no logo during the
+earlier OS startup. Plymouth is explicitly disabled:
+attempts to add a separate graphical boot screen failed to boot on the tested
+Pi 3 with kernel `6.18.34+rpt-rpi-v8`. The exact cause was not established. The
+installer also removes the Bosun Plymouth service and drop-ins from that earlier
+experiment. No additional display process, package installation, or initramfs
+rebuild is involved. Brief black intervals during HDMI mode changes remain possible.
+
+The installer preserves the currently deployed Stage JavaScript/CSS: it only
+adds the initial branding to `index.html`. It does not restart services or reboot;
+the boot configuration applies on the next restart. It does not change MIDI
+routing, power management, filesystem write protection or HDMI recovery timing.
+Original `config.txt` and `cmdline.txt` are kept alongside them with the suffix
+`.bosun-before-splash`; rerunning the installer preserves these first backups.
+
+Once enabled, the full appliance installer refreshes the splash version on
+updates. After a Stage-only deployment, rerun `install-boot-splash.sh` from the
+matching checkout to refresh the loading screen too.
+
+For troubleshooting, SSH and journal output remain available. To recover the
+normal HDMI console, remove `quiet`, `bosun.quiet=1` and `logo.nologo` from
+`/boot/firmware/cmdline.txt`, replace `console=tty3` with `console=tty1`,
+and remove the parameters beginning with `loglevel=`, `vt.global_cursor_default=`,
+`systemd.show_status=` and `rd.systemd.show_status=`. Keep the file on one line
+and preserve all other parameters, especially `root=`. The tty1 login prompt
+returns automatically when `bosun.quiet=1` is absent. Keep `plymouth.enable=0`
+and `nosplash` while the Plymouth package is installed, including after restoring
+the saved original boot files, to prevent the early splash from being enabled.
+
+### Early framebuffer logo with a reversible boot trial
+
+On the tested 64-bit Pi 3 boot layout (`auto_initramfs=1`, `initramfs8`), an optional
+early systemd service draws the same logo and version after the KMS framebuffer
+and console setup are ready. A bar below the version advances at startup
+milestones: 20% after console setup, 45% after system initialization, 65% before
+the hub starts, and 80% before the kiosk starts. Chromium continues at 90% and
+reaches 100% only when Stage mounts; waiting for a pedal does not advance it.
+These percentages describe phases, not measured remaining time.
+
+Each framebuffer update writes once to the existing `/dev/fb0`, then exits.
+All four updates finish before Cage starts, so they do not compete with the
+kiosk. They do not change video
+modes, switch virtual terminals, or claim DRM ownership. A missing framebuffer or
+drawing error is ignored so normal startup continues. Each service has a three-second
+timeout; only the first waits up to two seconds for KMS. Images are rendered
+at installation time, with no animation loop; progress state is kept in `/run`.
+This uses neither Plymouth
+nor the kernel's `fullscreen_logo` image parser. HDMI startup and mode changes can
+still produce short blank/no-signal intervals.
+
+Prepare it from a complete checkout with `cc`, `python3-pil`
+and `fonts-dejavu-core` installed:
+
+```bash
+sudo bash tools/rpi-hub/prepare-framebuffer-splash.sh
+sudo reboot '0 tryboot'
+```
+
+Preparation installs services guarded by a trial-specific kernel parameter and
+creates `tryboot.txt` with a separate cmdline. The existing initramfs is reused.
+It checks that the
+normal config, cmdline, initramfs, kernel and firmware files remain byte-for-byte
+unchanged, and saves copies under the printed `/var/tmp/bosun-splash-trial.*/known-good`
+directory. Previously installed splash assets and units are backed up under its
+`installed` subdirectory. Raspberry Pi's `tryboot` flag applies to one boot only: the next normal
+restart uses the previous configuration, including after a failed trial.
+
+Verify the visible logo-to-Stage sequence, SSH, and hub/MIDI services after the
+trial. `/run/bosun-splash.result` reports whether the helper drew the image, and
+`/run/bosun-splash.progress` records the last completed milestone. Only
+after a successful trial, make that exact image permanent using the manifest path
+printed during preparation:
+
+```bash
+sudo python3 tools/rpi-hub/boot-splash/trial.py commit /var/tmp/bosun-splash-trial.XXXXXX/trial.json
+```
+
+Commit refuses a different running trial, incomplete milestones, or changed
+boot files, images and services. It keeps the
+original kernel, firmware, config and initramfs, enables the tested services and
+adds its activation parameter. Removing `bosun.framebuffer_splash=1` from `cmdline.txt`
+disables the drawing on the next boot without removing the helper. Keep the
+known-good directory to restore previous boot files and splash assets. Subsequent runs of
+`install-boot-splash.sh` refresh the version in both the early picture and the
+browser screen; renderer changes require a new trial. A previously installed
+static framebuffer logo is preserved until the progress version has been tried.
+
+### Stage output
 
 Connect and power an HDMI screen. Stage is configured to open automatically at startup and select the screen when it is connected later. The screen's advertised preferred resolution is used; a 1920 × 440 panel should advertise that mode. Check the actual image and supported resolution on your screen after connecting it.
 

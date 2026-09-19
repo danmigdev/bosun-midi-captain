@@ -140,6 +140,12 @@ if ! runuser -u "$HUB_USER" -- test -w /var/lib/bosun-hub/chromium; then
     exit 1
 fi
 
+# Keep an opted-in boot screen on the release just installed. A fresh appliance
+# enables this separately with install-boot-splash.sh.
+if [[ -f /etc/systemd/system/getty@tty1.service.d/50-bosun-splash.conf ]]; then
+    bash "$SRC/install-boot-splash.sh"
+fi
+
 echo
 echo "== status =="
 systemctl --no-pager --lines=0 status bosun-hub.service || true

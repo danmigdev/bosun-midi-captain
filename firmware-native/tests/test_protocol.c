@@ -180,7 +180,7 @@ static void event_is(const char *name) {
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "event"), name));
 }
 static void device_info_screen_projection(void) {
-    const char device[] = "{\"tft\":{\"layout\":["
+    const char device[] = "{\"bank_count\":2,\"tft\":{\"layout\":["
         "{\"field\":\"bank\",\"color\":\"#9aa1ad\",\"prefix\":\"BANK \",\"suffix\":\"\"},"
         "{\"field\":\"kemper_rig_in_bank\",\"color\":\"#6fd99b\",\"prefix\":\"RIG \"},"
         "{\"field\":\"expression_mode\",\"color\":\"#ff7f00\"},"
@@ -193,6 +193,7 @@ static void device_info_screen_projection(void) {
     assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
     request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
     int colors = bosun_json_get(&reply, 0, "tft_colors"), labels = bosun_json_get(&reply, 0, "tft_labels");
+    assert(bosun_config_int(&reply, 0, "bank_count", 0) == 2);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "bank"), "#9aa1ad"));
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "kemper_rig_in_bank"), "#6fd99b"));
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, colors, "expression_mode"), "#ff7f00"));

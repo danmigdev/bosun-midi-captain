@@ -113,13 +113,10 @@
 
   // ---- vertical pack / distribute helpers ----
   const TFT_HEIGHT = 240;
-  const LINE_HEIGHT_BASE = 12;   // terminalio.FONT at scale 1; close enough for BDF too
+  const LINE_HEIGHT_BASE = 12;   // Native TFT renderer's cell height at scale 1.
 
   function labelHeight(e: LayoutEntry): number {
-    // The firmware badge includes terminalio's 14px text bounds; its icon
-    // is 8x12 with a 2px gap. Account for it in vertical packing as well.
-    const base = e.field === "expression_mode" ? 14 : LINE_HEIGHT_BASE;
-    return base * Math.max(1, e.size ?? 1);
+    return LINE_HEIGHT_BASE * Math.max(1, e.size ?? 1);
   }
 
   function packTop() {
@@ -429,19 +426,7 @@
                       height:{boxH}px; line-height:{boxH}px;">
             <span class="marqueeInner"
                   use:marquee={{ enabled: !!e.scroll, speed: e.scroll_speed ?? SCROLL_DEFAULT_SPEED,
-                                 text: previewText(e), size: e.size, idx: i }}>{#if e.field === "expression_mode"}<svg
-                    class="pedalIcon" aria-hidden="true" viewBox="0 0 16 12"
-                    data-mode={expressionPreviewMode || "---"}
-                    width={16 * e.size} height={12 * e.size}
-                    style:margin-right="{2 * e.size}px"
-                    style:visibility={expressionPreviewMode ? "visible" : "hidden"}
-                    fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
-                    {#if expressionPreviewMode === "VOL"}
-                      <path d="M1 10.5H14.5V1.5Z" fill="currentColor" stroke="none" />
-                    {:else if expressionPreviewMode === "WAH"}
-                      <path d="M1 6.5 14 2 14.5 3.5 1.5 8Z M7 6.5V9 M9 6V9 M1 9.5H14.5V11H1Z" />
-                    {/if}
-                  </svg>{/if}{previewText(e)}</span>
+                                 text: previewText(e), size: e.size, idx: i }}>{previewText(e)}</span>
           </div>
         {/each}
       </div>
@@ -523,7 +508,6 @@
     outline-offset: 0;
   }
   .marqueeInner { display: inline-block; white-space: nowrap; will-change: transform; }
-  .pedalIcon { display: inline-block; vertical-align: middle; }
   .pedalPreview { margin-bottom: 0.5rem; }
   .prevhint { color: var(--text-dim); font-size: 0.72rem; margin: 0.4rem 0 0; max-width: 240px; }
 

@@ -71,27 +71,31 @@ static void geometry_and_colors(void) {
     assert(bosun_display_render(&display, &config, &kemper, hold_effect, 1) == BOSUN_DISPLAY_OK);
     assert(writes == before); /* Unchanged frame has no display I/O. */
 }
-static void expression_badges_and_raw_mode(void) {
+static void expression_labels_are_text_only(void) {
     const char *layout = "{\"tft\":{\"layout\":[{\"field\":\"expression_mode\","
         "\"x\":-6,\"y\":-6,\"halign\":\"right\",\"valign\":\"bottom\",\"size\":2,\"color\":\"#ffffff\"}]}}";
     load(layout, "{}");
-    kemper.expression_mode = BOSUN_EXPRESSION_VOL;
-    assert(frame(0) == 0);
-    assert(display.labels[0].x == 162 && display.labels[0].y == 210);
-    assert(pixels[222][164] == 0); /* Left treadle location has no VOL ramp. */
-    assert(pixels[230][164] == 0xffff);
-    kemper.expression_mode = BOSUN_EXPRESSION_WAH; ++kemper.revision;
-    assert(frame(1) == 0);
-    assert(pixels[222][164] == 0xffff); /* Tilted pedal, with horizontal base. */
-    assert(pixels[228][164] == 0xffff);
+    const bosun_expression_mode modes[] = {BOSUN_EXPRESSION_VOL, BOSUN_EXPRESSION_WAH};
+    const char *texts[] = {"VOL", "WAH"};
+    for (unsigned i = 0; i < 2; ++i) {
+        kemper.expression_mode = modes[i]; ++kemper.revision;
+        assert(frame(i) == BOSUN_DISPLAY_OK);
+        assert(display.labels[0].x == 198 && display.labels[0].y == 210);
+        assert(display.labels[0].width == 36 && display.labels[0].height == 24);
+        assert(display.labels[0].length == 3 && !memcmp(display.labels[0].glyphs, texts[i], 3));
+        assert(colored(0xffff) > 0);
+        /* The former icon area is empty for every live expression mode. */
+        for (unsigned y = 210; y < 234; ++y)
+            for (unsigned x = 162; x < 198; ++x) assert(pixels[y][x] == 0);
+    }
     kemper.expression_mode = BOSUN_EXPRESSION_UNKNOWN; ++kemper.revision;
-    assert(frame(2) == 0);
-    for (unsigned y = 210; y < 234; ++y)
-        for (unsigned x = 162; x < 194; ++x) assert(pixels[y][x] == 0);
+    assert(frame(2) == BOSUN_DISPLAY_OK);
+    assert(display.labels[0].length == 0 && colored(0xffff) == 0);
     load("{\"tft\":{\"layout\":[{\"field\":\"expression_mode\",\"prefix\":\"WAH \",\"size\":1}]}}", "{}");
     kemper.expression_mode = BOSUN_EXPRESSION_VOL;
     assert(frame(0) == 0);
-    assert(display.labels[0].icon == BOSUN_EXPRESSION_VOL);
+    assert(display.labels[0].width == 42);
+    assert(display.labels[0].length == 7 && !memcmp(display.labels[0].glyphs, "WAH VOL", 7));
 }
 static void fields_fonts_and_clipping(void) {
     load("{\"tft\":{\"layout\":[{\"field\":\"patch_name\",\"prefix\":\"RIG \",\"suffix\":\"!\",\"x\":-10},"
@@ -179,12 +183,12 @@ static void momentary_hold_repaints_without_configuration_change(void) {
 int main(void) {
     assert(sizeof(bosun_display_t) < 4096);
     geometry_and_colors();
-    expression_badges_and_raw_mode();
+    expression_labels_are_text_only();
     fields_fonts_and_clipping();
     scroll_snapshot_and_tuner();
     failed_transfer_is_visible();
     slow_scroll_long_labels_do_not_overflow();
     momentary_hold_repaints_without_configuration_change();
-    printf("display snapshots, geometry, color, icons, UTF-8, scrolling, tuner: PASS (%zu bytes)\n", sizeof display);
+    printf("display snapshots, geometry, color, expression text, UTF-8, scrolling, tuner: PASS (%zu bytes)\n", sizeof display);
     return 0;
 }

@@ -1,13 +1,20 @@
 <script lang="ts">
   import { cmd, patchIdOf, type BindingMode, type Patch, type PatchSummary } from "../lib/protocol";
   import { defaultLedFor } from "../lib/switch-colors";
+  import { getBankCount, getRigsPerBank, DEFAULT_RIGS_PER_BANK, MAX_BANKS, nextFreePatch } from "../lib/bank-layout";
 
   type Props = {
     patches: PatchSummary[];
     currentPatchEnvelope: { bank: number; slot: number; patch: Patch } | null;
+    rigsPerBank?: number;
+    bankCount?: number;
+    ready?: boolean;
   };
 
-  let { patches, currentPatchEnvelope }: Props = $props();
+  let { patches, currentPatchEnvelope, rigsPerBank = DEFAULT_RIGS_PER_BANK, bankCount = MAX_BANKS, ready = true }: Props = $props();
+  let configuredSlots = $derived(getRigsPerBank({ rigs_per_bank: rigsPerBank }));
+  let configuredBanks = $derived(getBankCount({ bank_count: bankCount }));
+  let error = $state("");
 
   type DialogKind = null | "new" | "clone" | "delete";
   let dialog = $state<DialogKind>(null);
@@ -16,16 +23,6 @@
   let targetName = $state("");
 
   const SWITCH_ORDER = ["1","2","3","4","up","A","B","C","D","down"];
-
-  function nextFreeSlot(): { bank: number; slot: number } {
-    const used = new Set(patches.map(p => `${p.bank}/${p.slot}`));
-    for (let b = 1; b <= 99; b++) {
-      for (let s = 1; s <= 99; s++) {
-        if (!used.has(`${b}/${s}`)) return { bank: b, slot: s };
-      }
-    }
-    return { bank: 1, slot: 1 };
-  }
 
   function blankPatch(name: string): Patch {
     return {
@@ -51,7 +48,10 @@
   }
 
   function openNew() {
-    const next = nextFreeSlot();
+    if (!ready) return;
+    error = "";
+    const next = nextFreePatch(patches, configuredSlots, configuredBanks);
+    if (!next) { error = "All bank slots are occupied. Increase the bank layout in Settings or free a slot."; return; }
     targetBank = next.bank;
     targetSlot = next.slot;
     targetName = "New patch";
@@ -59,8 +59,10 @@
   }
 
   function openClone() {
-    if (!currentPatchEnvelope) return;
-    const next = nextFreeSlot();
+    if (!ready || !currentPatchEnvelope) return;
+    error = "";
+    const next = nextFreePatch(patches, configuredSlots, configuredBanks);
+    if (!next) { error = "All bank slots are occupied. Increase the bank layout in Settings or free a slot."; return; }
     targetBank = next.bank;
     targetSlot = next.slot;
     targetName = (currentPatchEnvelope.patch.name ?? "Patch") + " copy";
@@ -69,10 +71,12 @@
 
   function openDelete() {
     if (!currentPatchEnvelope) return;
+    error = "";
     dialog = "delete";
   }
 
   async function confirm() {
+    if (dialog !== "delete" && (!ready || !targetIsValid)) return;
     try {
       if (dialog === "new") {
         const patch = blankPatch(targetName.trim() || "New patch");
@@ -113,15 +117,18 @@
       currentPatchEnvelope.bank === targetBank &&
       currentPatchEnvelope.slot === targetSlot && dialog === "clone")
   );
+  let targetIsValid = $derived(Number.isInteger(targetBank) && targetBank >= 1 && targetBank <= configuredBanks
+    && Number.isInteger(targetSlot) && targetSlot >= 1 && targetSlot <= configuredSlots);
 </script>
 
 <div class="actions">
-  <button onclick={openNew}>+ New patch</button>
-  <button onclick={openClone} disabled={!currentPatchEnvelope}>Clone…</button>
+  <button onclick={openNew} disabled={!ready}>+ New patch</button>
+  <button onclick={openClone} disabled={!ready || !currentPatchEnvelope}>Clone…</button>
   <button class="danger" onclick={openDelete} disabled={!currentPatchEnvelope || patches.length <= 1}>
     Delete…
   </button>
 </div>
+{#if error}<p role="alert">{error}</p>{/if}
 
 {#if dialog}
   <div class="overlay" onclick={() => dialog = null} role="presentation"></div>
@@ -138,8 +145,8 @@
       <fieldset class="dest">
         <legend>{dialog === "clone" ? "Copy to" : "Location"}</legend>
         <div class="row">
-          <label>Bank<input type="number" min="1" max="99" bind:value={targetBank} /></label>
-          <label>Slot<input type="number" min="1" max="99" bind:value={targetSlot} /></label>
+          <label>Bank<input type="number" min="1" max={configuredBanks} bind:value={targetBank} /></label>
+          <label>Slot<input type="number" min="1" max={configuredSlots} bind:value={targetSlot} /></label>
         </div>
         <label class="full">Name
           <input bind:value={targetName} />
@@ -150,7 +157,7 @@
       {/if}
       <div class="row right">
         <button onclick={() => dialog = null}>Cancel</button>
-        <button class="primary" onclick={confirm}>
+        <button class="primary" onclick={confirm} disabled={!ready || !targetIsValid}>
           {dialog === "new" ? "Create" : "Clone"}
         </button>
       </div>

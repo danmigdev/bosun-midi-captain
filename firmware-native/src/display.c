@@ -6,7 +6,7 @@
 #include "../third_party/adafruit-gfx-font/glcdfont.c"
 #include "../third_party/adafruit-gfx-font/unicode_cp437.h"
 
-enum { CELL_W = 6, CELL_H = 12, ICON_W = 16, ICON_GAP = 2,
+enum { CELL_W = 6, CELL_H = 12,
        SCROLL_MARGIN = 6, SCROLL_PAUSE = 800, ROWS_PER_TICK = 8 };
 
 static int clamp(int value, int minimum, int maximum) {
@@ -116,7 +116,7 @@ static void set_text(bosun_display_label_t *label, const char *text, unsigned *s
         label->glyphs[label->length++] = glyph;
     }
     if (*cursor) *status |= BOSUN_DISPLAY_LIMIT;
-    label->width = (uint16_t)((max_columns * CELL_W + (label->badge ? ICON_W + ICON_GAP : 0)) * label->scale);
+    label->width = (uint16_t)(max_columns * CELL_W * label->scale);
     label->height = (uint16_t)(lines * CELL_H * label->scale);
 }
 static uint16_t scroll_offset(uint32_t elapsed, uint16_t span, uint16_t speed) {
@@ -150,8 +150,6 @@ static void add_label(bosun_display_t *display, const bosun_json_doc_t *doc, int
     string_field(doc, entry, "field", field, sizeof field, &display->status);
     if (*field) resolve(field, config, kemper, display->hold_effect, value, sizeof value, &display->status);
     else string_field(doc, entry, "text", value, sizeof value, &display->status);
-    label->badge = !strcmp(field, "expression_mode");
-    label->icon = label->badge && kemper ? (uint8_t)kemper->expression_mode : 0;
     if (*field && !*value) { label->scale = 1; return; }
     string_field(doc, entry, "prefix", prefix, sizeof prefix, &display->status);
     string_field(doc, entry, "suffix", suffix, sizeof suffix, &display->status);
@@ -225,38 +223,19 @@ static void prepare(bosun_display_t *display, const bosun_config_t *config,
         simple_label(display, *name ? name : "Bosun Native", 3, 0xffff, 120);
     }
 }
-static bool icon_pixel(uint8_t icon, int x, int y) {
-    if (x < 1 || x > 14 || y < 0 || y >= CELL_H) return false;
-    if (icon == BOSUN_EXPRESSION_VOL)
-        return y >= 2 && y <= 10 && 13 * (10 - y) <= 8 * (x - 1);
-    if (icon == BOSUN_EXPRESSION_WAH) {
-        int treadle = 6 - (x - 1) * 4 / 13;
-        return y == treadle || y == treadle + 1 || y == 9 || y == 10 || ((x == 7 || x == 8) && y >= 6 && y <= 8);
-    }
-    return false;
-}
 static void row_label(bosun_display_t *display, const bosun_display_label_t *label) {
     int y = (int)display->row - label->y;
     if (y < 0 || y >= label->height || !label->length) return;
     int x = label->x - scroll_offset(display->frame_ms - display->animation_started_ms,
                                      label->scroll_span, label->scroll_speed);
     unsigned local_y = (unsigned)y / label->scale;
-    int text_x = x + (label->badge ? (ICON_W + ICON_GAP) * label->scale : 0);
     unsigned line_number = local_y / CELL_H, character = 0, line = 0;
     int glyph_y = (int)(local_y % CELL_H) - 2;
-    if (label->badge) {
-        int icon_y = (int)local_y - ((int)label->height / label->scale - CELL_H) / 2;
-        for (int px = 0; px < ICON_W * label->scale; ++px) {
-            int dest = x + px;
-            if (dest >= 0 && dest < 240 && icon_pixel(label->icon, px / label->scale, icon_y))
-                display->line[dest] = label->color;
-        }
-    }
     for (unsigned i = 0; i < label->length; ++i) {
         uint8_t glyph = label->glyphs[i];
         if (glyph == '\n') { ++line; character = 0; continue; }
         if (line == line_number && glyph_y >= 0 && glyph_y < 8) {
-            int left = text_x + (int)character * CELL_W * label->scale;
+            int left = x + (int)character * CELL_W * label->scale;
             for (unsigned col = 0; col < 5; ++col) {
                 if (!(font[glyph * 5u + col] & (1u << glyph_y))) continue;
                 for (unsigned scale_x = 0; scale_x < label->scale; ++scale_x) {

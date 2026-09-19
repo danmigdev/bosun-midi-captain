@@ -16,19 +16,22 @@ See the [desktop app screenshots](#desktop-app-screenshots) for Home, patch edit
 
 Download the package for your system from [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
 
-These instructions cover **Bosun 0.6.5**, including native firmware updates
-and the Stage tuner. Keep the app and Pi on matching versions. To build
+These instructions cover **Bosun 0.6.7**, including the visual setup guide,
+direct native installation and configurable bank layouts. Keep the app,
+Captain firmware and Pi on matching versions. To build
 from source, use the [desktop build guide](editor/SETUP.md) or
 [Android build guide](editor/src-tauri/android-config.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
 | Windows x64 | `Bosun-<version>-portable-x64.zip` | Extract the whole ZIP and run `Bosun.exe`. |
-| macOS, Apple Silicon | `.dmg` | Open it and copy Bosun to Applications. |
-| Linux x64 | `.AppImage` | Make it executable, then open it. |
+| macOS, Apple Silicon (untested) | `.dmg` | Open it and copy Bosun to Applications. |
+| Linux x64 (untested) | `.AppImage` | Make it executable, then open it. |
 | Android 10 or later | `bosun.apk` | Install the APK and connect using USB-OTG or a Raspberry Pi hub. |
 
 Windows requires WebView2. Allow the Android USB permission prompt when connecting the pedal directly. Use a desktop computer for initial pedal setup and firmware updates.
+
+**Start here:** open **Setup guide** in Bosun, or read the [illustrated setup guide and FAQ](docs/first-setup.md). Choose among six configurations and follow the matching wiring and installation steps. The release also includes an [offline guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.7/Bosun-0.6.7-setup-guide.html); download it and open it in a browser. See [what changed in 0.6.7](docs/releases/0.6.7.md).
 
 <a id="connections"></a>
 
@@ -149,11 +152,15 @@ For Stage in a browser, open **`http://YOUR_PI_HOSTNAME:8080/`** on the LAN or *
 
 ### First installation from factory firmware
 
-Back up the pedal's original files before installing: the setup wizard can erase them.
+Open **Setup guide** in Bosun Desktop to choose your setup and see its wiring diagram, requirements, steps and FAQ. The [written setup guide](docs/first-setup.md) covers the same six configurations.
 
-Connect the pedal directly to a desktop computer and follow **Install firmware**. The existing wizard prepares a legacy bootstrap installation; it does not install the final native firmware. If automatic detection fails, follow its instructions to enter the pedal's bootloader.
+Download the latest complete Desktop release and connect the supported 10-switch RP2040 Captain directly to the computer. Choose **Install native firmware**, check the selected device and version, confirm the model, then press **Install**. First installation goes directly to the bundled native release: no CircuitPython bootstrap or Raspberry Pi is required.
 
-Once Bosun connects, create a supported profile and move the Captain's USB connection to a configured Raspberry Pi. Use **Update Bosun** below to complete the migration to native firmware. The first-install backup remains necessary: the updater's later backup contains the bootstrap installation, not the original factory firmware.
+The installer loads a temporary helper into RAM using standard USB mass storage and CDC drivers. It saves and verifies a complete original flash backup before writing, installs native firmware and an empty profile area, and checks the firmware version and storage after reboot. The app shows manual BOOTSEL instructions if the factory firmware cannot restart automatically. Leave the Captain on the same USB port throughout the operation. An interrupted write can be recovered from the saved backup after reopening Desktop.
+
+Create a **Kemper Player** profile afterwards, assign your switches and save. Factory settings are preserved in the backup, not converted into Bosun profiles. Existing native installations should use **Update firmware (USB)** to preserve profiles; existing CircuitPython Bosun profiles still use the Pi migration path.
+
+**Validation status:** the new first-installation path has software tests and build checks, but has not yet been validated end to end on a factory Captain. The macOS and Linux apps remain untested.
 
 <a id="configure-your-sounds"></a>
 
@@ -161,6 +168,7 @@ Once Bosun connects, create a supported profile and move the Captain's USB conne
 
 - **Profiles** keep settings for different devices or setups separate.
 - **Patches** contains your banks and rigs. Open a rig to assign messages to a switch's press, release or hold action, and set its label and LED colour.
+- **Settings → Banks** configures rigs per bank (1–10, default 5) and the number of banks (1–99) for each profile. Set 3 rigs and 2 banks for a small three-preset setup: Bank Up/Down cycles only between banks 1 and 2. Saved patches remain available in the editor. The bank limit requires updated Captain firmware and Stage; see [bank layout](docs/bank-layout.md).
 - **Quick setup** applies the available setup recipe for the active profile.
 - **Screen layout** changes the Captain's display fields and colours.
 - **Settings** contains device-wide options, including expression pedals and preset navigation.

@@ -5,7 +5,7 @@
 //   npm run build:stage      -> editor/dist-stage/  (index.html + assets)
 //   npm run dev:stage        -> vite dev server on :4733, add ?ws=ws://<hub>:8081
 //                               to point at a running hub
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -13,11 +13,20 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const kioskCore = fileURLToPath(new URL("./src/kiosk/tauri-core.ts", import.meta.url));
 const kioskEvent = fileURLToPath(new URL("./src/kiosk/tauri-event.ts", import.meta.url));
 const outDir = fileURLToPath(new URL("./dist-stage/", import.meta.url));
+const release = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
+const bootLogo = readFileSync(new URL("./src-tauri/icons/icon.png", import.meta.url)).toString("base64");
 
 export default defineConfig({
   publicDir: "kiosk-public",
   plugins: [
     svelte(),
+    {
+      name: "bosun-boot-splash",
+      transformIndexHtml(html) {
+        return html.replaceAll("__BOSUN_VERSION__", release)
+          .replaceAll("__BOSUN_BOOT_LOGO__", `data:image/png;base64,${bootLogo}`);
+      },
+    },
     {
       // The hub's static server serves `index.html` for `/`; vite names
       // the output after the input HTML, so rename it after the build.
