@@ -76,3 +76,28 @@ is experimental; macOS and Linux application operation remains untested.
 
 For Android requirements and APK installation, see
 [Android setup](src-tauri/android-config.md).
+
+## Repository layout and local files
+
+| Location | Purpose |
+| --- | --- |
+| `editor/` | Shared Desktop/Android UI, Stage and the setup wizard; native app code is in `src-tauri/`. |
+| `firmware-native/` | Maintained C firmware, host tests and RP2040 build tooling. |
+| `firmware/` | Frozen CircuitPython resources, shared schemas and migration/regression references. Still required by builds. |
+| `tools/` | Packaging, release checks, USB installer and Raspberry Pi services. |
+| `docs/` | User guides, hardware validation, release notes and the pinned F-Droid reference recipe. |
+| `samples/`, `fastlane/` | Example configurations and Android store descriptions. |
+| `dist/` | Ignored release packages, previews and local validation evidence. |
+| `.worktrees/` | Ignored additional Git worktrees, kept inside the project folder. |
+
+Create additional checkouts under `.worktrees/`, for example
+`git worktree add .worktrees/my-fix -b fix/my-fix`. Use Git's worktree commands
+to move or remove them so their registration stays valid. Review uncommitted
+changes before retiring a checkout.
+
+Old build logs, downloaded release copies and compiler output can be removed
+when no running process uses them. Keep recovery backups, installation journals,
+signing keys and validation evidence. In particular, `dist/` may contain hardware
+backups as well as disposable packages; do not erase it wholesale. Generated
+installer resources under `editor/src-tauri/resources/` are required for packaging
+and must be rebuilt using the instructions above if removed.

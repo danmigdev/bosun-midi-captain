@@ -87,6 +87,8 @@ For Android or Desktop acting as the MIDI host, check **Bridge ON** and leave Bo
 
 **Can Android replace the Pi?** Yes, with compatible USB host/OTG and a hub. It runs the MIDI bridge, editor and Stage. Firmware installation still uses Desktop. Android does not provide the Pi's network-sharing service.
 
+**Can I edit without a Player?** Yes. Connect the Captain directly to Desktop or Android USB host/OTG, select **USB** and accept any Android USB permission prompt. A Player and a USB hub are not needed just to configure the Captain.
+
 **Does a USB hub alone route MIDI?** No. It adds USB ports. Android, Desktop or the Pi must run the MIDI bridge. The direct Player USB-A connection uses the Player's USB host instead.
 
 **Can the Captain connect to two USB hosts at once?** No. Choose the Player, Android, computer or Pi as its host. A splitter cannot share the Captain's USB-B data connection. Access a Pi-connected Captain through the Pi network connection.
@@ -96,6 +98,8 @@ For Android or Desktop acting as the MIDI host, check **Bridge ON** and leave Bo
 **Where is my factory backup?** The installer displays its path and a **Show backup** button. Retain it. If writing was interrupted, reopen Desktop, reconnect the same Captain to the same USB port in BOOTSEL and choose **Restore backup**. The worker verifies the full restored flash; factory firmware does not report its startup status to Bosun.
 
 **The Captain is missing.** Check the cable supports data, close other serial apps and use a direct computer USB connection for installation. Follow the wizard's BOOTSEL instructions if needed. Disconnect unrelated RP2040 boards during installation.
+
+**The Pi is missing.** Keep Desktop or Android on the same LAN as the Pi and choose **Raspberry Pi (network) → Find Raspberry Pi → Connect**. If discovery fails, enter the Pi's hostname/IP and port **9876** manually. With the [configured Pi hotspot](../tools/rpi-hub/hotspot/README.md), join its Wi-Fi and use **10.42.0.1**, unless you changed the default address. Keep that Wi-Fi connection if the device reports no internet. The Captain stays connected to the Pi by USB.
 
 **Stage opens but does not follow the Player.** Check the chosen wiring diagram, the Kemper Player profile and the bridge. Seeing the page alone does not verify the MIDI connection.
 

@@ -65,5 +65,6 @@ Android, select **Raspberry Pi (network)** in Bosun and connect to the hotspot's
 address on port `9876`. The Captain stays connected to the Pi by USB.
 
 Android can display Stage and edit the connected pedal. The unified firmware
-installation and migration procedure currently runs from Bosun Desktop through
-a Raspberry Pi; see [firmware updates](../../docs/firmware-updates.md).
+installer runs in Bosun Desktop: first installation and native updates support
+direct USB, while migration from existing Bosun CircuitPython uses a Raspberry
+Pi. See [firmware updates](../../docs/firmware-updates.md).

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Synchronize the canonical firmware into the Tauri resource trees.
+"""Synchronize the frozen CircuitPython resources into the Tauri resource trees.
 
-``firmware/`` is the only source of truth for Bosun firmware.  Tauri needs
-two derived trees:
+``firmware/`` is the source for the legacy resources still bundled by Tauri.
+The maintained C firmware is built separately from ``firmware-native/``.
+This command maintains two derived legacy trees:
 
 * ``resources/firmware`` is an exact mirror (excluding transient caches);
 * ``resources/lib`` mirrors each Bosun-owned top-level entry from

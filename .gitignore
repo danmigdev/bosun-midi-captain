@@ -23,6 +23,10 @@ editor/src-tauri/resources/
 # Python caches
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Additional development checkouts stay inside this repository directory.
+/.worktrees/
 
 # Claude Code local settings (personal, machine-specific)
 .claude/settings.local.json
