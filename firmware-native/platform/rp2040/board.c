@@ -2,6 +2,7 @@
 #include "bosun/board.h"
 #include "cdc_session.h"
 #include "board_contracts.h"
+#include "bootloader_entry.h"
 #include "uart_tx.h"
 #include <string.h>
 #include "hardware/adc.h"
@@ -135,6 +136,10 @@ bool bosun_board_init(const bosun_board_config_t *config) {
         gpio_set_dir(switch_pins[i], GPIO_IN);
         gpio_pull_up(switch_pins[i]);
     }
+    /* Recovery must not depend on USB, display, filesystem or config startup.
+     * Settle GPIO pull-ups; normal startup incurs only this one millisecond. */
+    sleep_ms(1);
+    if (bosun_bootloader_held(bosun_board_switches, sleep_ms)) reset_usb_boot(0, 0);
     adc_init();
     adc_gpio_init(EXP1);
     adc_gpio_init(EXP2);

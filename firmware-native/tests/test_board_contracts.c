@@ -1,4 +1,5 @@
 #include "board_contracts.h"
+#include "bootloader_entry.h"
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
@@ -89,7 +90,27 @@ static void dma_ring_counter(void) {
     tracker.consumed = produced - 73;
     assert(bosun_dma_rx_available(&tracker, produced, CAPACITY) == 73);
 }
+static uint16_t boot_mask;
+static unsigned boot_elapsed, release_at;
+static uint16_t read_boot_switches(void) {
+    return boot_elapsed >= release_at ? 0 : boot_mask;
+}
+static void boot_wait(uint32_t ms) { boot_elapsed += ms; }
+static void bootloader_shortcut(void) {
+    release_at = UINT32_MAX;
+    for (unsigned mask = 0; mask < 1024; ++mask) {
+        boot_mask = (uint16_t)mask; boot_elapsed = 0;
+        bool entered = bosun_bootloader_held(read_boot_switches, boot_wait);
+        assert(entered == (mask == BOSUN_BOOTLOADER_CHORD));
+        assert(boot_elapsed == (entered ? 3000u : 0u));
+    }
+    for (unsigned release = 0; release <= 3000; release += 10) {
+        boot_mask = BOSUN_BOOTLOADER_CHORD; boot_elapsed = 0; release_at = release;
+        assert(!bosun_bootloader_held(read_boot_switches, boot_wait));
+    }
+}
 int main(void) {
+    bootloader_shortcut();
     flash_bounds();
     rectangle_clipping();
     dma_ring_counter();

@@ -16,10 +16,11 @@
     connected: boolean; activeProfile?: ProfileInfo | null; firmwareInfo?: FirmwareIdentity | null;
     unifiedRelease?: string | null; resumeUnifiedUpdate?: boolean; onUnifiedUpdate?: () => void;
     usbRelease?: string | null; onUsbUpdate?: () => void;
+    onBootloader?: () => Promise<void>;
   };
   let { connected, activeProfile = null, firmwareInfo = null,
     unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate,
-    usbRelease = null, onUsbUpdate }: Props = $props();
+    usbRelease = null, onUsbUpdate, onBootloader }: Props = $props();
   let canUpdateFirmware = $derived(connected && supportsFirmwareFileOta(firmwareInfo));
 
   let stats = $state<DeviceStats | null>(null);
@@ -410,6 +411,14 @@
     }
   }
 
+  async function doBootloader() {
+    if (!onBootloader || rebooting || backupBusy || restoreBusy || fwSrcBusy) return;
+    rebooting = true;
+    stopStatsPoll();
+    try { await onBootloader(); }
+    finally { rebooting = false; if (connected) startStatsPoll(); }
+  }
+
   async function doReboot() {
     rebooting = true; rebootMsg = "Sending REBOOT"; stopStatsPoll();
     try { await cmd.reboot(); } catch {}
@@ -702,7 +711,15 @@
       <button onclick={doReboot} disabled={rebooting}>
         {rebooting ? "Rebooting…" : "Reboot pedal"}
       </button>
+      {#if onBootloader}
+        <button onclick={doBootloader} disabled={rebooting || backupBusy || restoreBusy || fwSrcBusy}>
+          Enter bootloader
+        </button>
+      {/if}
     </div>
+    {#if onBootloader}
+      <p class="muted small">Enter USB firmware recovery mode (RPI-RP2) to install firmware manually. This disconnects the pedal; it does not install or erase firmware.</p>
+    {/if}
     {#if rebootMsg}
       <p class="curr">{rebootMsg}</p>
     {/if}

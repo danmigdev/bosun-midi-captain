@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   pickFirmwareSource: vi.fn(),
   prepareFirmwareSource: vi.fn(),
   pushFirmware: vi.fn(),
+  enterBootloader: vi.fn(),
   cmd: {
     getDeviceInfo: vi.fn(), getManifest: vi.fn(), getManifestAwait: vi.fn(),
     listProfiles: vi.fn(), listPatches: vi.fn(), getDirty: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 // boundary is stubbed so these regressions exercise every visible entry point
 // without touching a pedal or starting a firmware transaction.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("../src/lib/bootloader", () => ({ enterBootloader: mocks.enterBootloader }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("../src/lib/network-bootstrap", () => ({ readNetworkBootstrap: mocks.readNetworkBootstrap }));
 vi.mock("../src/lib/protocol", async (importOriginal) => ({
@@ -61,6 +63,7 @@ let backendConnected = false;
 
 beforeEach(() => {
   backendConnected = false;
+  mocks.enterBootloader.mockReset().mockResolvedValue(undefined);
   localStorage.setItem("BOSUN_ONBOARDED", "1");
   localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({
     mode: "network", host: "bosun-hub.local", port: "9876",
@@ -99,6 +102,7 @@ type DeviceIdentity = {
   fw: string;
   native_experimental?: boolean;
   firmware_ota?: boolean;
+  reboot_modes?: string[];
 };
 
 async function ready(identity?: DeviceIdentity) {
@@ -142,6 +146,17 @@ function expectNoOtaControls() {
 }
 
 describe("App direct USB firmware update", () => {
+  it("enters the bootloader from Maintenance and clears the USB session", async () => {
+    render(App);
+    await screen.findByTitle("Connected on COM9");
+    await deviceInfo({ fw: "0.6.10-native", reboot_modes: ["normal", "bootloader"] });
+    await maintenance();
+    await fireEvent.click(screen.getByRole("button", { name: "Enter bootloader", exact: true }));
+    await waitFor(() => expect(mocks.enterBootloader).toHaveBeenCalledOnce());
+    await screen.findByText(/Bootloader requested. Look for RPI-RP2/);
+    expect(screen.queryByTitle("Connected on COM9")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Install Bosun/ })).not.toBeInTheDocument();
+  });
   let current: UsbUpdateJob | null;
   const updateJob = (phase: UsbUpdateJob["phase"]): UsbUpdateJob => ({
     id: "usb-job", phase, port: "COM9", previous_version: "0.6.5-native", version: "0.6.5-native",
@@ -213,6 +228,11 @@ describe("App direct USB firmware update", () => {
 });
 
 describe("App firmware update capabilities", () => {
+  it("does not offer manual bootloader entry through a network hub", async () => {
+    await ready({ fw: "0.6.10-native", reboot_modes: ["bootloader"] });
+    await maintenance();
+    expect(screen.queryByRole("button", { name: "Enter bootloader" })).not.toBeInTheDocument();
+  });
   it.each([
     { fw: "0.1.0-native", native_experimental: true, firmware_ota: false },
     { fw: "0.1.0-native" },

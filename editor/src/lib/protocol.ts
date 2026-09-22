@@ -402,7 +402,7 @@ export type FirmwareMessage =
       sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string }
   | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number };
       /** Native firmware uses a separate release line and does not accept Python file OTA. */
-      native_experimental?: boolean; firmware_ota?: boolean;
+      native_experimental?: boolean; firmware_ota?: boolean; reboot_modes?: string[];
       /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
       stage_input?: boolean;
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */

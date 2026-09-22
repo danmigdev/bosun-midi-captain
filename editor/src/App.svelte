@@ -42,7 +42,8 @@
     unifiedUpdateAvailable, unifiedUpdateStatus,
     type BundledUpdateManifest, type PendingUpdate,
   } from "./lib/unified-update";
-  import { isNativeFirmware, supportsFirmwareFileOta, type FirmwareIdentity } from "./lib/firmware-capabilities";
+  import { isNativeFirmware, supportsFirmwareFileOta, supportsBootloader, type FirmwareIdentity } from "./lib/firmware-capabilities";
+  import { enterBootloader } from "./lib/bootloader";
   import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
   import type { SetlistItem } from "./lib/setlists";
   import {
@@ -935,6 +936,7 @@
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
   // pedal doesn't (prompt).
   async function pollForUnflashedPedal() {
+    if (bootloaderRequested) return;
     if (usbLocked || showUsbUpdate || showSetupWizard || connectionMode !== "usb" || connected || showInstaller || busy || manualMode) return;
     // Don't let a new probe start while the previous one is still running:
     // auto_connect can take several seconds, longer than the poll interval,
@@ -944,6 +946,7 @@
     try {
       let dev;
       try { dev = await detectPedal(); } catch { return; }
+      if (bootloaderRequested) return;
       if (usbLocked || showUsbUpdate || showSetupWizard || connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
 
       const inBootloader = !!dev.bootloader_drive;
@@ -1018,6 +1021,7 @@
 
   async function doConnect() {
     if (busy || usbLocked) return;
+    bootloaderRequested = false;
     busy = true; error = "";
     try {
       // Defensive: if a prior stale handle is somehow still around (e.g.
@@ -1029,6 +1033,25 @@
       await refetchAll();
     } catch (e) { error = String(e); }
     finally { busy = false; }
+  }
+
+  let bootloaderRequested = $state(false);
+  let canEnterBootloader = $derived(!IS_ANDROID && connected && !networkSession
+    && !busy && !usbLocked && supportsBootloader(deviceInfo));
+
+  async function doEnterBootloader() {
+    if (!canEnterBootloader) return;
+    busy = true;
+    // Also suppress the installer if the device reboots but its ACK is lost.
+    bootloaderRequested = true;
+    try {
+      await enterBootloader();
+      try { await stopBridge(); } catch { /* USB may already have disappeared. */ }
+      await handleLinkLoss(true);
+      showToast("info", "Bootloader requested. Look for RPI-RP2. Copy the firmware for your model, or power-cycle to return to Bosun.");
+    } catch (e) {
+      showToast("error", String(e));
+    } finally { busy = false; }
   }
 
   async function doDisconnect() {
@@ -1317,6 +1340,7 @@
         deviceInfo = {
           fw: msg.fw, device: msg.device,
           native_experimental: msg.native_experimental, firmware_ota: msg.firmware_ota,
+          reboot_modes: msg.reboot_modes,
           bank: msg.current.bank, slot: msg.current.slot,
           profile: (msg as { profile?: string }).profile ?? "",
           stage_input: msg.stage_input === true,
@@ -2035,6 +2059,7 @@
             <h2>Maintenance</h2>
           </header>
           <MaintenancePanel {connected} {activeProfile} firmwareInfo={deviceInfo}
+                            onBootloader={canEnterBootloader ? doEnterBootloader : undefined}
                             usbRelease={canUseUsbUpdate ? bundledUpdate?.release : null}
                             onUsbUpdate={openUsbUpdate}
                             unifiedRelease={canUseUnifiedUpdate ? bundledUpdate?.release : null}

@@ -5,6 +5,28 @@ Raspberry Pi. The Pi updater also migrates supported CircuitPython configuration
 supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player or
 Generic MIDI profiles. CircuitPython is no longer maintained separately.
 
+## Enter the bootloader from Bosun
+
+The following options are implemented on `main`; the startup shortcut requires
+firmware built with this change. Older installed firmware does not gain the
+shortcut by updating Desktop alone.
+
+- **Bosun Desktop:** connect the Captain directly to the computer by USB, open
+  **Maintenance**, and click **Enter bootloader**. Save or discard any unsaved
+  patch edits first. The button appears when the connected native firmware
+  advertises bootloader support.
+- **Without Desktop:** disconnect all power sources. Hold **switch 1 (top-left)**,
+  reconnect USB to the computer, and keep holding that switch alone for
+  **three seconds**, then release it. The shortcut runs before configuration
+  and display initialization.
+
+The computer should show an **RPI-RP2** drive. Entering this mode does not erase
+the installed firmware or configuration. Power-cycle without holding a switch
+to return to Bosun, or follow PaintAudio's official recovery instructions and
+use the firmware for your exact Captain model to reinstall stock firmware.
+Back up anything you want to keep before installing another firmware; backing
+up and restoring the previous system is the user's responsibility.
+
 ## First installation from factory firmware
 
 Open **Setup guide** in Desktop and select your configuration, then **Install

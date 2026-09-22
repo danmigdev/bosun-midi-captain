@@ -17,6 +17,12 @@ RP2040 MIDI Captain with **8 MiB flash**.
 A raw UF2 does not migrate configuration or create a recovery backup. Use the
 complete update procedure when replacing an existing installation.
 
+Builds containing the manual recovery shortcut can enter **RPI-RP2** by holding
+**switch 1 (top-left)** alone while powering on and keeping it held for three
+seconds. Bosun Desktop also offers **Maintenance → Enter bootloader** over a
+direct USB connection. See [bootloader entry](../docs/firmware-updates.md#enter-the-bootloader-from-bosun)
+for the full procedure and stock firmware recovery.
+
 ## Build requirements
 
 Build on Linux, or on Windows through WSL with an Ubuntu distribution. On

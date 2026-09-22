@@ -3,6 +3,11 @@ export interface FirmwareIdentity {
   fw: string;
   native_experimental?: boolean;
   firmware_ota?: boolean;
+  reboot_modes?: string[];
+}
+
+export function supportsBootloader(info: FirmwareIdentity | null | undefined): boolean {
+  return isNativeFirmware(info) && info?.reboot_modes?.includes("bootloader") === true;
 }
 
 export function isNativeFirmware(info: FirmwareIdentity | null | undefined): boolean {
