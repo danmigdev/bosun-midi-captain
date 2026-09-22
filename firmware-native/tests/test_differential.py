@@ -561,18 +561,16 @@ class DifferentialTests(unittest.TestCase):
         cases.extend((
             (2, 0, 1, {"type": "kemper_tuner", "state": "on"}),
             (2, 0, 0, {"type": "kemper_tuner", "state": "off"}),
-            (3, 0, 0, {"type": "kemper_tap_tempo"}),
             (5, 0, 64, {"type": "kemper_morph", "value": 64}),
             (6, 0, 1, {"type": "kemper_morph_trigger", "state": "on"}),
             (7, 0, 127, {"type": "kemper_wah", "value": 127}),
             (8, 0, 100, {"type": "kemper_volume", "value": 100}),
-            (10, 0, 1, {"type": "kemper_rotary", "value": "fast"}),
             (11, 0, -1, {"type": "kemper_step_rig", "direction": "prev"}),
             (11, 0, 1, {"type": "kemper_step_rig", "direction": "next"}),
         ))
-        cases.extend((4, 0, bpm, {"type": "kemper_set_tempo", "bpm": bpm}) for bpm in (0, 40, 127, 128, 250, 500))
-        cases.extend((9, index, 1, {"type": "kemper_looper", "action": action})
-                     for index, action in enumerate(("rec_play", "stop_erase", "trigger", "reverse", "half_speed")))
+        # Tap, BPM, Rotary and Looper intentionally fix legacy mappings. Their
+        # documented MIDI packets are tested directly in test_kemper.c instead
+        # of treating the frozen CircuitPython implementation as an oracle.
         for channel in (1, 3, 16):
             for command, index, value, message in cases:
                 oracle.plugin.dispatch(dict(message, channel=channel), oracle.midi)

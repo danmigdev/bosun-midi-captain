@@ -2,7 +2,7 @@
  * when a smaller bank or slot layout is configured. */
 export const DEFAULT_RIGS_PER_BANK = 5;
 export const MAX_RIGS_PER_BANK = 10;
-export const MAX_BANKS = 99;
+export const MAX_BANKS = 125;
 
 export function getBankCount(device: { bank_count?: unknown } | null | undefined): number {
   const value = device?.bank_count;

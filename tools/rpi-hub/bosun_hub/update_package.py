@@ -25,7 +25,8 @@ import zlib
 
 FLASH_BASE = 0x10000000
 FLASH_BYTES = 8 * 1024 * 1024
-STORAGE_BYTES = 512 * 1024
+STORAGE_BYTES = 4 * 1024 * 1024
+STORAGE_HEADER_OFFSET = STORAGE_BYTES - 512 * 1024
 STORAGE_OFFSET = FLASH_BYTES - STORAGE_BYTES
 _UF2_LIMIT = STORAGE_OFFSET * 2
 _MANIFEST_LIMIT = 4096
@@ -474,7 +475,7 @@ def build_native_storage(config_dir: Path, output: Path, *, builder: Path) -> by
                 _fail("Storage builder did not produce a regular image")
             with candidate.open("rb") as handle:
                 image = handle.read(STORAGE_BYTES + 1)
-            if len(image) != STORAGE_BYTES or b"littlefs" not in image[:8192]:
+            if len(image) != STORAGE_BYTES or b"littlefs" not in image[STORAGE_HEADER_OFFSET:STORAGE_HEADER_OFFSET + 8192]:
                 _fail("Storage builder produced an invalid image")
             with output.open("xb") as handle:
                 handle.write(image)

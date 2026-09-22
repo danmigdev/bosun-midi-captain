@@ -3,7 +3,7 @@
 #define BOSUN_BOARD_CONTRACTS_H
 #include "bosun/board.h"
 
-enum { BOSUN_STORAGE_BYTES = 512 * 1024 };
+#include "bosun/storage_layout.h"
 
 typedef struct { uint64_t consumed; uint32_t dropped; } bosun_dma_rx_tracker_t;
 

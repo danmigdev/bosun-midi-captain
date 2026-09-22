@@ -5,6 +5,10 @@ kinds are Kemper Player and generic MIDI. Existing CircuitPython installations
 can migrate through **Update Bosun**; CircuitPython is no longer maintained as a
 parallel firmware target.
 
+This branch also includes a separate [experimental Kemper PROFILER plugin](../docs/kemper-head.md)
+for Head, Rack and Stage, sharing the Player engine and schemas. It adds MK1/MK2
+capabilities, Performance/Browse selection and banks 1–125. Hardware validation remains pending.
+
 ## Install or update
 
 For existing native firmware, connect the Captain directly by USB to Bosun Desktop,
@@ -67,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File tools/native-build.ps1 -Platform all -F
 
 Use `-Distribution <name>` if the WSL distribution is not named `Ubuntu`.
 `PICO_SDK_PATH` selects an existing pinned SDK; `BOSUN_BUILD_ROOT` changes build
-output directories. The default build reserves the final 512 KiB of the 8 MiB
+output directories. The default build reserves the final 4 MiB of the 8 MiB
 flash for configuration. The firmware build's `BOSUN_FLASH_BYTES` setting can
 change a verified board geometry, but the release updater currently accepts
 only the supported 8 MiB target.

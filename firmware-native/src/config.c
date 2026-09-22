@@ -1,6 +1,15 @@
 #include "bosun/config.h"
 #include <stdio.h>
 #include <string.h>
+#include "bosun_plugin_kinds.h"
+
+bool bosun_config_kind_supported(const char *kind) {
+    if (!kind) return false;
+    if (!*kind || !strcmp(kind, "unknown")) return true;
+    for (unsigned i = 0; i < sizeof bosun_plugin_kinds / sizeof *bosun_plugin_kinds; ++i)
+        if (!strcmp(kind, bosun_plugin_kinds[i])) return true;
+    return false;
+}
 
 /* One cooperative application instance. Workspace is never retained by callers. */
 static union {
@@ -37,7 +46,7 @@ bool bosun_config_profile_id(const char *id) {
     bosun_json_token_t token; bosun_json_doc_t document;
     return bosun_json_parse(&document, quoted, length + 2, &token, 1) == BOSUN_JSON_OK;
 }
-bool bosun_config_coordinates(unsigned bank, unsigned slot) { return bank >= 1 && bank <= 99 && slot >= 1 && slot <= 10; }
+bool bosun_config_coordinates(unsigned bank, unsigned slot) { return bank >= 1 && bank <= BOSUN_BANK_MAX && slot >= 1 && slot <= BOSUN_SLOT_MAX; }
 bool bosun_config_path(char *out, size_t capacity, const char *profile, const char *file) {
     if (!out || !capacity || !bosun_config_profile_id(profile) || !file || !*file) return false;
     int n = snprintf(out, capacity, "/config/profiles/%s/%s", profile, file);
@@ -227,6 +236,7 @@ bosun_store_result_t bosun_config_put_patch(bosun_config_t *c, const char *profi
     if (r != BOSUN_STORE_OK) return r;
     r = write_file(path, json, length);
     if (r != BOSUN_STORE_OK) return r;
+    ++c->catalog_revision;
     if (active) {
         if (index < 0) index = c->dirty_count++;
         c->dirty[index] = (bosun_dirty_patch_t){(uint16_t)bank, (uint16_t)slot, now_ms};
@@ -335,7 +345,7 @@ bosun_store_result_t bosun_config_save(bosun_config_t *c, unsigned bank, unsigne
         }
         if (r == BOSUN_STORE_OK) r = bosun_store_remove(draft);
         if (r != BOSUN_STORE_OK && r != BOSUN_STORE_NOT_FOUND) return r;
-        erase_dirty(c, i); ++c->revision;
+        erase_dirty(c, i); ++c->revision; ++c->catalog_revision;
         if (reload) {
             if (has_baseline) {
                 memcpy(c->patch, workspace, length); c->patch[length] = 0;
@@ -361,7 +371,7 @@ bosun_store_result_t bosun_config_remove_patch(bosun_config_t *c, unsigned bank,
         (void)object(c->patch, 0, &c->patch_doc, c->patch_tokens, BOSUN_PATCH_TOKENS);
         c->has_patch = false; ++c->patch_revision;
     }
-    ++c->revision; return BOSUN_STORE_OK;
+    ++c->revision; ++c->catalog_revision; return BOSUN_STORE_OK;
 }
 void bosun_config_tick(bosun_config_t *c, uint32_t now) {
     int a = bosun_json_get(&c->device_doc, 0, "autosave");
@@ -377,7 +387,7 @@ static unsigned number_name(const char *name, bool file) {
     unsigned n = 0, i = 0;
     while (name[i] >= '0' && name[i] <= '9') {
         n = n * 10u + (unsigned)(name[i++] - '0');
-        if (i > 2 || n > 99) return 0;
+        if (i > 3 || n > BOSUN_BANK_MAX) return 0;
     }
     return i && (file ? !strcmp(name + i, ".json") : name[i] == 0) ? n : 0;
 }
@@ -413,7 +423,7 @@ bosun_store_result_t bosun_config_activate(bosun_config_t *c, const char *profil
     if (r != BOSUN_STORE_OK) return r;
     if (!bosun_json_string(&d, bosun_json_get(&d, 0, "kind"), kind, sizeof kind)) strcpy(kind, "unknown");
     bosun_patch_key_t draft_keys[BOSUN_DIRTY_PATCHES]; size_t count = 0;
-    r = catalog(profile, true, 99, draft_keys, BOSUN_DIRTY_PATCHES, &count);
+    r = catalog(profile, true, BOSUN_BANK_MAX, draft_keys, BOSUN_DIRTY_PATCHES, &count);
     if (r != BOSUN_STORE_OK) return r;
     /* Keep the old raw documents in the two existing workspaces. Future
      * documents are read and validated in-place; failures restore both old
@@ -452,7 +462,7 @@ bosun_store_result_t bosun_config_activate(bosun_config_t *c, const char *profil
     c->dirty_count = (uint16_t)count; c->has_patch = has_patch; c->bank = 1; c->slot = 1;
     for (size_t i = 0; i < count; ++i)
         c->dirty[i] = (bosun_dirty_patch_t){draft_keys[i].bank, draft_keys[i].slot, 0};
-    ++c->revision; ++c->patch_revision;
+    ++c->revision; ++c->patch_revision; ++c->catalog_revision;
     c->last_error = BOSUN_STORE_OK;
     return BOSUN_STORE_OK;
 rollback:
@@ -535,12 +545,12 @@ static bosun_store_result_t coordinates_list(const bosun_config_t *c, unsigned l
     return BOSUN_STORE_OK;
 }
 unsigned bosun_config_bank_count(const bosun_config_t *c) {
-    int32_t value = c ? bosun_config_int(&c->device_doc, 0, "bank_count", 99) : 99;
-    return value >= 1 && value <= 99 ? (unsigned)value : 99;
+    int32_t value = c ? bosun_config_int(&c->device_doc, 0, "bank_count", BOSUN_BANK_MAX) : (int32_t)BOSUN_BANK_MAX;
+    return value >= 1 && value <= (int32_t)BOSUN_BANK_MAX ? (unsigned)value : BOSUN_BANK_MAX;
 }
 bosun_store_result_t bosun_config_coordinates_list(const bosun_config_t *c,
     bosun_patch_key_t *keys, size_t capacity, size_t *count) {
-    return coordinates_list(c, 99, keys, capacity, count);
+    return coordinates_list(c, BOSUN_BANK_MAX, keys, capacity, count);
 }
 bosun_store_result_t bosun_config_navigation_list(const bosun_config_t *c,
     bosun_patch_key_t *keys, size_t capacity, size_t *count) {
@@ -565,21 +575,30 @@ bosun_store_result_t bosun_config_patch_name(const bosun_config_t *c, unsigned b
     return bosun_json_string(&d, name, output, capacity) ? BOSUN_STORE_OK : BOSUN_STORE_LIMIT;
 }
 bosun_store_result_t bosun_config_patches(const bosun_config_t *c, const char *profile, bosun_json_writer_t *w) {
+    size_t total;
+    return bosun_config_patches_page(c, profile, w, 0, BOSUN_PATCH_CATALOG_MAX, &total);
+}
+bosun_store_result_t bosun_config_patches_page(const bosun_config_t *c, const char *profile,
+    bosun_json_writer_t *w, size_t offset, size_t limit, size_t *total) {
     bosun_patch_key_t keys[BOSUN_PATCH_CATALOG_MAX]; size_t count = 0;
+    *total = 0;
     const char *id = profile && *profile ? profile : c->profile;
     if (!*id) { bosun_json_puts(w, "[]"); return w->failed ? BOSUN_STORE_LIMIT : BOSUN_STORE_OK; }
     if (!bosun_config_profile_exists(id)) return BOSUN_STORE_NOT_FOUND;
     bosun_store_result_t r;
     if (!profile || !*profile) r = bosun_config_coordinates_list(c, keys, BOSUN_PATCH_CATALOG_MAX, &count);
-    else { r = catalog(id, false, 99, keys, BOSUN_PATCH_CATALOG_MAX, &count); sort_keys(keys, count); }
+    else { r = catalog(id, false, BOSUN_BANK_MAX, keys, BOSUN_PATCH_CATALOG_MAX, &count); sort_keys(keys, count); }
     if (r != BOSUN_STORE_OK) return r;
+    *total = count;
+    if (offset > count) return BOSUN_STORE_INVALID;
+    size_t end = limit > count - offset ? count : offset + limit;
     bosun_json_puts(w, "[");
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = offset; i < end; ++i) {
         size_t length; bosun_json_doc_t d;
         r = bosun_config_read_patch(c, profile, keys[i].bank, keys[i].slot, workspace, sizeof workspace, &length);
         if (r == BOSUN_STORE_OK) r = object(workspace, length, &d, work_tokens, BOSUN_PATCH_TOKENS);
         if (r != BOSUN_STORE_OK) return r;
-        if (i) bosun_json_puts(w, ",");
+        if (i != offset) bosun_json_puts(w, ",");
         bosun_json_puts(w, "{\"bank\":"); bosun_json_write_integer(w, keys[i].bank);
         bosun_json_puts(w, ",\"slot\":"); bosun_json_write_integer(w, keys[i].slot);
         bosun_json_puts(w, ",\"name\":"); if (!raw(w, &d, bosun_json_get(&d, 0, "name"))) bosun_json_quote(w, "");

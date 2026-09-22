@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "bosun/board.h"
 #include "bosun/config.h"
+#include "bosun/storage_layout.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -12,7 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { IMAGE_BYTES = 512 * 1024, IMAGE_BASE = 1536 * 1024, ERASE_BYTES = 4096 };
+enum { IMAGE_BYTES = BOSUN_STORAGE_BYTES, IMAGE_BASE = 4 * 1024 * 1024, ERASE_BYTES = 4096 };
 static uint8_t flash[IMAGE_BYTES], original[IMAGE_BYTES];
 static char input[BOSUN_PATCH_BYTES + 1], readback[BOSUN_PATCH_BYTES + 1];
 static bosun_json_token_t tokens[BOSUN_PATCH_TOKENS];
@@ -70,11 +71,15 @@ static int open_directory(const char *path) {
 }
 
 static bool coordinate(const char *name, unsigned maximum, bool file) {
-    size_t length = strlen(name);
-    if (length != (file ? 7u : 2u) || name[0] < '0' || name[0] > '9' ||
-        name[1] < '0' || name[1] > '9' || (file && strcmp(name + 2, ".json"))) return false;
-    unsigned number = (unsigned)(name[0] - '0') * 10u + (unsigned)(name[1] - '0');
-    return number >= 1 && number <= maximum;
+    unsigned number = 0, digits = 0;
+    while (name[digits] >= '0' && name[digits] <= '9') {
+        number = number * 10u + (unsigned)(name[digits++] - '0');
+        if (digits > 3 || number > maximum) return false;
+    }
+    if (!number || (file ? strcmp(name + digits, ".json") : name[digits] != 0)) return false;
+    char canonical[16];
+    snprintf(canonical, sizeof canonical, file ? "%02u.json" : "%02u", number);
+    return !strcmp(name, canonical);
 }
 
 typedef enum { BAD_PATH, DIRECTORY, ACTIVE, MANIFEST, DEVICE, LEARN, PATCH } path_kind_t;
@@ -98,7 +103,7 @@ static path_kind_t path_kind(const char *path, bool directory) {
     }
     if (count < 3 || strcmp(component[2], "patches")) return BAD_PATH;
     if (directory && count == 3) return DIRECTORY;
-    if (count < 4 || !coordinate(component[3], 99, false)) return BAD_PATH;
+    if (count < 4 || !coordinate(component[3], BOSUN_BANK_MAX, false)) return BAD_PATH;
     if (directory && count == 4) return DIRECTORY;
     return !directory && count == 5 && coordinate(component[4], 10, true) ? PATCH : BAD_PATH;
 }
@@ -133,9 +138,9 @@ static bool validate_json(path_kind_t kind, const char *path, size_t length) {
         return fail("invalid JSON object or native token limit exceeded", path);
     if (kind == MANIFEST) {
         int token = bosun_json_get(&document, 0, "kind");
-        if (token >= 0 && !bosun_json_equal(&document, token, "generic_midi") &&
-            !bosun_json_equal(&document, token, "kemper_player") &&
-            !bosun_json_equal(&document, token, "unknown"))
+        char plugin_kind[40];
+        if (token >= 0 && (!bosun_json_string(&document, token, plugin_kind, sizeof plugin_kind) ||
+                          !bosun_config_kind_supported(plugin_kind)))
             return fail("unsupported native plugin", path);
     }
     return true;
@@ -252,7 +257,7 @@ int main(int argc, char **argv) {
             bosun_store_list("/config/profiles", entries, 1, &count) == BOSUN_STORE_OK &&
             count == 0 && !memcmp(original, flash, sizeof flash);
         if (!valid || !publish(argv[3])) return 1;
-        puts("{\"empty\":true,\"storage_bytes\":524288,\"verified\":true}");
+        puts("{\"empty\":true,\"storage_bytes\":4194304,\"verified\":true}");
         return 0;
     }
     if (argc != 5 || strcmp(argv[1], "--config-root") || strcmp(argv[3], "--output")) {

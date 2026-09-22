@@ -729,7 +729,7 @@ describe("StageView", () => {
       await replyTo(await navigationRequest("LIST_PATCHES"), replyInventory([
         patch(99, 10, "Last"), patch(2, 3, "Current"), patch(25, 3, "Lead"),
         patch(25, 7, "Solo"), patch(25, 7, "Duplicate"),
-        patch(0, 1, "Invalid bank"), patch(100, 1, "Invalid bank"),
+        patch(0, 1, "Invalid bank"), patch(126, 1, "Invalid bank"),
         patch(3.5, 1, "Fractional bank"), patch(8, 0, "Invalid slot"), patch(9, 11, "Invalid slot"),
       ]));
       const banks = within(dialog).getAllByRole("button", { name: /^Bank \d+$/ });
@@ -748,14 +748,14 @@ describe("StageView", () => {
       expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);
     });
 
-    it("offers every existing bank through 99 without truncating a large inventory", async () => {
+    it("offers every existing bank through 125 without truncating a large inventory", async () => {
       renderStage({ deviceInfo: info, patches: inventory });
-      const allBanks = Array.from({ length: 99 }, (_, index) => patch(99 - index, 3, `Rig ${99 - index}`));
+      const allBanks = Array.from({ length: 125 }, (_, index) => patch(125 - index, 3, `Rig ${125 - index}`));
       const dialog = await openPicker(allBanks);
       const banks = within(dialog).getAllByRole("button", { name: /^Bank \d+$/ });
-      expect(banks).toHaveLength(99);
+      expect(banks).toHaveLength(125);
       expect(banks[0]).toHaveAccessibleName("Bank 1");
-      expect(banks[98]).toHaveAccessibleName("Bank 99");
+      expect(banks[124]).toHaveAccessibleName("Bank 125");
       // Browser coverage checks actual scrolling and full-screen geometry;
       // this verifies that the component does not silently drop later banks.
       expect(sentCommands("SWITCH_PATCH")).toHaveLength(0);

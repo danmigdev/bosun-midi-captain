@@ -485,7 +485,7 @@ impl Worker {
         drop(helper);
         result?;
         self.job.port = verify_runtime(&self.job.identity, &self.job.version, &Value::Null)?;
-        self.publish("done",100,"Native Bosun installed and storage verified. Create a Kemper Player profile to finish setup. The complete original backup is retained on this computer.")
+        self.publish("done",100,"Native Bosun installed and storage verified. Create a profile for your Kemper model to finish setup. The complete original backup is retained on this computer.")
     }
     fn restore_factory(&mut self) -> Result<(), String> {
         let backup = self.backup()?;

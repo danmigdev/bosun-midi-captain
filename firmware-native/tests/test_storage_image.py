@@ -47,12 +47,12 @@ class StorageImage(unittest.TestCase):
     def test_real_backend_exact_readback_and_deterministic_image(self):
         original = self.snapshot()
         report = self.run_builder()
-        self.assertEqual(report["storage_bytes"], 512 * 1024)
+        self.assertEqual(report["storage_bytes"], 4 * 1024 * 1024)
         self.assertEqual(report["block_bytes"], 4096)
         self.assertEqual(report["files"], len(original))
         self.assertTrue(report["verified"])
-        self.assertEqual(self.output.stat().st_size, 512 * 1024)
-        self.assertIn(b"littlefs", self.output.read_bytes()[:8192])
+        self.assertEqual(self.output.stat().st_size, 4 * 1024 * 1024)
+        self.assertIn(b"littlefs", self.output.read_bytes()[3670016:3678208])
         second = self.base / "second.bin"
         self.run_builder(output=second)
         self.assertEqual(self.output.read_bytes(), second.read_bytes())
@@ -64,11 +64,46 @@ class StorageImage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)["empty"])
         before = self.output.read_bytes()
-        self.assertEqual(len(before), 524288)
-        self.assertIn(b"littlefs", before[:8192])
+        self.assertEqual(len(before), 4194304)
+        self.assertIn(b"littlefs", before[3670016:3678208])
         again = subprocess.run(command, capture_output=True, text=True, timeout=40)
         self.assertNotEqual(again.returncode, 0)
         self.assertEqual(self.output.read_bytes(), before)
+
+    def test_head_profile_and_shared_configuration_are_preserved(self):
+        (self.profile / "manifest.json").write_text('{"kind":"kemper_head"}', encoding="utf-8")
+        (self.profile / "device.json").write_text('{"kemper":{},"midi_channel":3}', encoding="utf-8")
+        for bank in (99, 100, 125):
+            directory = self.profile / f"patches/{bank:02d}"
+            directory.mkdir()
+            (directory / "05.json").write_text('{"name":"Performance"}', encoding="utf-8")
+        original = self.snapshot()
+        self.assertTrue(self.run_builder()["verified"])
+        self.assertEqual(self.snapshot(), original)
+
+    def test_all_625_performance_slots_fit_and_verify(self):
+        (self.profile / "manifest.json").write_text('{"kind":"kemper_head"}')
+        for bank in range(1, 126):
+            directory = self.profile / f"patches/{bank:02d}"
+            directory.mkdir(exist_ok=True)
+            for slot in range(1, 6):
+                (directory / f"{slot:02d}.json").write_text(json.dumps({
+                    "name": f"Performance {bank} Slot {slot}",
+                    "padding": "x" * 1800,
+                    "on_enter": [{"type": "kemper_rig", "bank": bank, "slot": slot}],
+                }))
+        original = self.snapshot()
+        report = self.run_builder()
+        self.assertTrue(report["verified"])
+        self.assertEqual(report["files"], len(original))
+        self.assertEqual(self.snapshot(), original)
+
+    def test_bank_range_and_canonical_paths(self):
+        for bank in ("126", "001", "0100"):
+            directory = self.profile / "patches" / bank
+            directory.mkdir()
+            self.assert_rejected()
+            directory.rmdir()
 
     def test_existing_output_and_symlink_are_never_replaced(self):
         self.output.write_bytes(b"keep original")
@@ -136,7 +171,7 @@ class StorageImage(unittest.TestCase):
             path.unlink()
 
     def test_volume_full_leaves_no_output_and_does_not_change_input(self):
-        for bank in range(1, 4):
+        for bank in range(1, 21):
             directory = self.profile / "patches" / f"{bank:02}"
             directory.mkdir(exist_ok=True)
             for slot in range(1, 11):

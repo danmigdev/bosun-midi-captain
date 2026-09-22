@@ -37,7 +37,7 @@ def verify(directory, package):
     if (m["schema"] != 1 or m["firmware_sha256"] != native["firmware_sha256"] or
         m["loader_sha256"] != hashlib.sha256(loader).hexdigest() or
         m["storage_sha256"] != hashlib.sha256(storage).hexdigest() or
-        len(storage) != 524288 or b"littlefs" not in storage[:8192]):
+        len(storage) != 4194304 or b"littlefs" not in storage[3670016:3678208]):
         raise ValueError("Mismatched installer assets")
     return m
 

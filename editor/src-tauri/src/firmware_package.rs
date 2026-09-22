@@ -8,7 +8,8 @@ use std::{
 
 pub const FLASH_BASE: u32 = 0x1000_0000;
 pub const FLASH_BYTES: usize = 8 * 1024 * 1024;
-pub const STORAGE_OFFSET: usize = FLASH_BYTES - 512 * 1024;
+pub const STORAGE_OFFSET: usize = FLASH_BYTES - 4 * 1024 * 1024;
+pub const STORAGE_HEADER_OFFSET: usize = FLASH_BYTES - STORAGE_OFFSET - 512 * 1024;
 pub const SECTOR: usize = 4096;
 const MAX_ARCHIVE: u64 = 4 * 1024 * 1024;
 

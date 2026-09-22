@@ -2,6 +2,21 @@
 
 #include <string.h>
 
+#include "bosun_kemper_models.h"
+
+const bosun_kemper_model *bosun_kemper_model_for_kind(const char *kind) {
+    if (kind) for (unsigned i = 0; i < sizeof kemper_models / sizeof *kemper_models; ++i)
+        if (!strcmp(kind, kemper_models[i].kind)) return &kemper_models[i];
+    return NULL;
+}
+
+bool bosun_kemper_message_supported(const bosun_kemper_model *model, const char *type) {
+    if (!model || !type) return false;
+    for (const char *const *excluded = model->unsupported_messages; *excluded; ++excluded)
+        if (!strcmp(type, *excluded)) return false;
+    return true;
+}
+
 static const uint8_t effect_cc[8] = {17,18,19,20,22,24,27,29};
 /* Current effect modules: type at address 0, on/off at address 3.
  * Player still broadcasts Delay/Reverb at 74/2 and 75/2, but querying
@@ -52,7 +67,7 @@ static bool voice_channel(bosun_kemper *k, uint8_t channel,
 }
 
 static bool request(bosun_kemper *k, uint8_t page, uint8_t address) {
-    const uint8_t packet[] = {0xf0,0,0x20,0x33,2,0x7f,0x41,0,page,address,0xf7};
+    const uint8_t packet[] = {0xf0,0,0x20,0x33,k->model->product_id,0x7f,0x41,0,page,address,0xf7};
     return transmit(k, packet, sizeof(packet));
 }
 
@@ -85,7 +100,7 @@ static void expression(bosun_kemper *k, bosun_expression_mode mode) {
 static void invalidate_wah(bosun_kemper *k, uint32_t now) {
     k->wah_query_valid = k->wah_pending = false;
     k->wah_attempts = k->wah_types = k->wah_slots = k->wah_states = k->wah_on = 0;
-    k->wah_fixed = -1;
+    k->wah_fixed = k->fixed_effects ? -1 : 0;
     k->wah_cursor = 0;
     /* An absent deadline is not timestamp zero: after 2^31 ms, modular
      * comparison would mistake that zero for a future quarantine deadline. */
@@ -144,7 +159,7 @@ static void query_wah(bosun_kemper *k, uint32_t now) {
         !k->state.rig_name_fresh || k->last_name_rig != k->state.rig) return;
     if (k->wah_pending) {
         if (!due(now, k->wah_retire_ms)) return;
-        k->wah_fixed = -1;
+        k->wah_fixed = k->fixed_effects ? -1 : 0;
         k->wah_states = 0;
         publish_wah(k);
         k->wah_pending = false;
@@ -169,6 +184,7 @@ static void query_wah(bosun_kemper *k, uint32_t now) {
                 if (k->wah_slots & (1u << i)) { target = (uint8_t)i; break; }
         }
     }
+    if (target == 8 && !k->fixed_effects) return;
     uint8_t page = target == 8 ? 5 :
         effect_page[target >= 16 ? target - 16 : target];
     uint8_t address = target == 8 ? 21 : target >= 16 ? 0 : 3;
@@ -232,7 +248,7 @@ static void reset_reconcile(bosun_kemper *k, uint32_t now, uint32_t delay) {
     invalidate_wah(k, now);
 }
 
-static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
+static void arm(bosun_kemper *k, uint16_t rig, uint32_t now) {
     bosun_kemper_morph_clear(k);
     quarantine(k, now);
     retire_pc(k, now);
@@ -256,7 +272,7 @@ static void arm(bosun_kemper *k, uint8_t rig, uint32_t now) {
 
 static void expire_bank_snapshot(bosun_kemper *k, uint32_t now) {
     if (!k->bank_snapshot_active || !due(now, k->bank_snapshot_deadline_ms)) return;
-    uint8_t rig = k->deferred_bank_pc;
+    uint16_t rig = k->deferred_bank_pc;
     k->bank_snapshot_active = false;
     k->deferred_bank_pc = 0;
     if (rig) {
@@ -271,16 +287,23 @@ static void expire_bank_snapshot(bosun_kemper *k, uint32_t now) {
     }
 }
 
-bool bosun_kemper_begin_rig(bosun_kemper *k, uint8_t rig, uint32_t now) {
-    if (!k || rig < 1 || rig > 125) return false;
+bool bosun_kemper_begin_rig(bosun_kemper *k, uint16_t rig, uint32_t now) {
+    if (!k || rig < 1 || rig > (k->browse_mode ? 128u : k->model->max_banks * 5u)) return false;
     arm(k, rig, now);
     return true;
 }
 
 void bosun_kemper_init(bosun_kemper *k, uint8_t channel,
     uint8_t bound_blocks, bosun_midi_send_fn send, void *context) {
+    bosun_kemper_init_model(k, &kemper_models[0], channel, bound_blocks, send, context);
+}
+
+void bosun_kemper_init_model(bosun_kemper *k, const bosun_kemper_model *model,
+    uint8_t channel, uint8_t bound_blocks, bosun_midi_send_fn send, void *context) {
     if (!k) return;
     memset(k, 0, sizeof(*k));
+    k->model = model ? model : &kemper_models[0];
+    k->fixed_effects = k->model->fixed_effects;
     k->channel = channel >= 1 && channel <= 16 ? channel : 1;
     k->bound_blocks = bound_blocks;
     k->send = send;
@@ -288,7 +311,7 @@ void bosun_kemper_init(bosun_kemper *k, uint8_t channel,
     k->state.rig = k->state.bank = k->state.rig_in_bank = 1;
     k->state.tuner_deviance = 8192;
     k->state.morph_value = -1;
-    k->wah_fixed = -1;
+    k->wah_fixed = k->fixed_effects ? -1 : 0;
     k->bootstrap_name_pending = true;
 }
 
@@ -300,19 +323,29 @@ bool bosun_kemper_select_rig(bosun_kemper *k, uint8_t bank, uint8_t slot, uint32
     return k && bosun_kemper_select_rig_channel(k, k->channel, bank, slot, now);
 }
 
-bool bosun_kemper_select_rig_channel(bosun_kemper *k, uint8_t channel,
-                                    uint8_t bank, uint8_t slot, uint32_t now) {
-    if (!k || channel < 1 || channel > 16 || bank < 1 || bank > 25 || slot < 1 || slot > 5)
-        return false;
-    if (!voice_channel(k, channel, 0xb0, 0, 0) || !voice_channel(k, channel, 0xb0, 32, 0))
-        return false;
-    uint8_t rig = (uint8_t)((bank - 1) * 5 + slot);
+static bool schedule_program(bosun_kemper *k, uint8_t channel, uint16_t rig, uint32_t now) {
     arm(k, rig, now);
     k->scheduled_pc = true;
     k->scheduled_pc_rig = rig;
     k->scheduled_pc_channel = channel;
     k->scheduled_pc_ms = now + 5;
     return true;
+}
+
+bool bosun_kemper_select_rig_channel(bosun_kemper *k, uint8_t channel,
+                                    uint8_t bank, uint8_t slot, uint32_t now) {
+    if (!k || k->browse_mode || channel < 1 || channel > 16 || bank < 1 ||
+        bank > k->model->max_banks || slot < 1 || slot > 5) return false;
+    uint16_t rig = (uint16_t)((bank - 1) * 5 + slot);
+    return voice_channel(k, channel, 0xb0, 0, 0) &&
+        voice_channel(k, channel, 0xb0, 32, (uint8_t)((rig - 1) / 128)) &&
+        schedule_program(k, channel, rig, now);
+}
+
+bool bosun_kemper_select_program_channel(bosun_kemper *k, uint8_t channel,
+                                        uint8_t program, uint32_t now) {
+    return k && k->model->profiler && k->browse_mode && channel >= 1 && channel <= 16 && program < 128 &&
+        schedule_program(k, channel, (uint16_t)(program + 1u), now);
 }
 
 bool bosun_kemper_request_rig_name(bosun_kemper *k, uint32_t now) {
@@ -322,7 +355,7 @@ bool bosun_kemper_request_rig_name(bosun_kemper *k, uint32_t now) {
     /* Kemper MIDI Parameter Documentation, Request String Parameter: 0x43
      * returns function 0x03; numeric 0x41 at the same address returns no name.
      * Keep untagged replies from a previous generation out of a new request. */
-    const uint8_t packet[] = {0xf0,0,0x20,0x33,2,0x7f,0x43,0,0,1,0xf7};
+    const uint8_t packet[] = {0xf0,0,0x20,0x33,k->model->product_id,0x7f,0x43,0,0,1,0xf7};
     k->name_query_generation = k->generation;
     k->name_query_retire_ms = now + 1200;
     k->name_query_retire_active = true;
@@ -442,8 +475,28 @@ static void receive_live_block(bosun_kemper *k, unsigned i, bool on, uint32_t no
     receive_wah(k, on, (uint8_t)i, true, now);
 }
 
+bool bosun_kemper_request_identity(bosun_kemper *k, uint32_t now) {
+    const uint8_t packet[] = {0xf0,0x7e,0x7f,0x06,0x01,0xf7};
+    k->identity_known = k->identity_pending = false;
+    if (!transmit(k, packet, sizeof packet)) return false;
+    k->identity_pending = true;
+    k->identity_deadline_ms = now + 2000;
+    return true;
+}
+
 static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
                           uint32_t now) {
+    /* Universal Identity payload excludes F0/F7. Accept Kemper only, within
+     * the request window. Raw family/member/revision have no verified model
+     * mapping here: never infer MK2 or operating mode from these bytes. */
+    if (length == 15 && data[0] == 0x7e && data[2] == 6 && data[3] == 2 &&
+        data[4] == 0 && data[5] == 0x20 && data[6] == 0x33 &&
+        k->identity_pending && !due(now, k->identity_deadline_ms)) {
+        for (size_t i = 0; i < length; ++i) if (data[i] >= 0x80) return;
+        memcpy(k->identity, data + 7, sizeof k->identity);
+        k->identity_known = true; k->identity_pending = false;
+        return;
+    }
     if (length < 6 || data[0] != 0 || data[1] != 0x20 || data[2] != 0x33) return;
     for (size_t i = 0; i < length; ++i) if (data[i] >= 0x80) return;
     uint8_t fn = data[5];
@@ -456,7 +509,7 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
         if (data[7] == 0 && data[8] == 1) receive_name(k, data + 9, length - 9, now);
         return;
     }
-    if (fn == 7 && length > 12 && data[7] == 0 && data[8] == 0 &&
+    if (!k->browse_mode && fn == 7 && length > 12 && data[7] == 0 && data[8] == 0 &&
         data[9] == 1 && data[10] == 0 && data[11] == 0 && data[12] &&
         !k->bank_snapshot_seen && k->local_pc.valid &&
         k->local_pc.generation == k->generation && k->local_pc.rig == k->state.rig &&
@@ -536,20 +589,22 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
 }
 
 static void receive_cc(bosun_kemper *k, uint8_t cc, uint8_t value, uint32_t now) {
+    if (cc == 32 && k->model->profiler && !k->browse_mode) { k->bank_lsb = value; return; }
     /* External pedal/button traffic invalidates our last command. A pedal
      * value (including SysEx page 0/11) is not reliable Morph-state feedback. */
     if (cc == 11 || cc == 80) { bosun_kemper_morph_clear(k); return; }
-    if (cc == 31) { tuner(k, value >= 64); return; }
+    if (cc == 31) { tuner(k, value != 0); return; }
     for (unsigned i = 0; i < 8; ++i) {
         if (cc != effect_cc[i]) continue;
-        receive_live_block(k, i, value >= 64, now);
+        receive_live_block(k, i, value != 0, now);
         return;
     }
 }
 
 static void receive_pc(bosun_kemper *k, uint8_t pc, uint32_t now) {
-    if (pc >= 125) return;
-    uint8_t rig = pc + 1;
+    if (pc >= 128) return;
+    uint16_t rig = (uint16_t)((k->browse_mode ? 0u : k->bank_lsb * 128u) + pc + 1u);
+    if (rig > (k->browse_mode ? 128u : k->model->max_banks * 5u)) return;
     expire_bank_snapshot(k, now);
     expire_orphans(k, now);
     if ((k->local_pc.valid || (k->bank_snapshot_seen && !due(now, k->bank_snapshot_deadline_ms))) &&
@@ -611,7 +666,7 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
     expire_orphans(k, now);
     if (k->scheduled_pc && due(now, k->scheduled_pc_ms)) {
         k->scheduled_pc = false;
-        if (voice_channel(k, k->scheduled_pc_channel, 0xc0, (uint8_t)(k->scheduled_pc_rig - 1), 0)) {
+        if (voice_channel(k, k->scheduled_pc_channel, 0xc0, (uint8_t)((k->scheduled_pc_rig - 1) % 128), 0)) {
             k->rig_identity_known = true;
             retire_pc(k, now);
             k->local_pc = (bosun_kemper_pc_token){k->generation, now + 10000,
@@ -659,11 +714,19 @@ void bosun_kemper_tick(bosun_kemper *k, uint32_t now) {
      * rig. Retry the initial snapshot at most once per second until its PC. */
     bool initialize = !k->init_sent || !k->state.connected || !k->rig_identity_known;
     if (k->init_sent && now - k->last_beacon_ms < (initialize ? 1000u : 5000u)) return;
-    const uint8_t packet[] = {0xf0,0,0x20,0x33,2,0x7f,0x7e,0,0x40,2,
+    const uint8_t packet[] = {0xf0,0,0x20,0x33,k->model->product_id,0x7f,0x7e,0,0x40,2,
         initialize ? 0x23 : 0x22,5,0xf7};
     (void)transmit(k, packet, sizeof(packet));
     k->last_beacon_ms = now;
     k->init_sent = true;
+}
+
+/* Kemper MIDI Parameter Documentation: 14-bit NRPN address and value. */
+static bool nrpn(bosun_kemper *k, uint8_t channel, uint8_t page, uint8_t address, uint16_t value) {
+    return voice_channel(k, channel, 0xb0, 99, page) &&
+        voice_channel(k, channel, 0xb0, 98, address) &&
+        voice_channel(k, channel, 0xb0, 6, (uint8_t)(value >> 7)) &&
+        voice_channel(k, channel, 0xb0, 38, (uint8_t)(value & 127));
 }
 
 static bool command_channel(bosun_kemper *k, uint8_t channel, bosun_kemper_command_type command,
@@ -675,27 +738,27 @@ static bool command_channel(bosun_kemper *k, uint8_t channel, bosun_kemper_comma
         return index < 8 && voice_channel(k, channel, 0xb0, effect_cc[index], boolean);
     case BOSUN_KEMPER_FIXED: {
         static const uint8_t addresses[] = {11,6,16,21,1};
-        return index < 5 && voice_channel(k, channel, 0xb0, 99, 5) &&
-            voice_channel(k, channel, 0xb0, 98, addresses[index]) && voice_channel(k, channel, 0xb0, 6, 0) &&
-            voice_channel(k, channel, 0xb0, 38, value ? 1 : 0);
+        return k->fixed_effects && index < 5 && nrpn(k, channel, 5, addresses[index], value ? 1 : 0);
     }
     case BOSUN_KEMPER_TUNER: return voice_channel(k, channel, 0xb0, 31, boolean);
-    case BOSUN_KEMPER_TAP: return voice_channel(k, channel, 0xb0, 30, 127);
+    case BOSUN_KEMPER_TAP: return voice_channel(k, channel, 0xb0, 30, 0);
     case BOSUN_KEMPER_TEMPO:
         if (value < 40) value = 40;
         if (value > 250) value = 250;
-        return voice_channel(k, channel, 0xb0, 92, (uint8_t)(value / 128)) &&
-            voice_channel(k, channel, 0xb0, 93, (uint8_t)(value % 128));
+        return nrpn(k, channel, 4, 0, (uint16_t)(value * 64));
     case BOSUN_KEMPER_MORPH:
         return value >= 0 && value <= 127 && voice_channel(k, channel, 0xb0, 11, (uint8_t)value);
     case BOSUN_KEMPER_MORPH_TRIGGER: return voice_channel(k, channel, 0xb0, 80, boolean);
     case BOSUN_KEMPER_WAH: return voice_channel(k, channel, 0xb0, 1, (uint8_t)value);
     case BOSUN_KEMPER_VOLUME: return voice_channel(k, channel, 0xb0, 7, (uint8_t)value);
     case BOSUN_KEMPER_LOOPER: {
-        static const uint8_t cc[] = {88,89,91,93,94};
-        return index < 5 && voice_channel(k, channel, 0xb0, cc[index], 127);
+        if (index > 6 || value < 0 || value > 2) return false;
+        bool sent = nrpn(k, channel, 125, (uint8_t)(88 + index), value ? 1 : 0);
+        /* Always attempt the release even if the press transmission failed. */
+        if (value == 2) return nrpn(k, channel, 125, (uint8_t)(88 + index), 0) && sent;
+        return sent;
     }
-    case BOSUN_KEMPER_ROTARY: return voice_channel(k, channel, 0xb0, 47, boolean);
+    case BOSUN_KEMPER_ROTARY: return voice_channel(k, channel, 0xb0, 33, value ? 1 : 0);
     case BOSUN_KEMPER_STEP: return voice_channel(k, channel, 0xb0, value < 0 ? 49 : 48, 0);
     }
     return false;

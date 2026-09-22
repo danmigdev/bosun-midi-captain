@@ -63,6 +63,37 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe("profile-scoped patch commands", () => {
+  it("updates PROFILER mode/capabilities and preserves an unavailable saved action", async () => {
+    const m = manifest();
+    m.plugins.kemper_head = {
+      label: "PROFILER", version: "1", config_schema: { key: "kemper", fields: {
+        mode: { type: "enum", default: "performance", values: ["performance", "browse"] },
+        generation: { type: "enum", default: "MK1", values: ["MK1", "MK2"] },
+      } },
+      messages: {
+        kemper_rig: { label: "Performance", params: { bank: { type: "int", min: 1, max: 125 } }, requires: { mode: "performance" } },
+        kemper_browse_rig: { label: "Browse", params: {}, requires: { mode: "browse" } },
+        kemper_fixed_toggle: { label: "Fixed FX", params: {}, requires: { generation: "MK2" } },
+      },
+    };
+    const saved = patch("kemper_fixed_toggle");
+    const props = { bank: 125, slot: 1, patch: saved, manifest: m, activeKind: "kemper_head" };
+    const view = render(PatchEditor, props);
+    const add = await expandSwitch(view.container);
+    const selected = view.container.querySelector<HTMLSelectElement>("#swrow-1 .action .msg select")!;
+    expect(choices(add)).toContain("kemper_rig");
+    expect(choices(add)).not.toContain("kemper_browse_rig");
+    expect(choices(add)).not.toContain("kemper_fixed_toggle");
+    expect(selected.selectedOptions[0]).toBeDisabled();
+    await view.rerender({ ...props, device: { kemper: { generation: "MK2", mode: "browse" } } });
+    expect(choices(add)).not.toContain("kemper_rig");
+    expect(choices(add)).toContain("kemper_browse_rig");
+    expect(choices(add)).toContain("kemper_fixed_toggle");
+    expect(selected.selectedOptions[0]).not.toBeDisabled();
+    expect(saved.bindings![0].actions!.press!.messages[0].type).toBe("kemper_fixed_toggle");
+    expect(commands.putBinding).not.toHaveBeenCalled();
+  });
+
   it.each(plugins)("offers only core + %s commands in switch and patch macros", async (kind) => {
     const m = manifest();
     const view = render(PatchEditor, { bank: 1, slot: 1, patch: patch(), manifest: m, activeKind: kind });

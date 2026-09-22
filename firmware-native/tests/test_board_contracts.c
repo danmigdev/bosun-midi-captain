@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 static void flash_bounds(void) {
-    const uint32_t flash = 2 * 1024 * 1024, start = flash - BOSUN_STORAGE_BYTES;
+    const uint32_t flash = 8 * 1024 * 1024, start = flash - BOSUN_STORAGE_BYTES;
     assert(bosun_flash_range(flash, start, BOSUN_STORAGE_BYTES, 4096));
     assert(bosun_flash_range(flash, flash - 256, 256, 256));
     assert(bosun_flash_range(flash, flash - 1, 1, 1));

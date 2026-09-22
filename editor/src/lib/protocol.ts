@@ -1,6 +1,8 @@
+import { collectPatchCatalog } from './patch-catalog';
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { IS_ANDROID } from "./platform";
+import { MAX_BANKS } from "./bank-layout";
 
 
 // --------------------- domain types ---------------------
@@ -71,6 +73,8 @@ export interface MessageSchema {
   label: string;
   params: Record<string, ParamSchema>;
   summary?: string;          // "Scene {scene}" - template for compact display
+  /** Required values in the active plugin's configuration block. */
+  requires?: Record<string, unknown>;
 }
 
 export interface PluginConfigFieldSchema {
@@ -206,7 +210,7 @@ export const CORE_MESSAGE_TYPES: Record<string, MessageSchema> = {
   captain_patch: {
     label: "Switch Captain Patch",
     params: {
-      bank: { type: "int", min: 1, max: 99, default: 1, label: "Bank" },
+      bank: { type: "int", min: 1, max: MAX_BANKS, default: 1, label: "Bank" },
       slot: { type: "int", min: 1, max: 10, default: 1, label: "Slot" },
     },
     summary: "→ Captain {bank}/{slot}",
@@ -427,6 +431,7 @@ export type FirmwareMessage =
   // (null if unknown). `color` is a POSITION colour hint (the device does not
   // report a real per-rig colour) - may be null. `fresh` is true when the name
   // is tagged to the rig the device is currently on.
+  | { type: "KEMPER_IDENTITY"; profile: string; status: "received" | "pending" | "unavailable"; raw: number[]; model: null; os_version: null; mode: null }
   | { type: "RIG_INFO"; id?: string; name: string; rig: number | null; color: string | null; fresh: boolean }
   | { type: "EVENT"; event: string; [k: string]: unknown };
 
@@ -665,6 +670,7 @@ async function _drainOnce(): Promise<void> {
           _pending.delete(id);
           cb(obj);
         }
+        if (obj.type === "PATCH_LIST" && "offset" in obj) continue;
         for (const sub of _firmwareSubscribers) {
           try { sub(obj); }
           catch (error) { console.error("firmware subscriber failed:", error); }
@@ -702,7 +708,20 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
   message: { type: string; id?: string; [k: string]: unknown },
   timeoutMs = 5000,
 ): Promise<T> {
+  if (message.type === "LIST_PATCHES" && message.limit === undefined) {
+    const generation = _connectionGeneration;
+    const result = await collectPatchCatalog(page => _sendAndAwait(page, timeoutMs, undefined, generation), message);
+    if (generation !== _connectionGeneration) throw new Error("error: disconnected");
+    if (result.paginated) publishPatchCatalog(result.message);
+    return result.message as T;
+  }
   return _sendAndAwait<T>(message, timeoutMs);
+}
+
+function publishPatchCatalog(message: FirmwareMessage): void {
+  for (const sub of _firmwareSubscribers) {
+    try { sub(message); } catch (error) { console.error("firmware subscriber failed:", error); }
+  }
 }
 
 class FirmwareCommandResponseError extends Error {
@@ -866,15 +885,16 @@ async function refreshPatchList(refresh: PatchListRefresh): Promise<void> {
       const revision = _patchListRevision;
       let retryDelay = 0;
       try {
-        const response = await _sendAndAwait({ type: "LIST_PATCHES" }, Math.max(1, Math.min(10000, deadline - Date.now())), error => {
+        const catalog = await collectPatchCatalog(page => _sendAndAwait(page, Math.max(1, Math.min(10000, deadline - Date.now())), error => {
           // The hub rejected this read before forwarding it to Captain. Retry
           // only this explicit admission failure, never a save or lost reply.
           if (error.error !== "background_busy" || (error.of && error.of !== "LIST_PATCHES") ||
               generation !== _connectionGeneration || Date.now() + busyDelay >= deadline) return false;
           retryDelay = busyDelay;
           return true;
-        }, generation);
-        if (response.type !== "PATCH_LIST") throw new Error("Unexpected response to LIST_PATCHES");
+        }, generation));
+        if (generation !== _connectionGeneration) throw new Error("error: disconnected");
+        if (catalog.paginated) publishPatchCatalog(catalog.message);
       } catch (error) {
         if (!retryDelay) throw error;
         await new Promise<void>(resolve => setTimeout(resolve, retryDelay));

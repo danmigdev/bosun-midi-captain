@@ -3,7 +3,7 @@ param(
     [string]$SdkPath,
     [switch]$FetchSdk,
     [string]$Distribution = 'Ubuntu',
-    [ValidateRange(786432, 16777216)][uint32]$FlashBytes = 8388608
+    [ValidateRange(4456448, 16777216)][uint32]$FlashBytes = 8388608
 )
 $ErrorActionPreference = 'Stop'
 if ($FlashBytes % 4096 -ne 0) { throw 'FlashBytes must be sector aligned (4096 bytes)' }

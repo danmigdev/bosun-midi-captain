@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { collectPatchCatalog } from "../lib/patch-catalog";
+  import { MAX_BANKS } from "../lib/bank-layout";
   // Minimal shell around StageView for the Pi kiosk: holds the reactive
   // props StageView needs (deviceInfo, manifest, device.json, patches,
   // connected) and keeps them current from the firmware message bus, the
@@ -66,9 +68,8 @@
     patchListRequest = request;
     // Own the response as well as its timeout. An older list may finish after
     // a profile change or a mutation announced by another editor.
-    void sendAndAwait<FirmwareMessage & { profile?: string }>(
-      { type: "LIST_PATCHES" }, PATCH_LIST_RETRY_MS,
-    ).then((msg) => {
+    void collectPatchCatalog(page => sendAndAwait<FirmwareMessage>(page, PATCH_LIST_RETRY_MS)).then(({ message }) => {
+      const msg = message as FirmwareMessage & { profile?: string };
       if (!connected || patchListRequest !== request) return;
       patchListRequest = null;
       if (request.generation !== patchListGeneration) {
@@ -85,7 +86,7 @@
       }
       if (msg.type !== "PATCH_LIST" || !Array.isArray(msg.patches)
           || !msg.patches.every((patch) => isRecord(patch)
-            && Number.isInteger(patch.bank) && Number(patch.bank) >= 1 && Number(patch.bank) <= 99
+            && Number.isInteger(patch.bank) && Number(patch.bank) >= 1 && Number(patch.bank) <= MAX_BANKS
             && Number.isInteger(patch.slot) && Number(patch.slot) >= 1 && Number(patch.slot) <= 10)) {
         retryPatchList(request.started);
         return;

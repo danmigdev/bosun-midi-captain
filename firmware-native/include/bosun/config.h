@@ -10,8 +10,10 @@
 #define BOSUN_PROFILE_ID_BYTES 33u
 #define BOSUN_DIRTY_PATCHES 128u
 #define BOSUN_PROFILE_MAX 32u
-#define BOSUN_PATCH_CATALOG_MAX 256u
+#define BOSUN_PATCH_CATALOG_MAX 625u
 #define BOSUN_BINDING_BYTES 8192u
+#define BOSUN_BANK_MAX 125u
+#define BOSUN_SLOT_MAX 10u
 typedef struct { uint16_t bank, slot; } bosun_patch_key_t;
 typedef struct { uint16_t bank, slot; uint32_t modified_ms; } bosun_dirty_patch_t;
 typedef struct {
@@ -21,13 +23,14 @@ typedef struct {
     bosun_json_doc_t device_doc, patch_doc;
     bosun_dirty_patch_t dirty[BOSUN_DIRTY_PATCHES];
     uint16_t bank, slot, dirty_count;
-    uint32_t revision, patch_revision;
+    uint32_t revision, patch_revision, catalog_revision;
     bool has_patch;
     bosun_store_result_t last_error;
 } bosun_config_t;
 
 extern const char bosun_default_device[];
 bool bosun_config_profile_id(const char *id);
+bool bosun_config_kind_supported(const char *kind);
 bool bosun_config_coordinates(unsigned bank, unsigned slot);
 bool bosun_config_path(char *out, size_t capacity, const char *profile, const char *file);
 bool bosun_config_patch_path(char *out, size_t capacity, const char *profile,
@@ -62,6 +65,8 @@ bosun_store_result_t bosun_config_save(bosun_config_t *config, unsigned bank, un
 bosun_store_result_t bosun_config_profiles(const bosun_config_t *config, bosun_json_writer_t *writer);
 bosun_store_result_t bosun_config_patches(const bosun_config_t *config, const char *profile,
                                          bosun_json_writer_t *writer);
+bosun_store_result_t bosun_config_patches_page(const bosun_config_t *config, const char *profile,
+    bosun_json_writer_t *writer, size_t offset, size_t limit, size_t *total);
 bool bosun_config_dirty(const bosun_config_t *config, unsigned bank, unsigned slot);
 /* Sorted active-profile persisted+draft coordinates, no patch JSON parsing.
  * LIMIT resets count to zero. A caller may choose a smaller bounded capacity. */

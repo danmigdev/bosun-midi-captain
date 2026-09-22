@@ -14,7 +14,7 @@
     type PatchSummary,
   } from "../lib/protocol";
   import { DEFAULT_LAYOUT } from "../lib/pedal-layout";
-  import { getBankCount } from "../lib/bank-layout";
+  import { getBankCount, MAX_BANKS } from "../lib/bank-layout";
   import { ledColorFor } from "../lib/led-color";
   import {
     readSavedStageTheme, saveStageTheme, stageThemeToCssVars, type StageTheme,
@@ -330,7 +330,7 @@
       if (!current()) return;
       if (info.type !== "DEVICE_INFO" || inventory.type !== "PATCH_LIST"
           || !info.current || !Array.isArray(inventory.patches)
-          || !Number.isInteger(info.current.bank) || info.current.bank < 1 || info.current.bank > 99
+          || !Number.isInteger(info.current.bank) || info.current.bank < 1 || info.current.bank > MAX_BANKS
           || !Number.isInteger(info.current.slot) || info.current.slot < 1 || info.current.slot > 10
           || (info.profile && inventory.profile && info.profile !== inventory.profile)
           || (info.profile && bankPickerProfile && info.profile !== bankPickerProfile)) {
@@ -386,7 +386,7 @@
     ? { bank: preselectedBank.bank, slot: deviceInfo.slot } : deviceInfo);
 
   function bankTarget(delta: -1 | 1, current: { bank: number; slot: number } | null = navigationPosition, inventory = bankInventory, limit = bankCount) {
-    if (!current || !Number.isInteger(current.bank) || current.bank < 1 || current.bank > 99
+    if (!current || !Number.isInteger(current.bank) || current.bank < 1 || current.bank > MAX_BANKS
         || !Number.isInteger(current.slot) || current.slot < 1 || current.slot > 10) return null;
     const valid = validPatches(inventory, limit);
     const banks = [...new Set(valid.map(p => p.bank))].sort((a, b) => a - b);

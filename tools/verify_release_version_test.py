@@ -60,7 +60,15 @@ class ReleaseVersionTests(unittest.TestCase):
     def test_aligned_sources_tags_and_actual_uf2_identity(self):
         for tag in (None, "v1.2.3", "refs/tags/v1.2.3"):
             self.assertEqual(gate.verify(self.root, tag=tag, package=self.package()),
-                             {"release": "1.2.3", "firmware_version": "1.2.3-native"})
+                             {"release": "1.2.3", "firmware_version": "1.2.3-native", "prerelease": "false"})
+
+    def test_experimental_channel_is_explicit_and_unknown_channels_fail(self):
+        path = self.root / "editor/package.json"
+        path.write_text('{"version":"1.2.3","bosunReleaseChannel":"experimental"}')
+        self.assertEqual(gate.verify(self.root)["prerelease"], "true")
+        path.write_text('{"version":"1.2.3","bosunReleaseChannel":"typo"}')
+        with self.assertRaises(ValueError):
+            gate.verify(self.root)
 
     def test_each_version_touchpoint_must_match(self):
         for relative, original in self.sources.items():
@@ -77,7 +85,7 @@ class ReleaseVersionTests(unittest.TestCase):
             (self.root / relative).write_text(original.replace("1.2.3", "1.2.4"), encoding="utf-8")
         package = self.package(release="1.2.4", firmware_version="1.2.4-native", embedded=b"1.2.4-native\0")
         self.assertEqual(gate.verify(self.root, tag="v1.2.4", package=package),
-                         {"release": "1.2.4", "firmware_version": "1.2.4-native"})
+                         {"release": "1.2.4", "firmware_version": "1.2.4-native", "prerelease": "false"})
         self.assertEqual(self.archived_cp.read_bytes(), archived)
         # Retirement must not weaken validation of the firmware actually shipped.
         old_package = self.package()

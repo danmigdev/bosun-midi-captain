@@ -76,7 +76,7 @@ async def exercise(emulator):
                 tcp_request("1", "GET_GLOBAL", "GLOBAL"),
                 ws_request("1", "GET_MANIFEST", "MANIFEST"))
             assert global_reply["device"]["device_name"] == "Offline Captain"
-            assert set(manifest["plugins"]) == {"generic_midi", "kemper_player"}
+            assert set(manifest["plugins"]) == {"generic_midi", "kemper_player", "kemper_head"}
             device = await ws_request("bootstrap-device", "GET_DEVICE_INFO", "DEVICE_INFO")
             patches = await ws_request("bootstrap-list", "LIST_PATCHES", "PATCH_LIST")
             context = await ws_request("bootstrap-context", "GET_CONTEXT", "CONTEXT")
@@ -138,6 +138,17 @@ async def exercise(emulator):
             assert stats["queue_overflows"] == 0, stats
             assert stats["midi_tx_count"] == 1 and stats["midi_tx_failed"] == 0, stats
 
+            # Three-digit banks cross every layer: editor write, hub cache,
+            # native storage, Stage selection, and a saved-profile read.
+            last = {"name": "Performance 125", "bindings": []}
+            await tcp_request("last-put", "PUT_PATCH", "ACK", bank=125, slot=5, patch=last)
+            await tcp_request("last-save", "SAVE_NOW", "SAVED", bank=125, slot=5)
+            await ws_request("last-switch", "SWITCH_PATCH", "ACK", bank=125, slot=5)
+            current = await ws_request("last-context", "GET_CONTEXT", "CONTEXT")
+            assert current["context"]["bank"] == 125 and current["context"]["slot"] == 5
+            last_saved = await tcp_request("last-read", "GET_PATCH", "PATCH", bank=125, slot=5, profile="test")
+            assert last_saved["patch"] == last
+
             # Losing the editor must leave Stage connected and keep its own
             # request ids working; reconnecting the editor shares that link.
             writer.close()
@@ -168,6 +179,7 @@ def main():
             asyncio.run(exercise(emulator))
             saved = json.loads((root / "config/profiles/test/patches/01/01.json").read_text())
             assert saved["name"] == "UPDATED CLEAN"
+            assert json.loads((root / "config/profiles/test/patches/125/05.json").read_text())["name"] == "Performance 125"
             assert (root / "untouched.txt").read_text() == "original sentinel"
         finally:
             emulator.close()

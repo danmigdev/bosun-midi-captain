@@ -18,7 +18,7 @@ def audit(elf: Path, uf2: Path, flash_bytes: int, nm: str) -> dict:
     for name in required:
         if name not in symbols:
             raise ValueError(f'missing ELF bound: {name}')
-    flash_limit = 0x10000000 + flash_bytes - 512 * 1024
+    flash_limit = 0x10000000 + flash_bytes - 4 * 1024 * 1024
     if not 0x10000000 <= symbols['__flash_binary_start'] < symbols['__flash_binary_end'] <= flash_limit:
         raise ValueError('ELF flash image overlaps reserved storage or lies outside XIP flash')
     stack = symbols['__StackTop'] - symbols['__StackBottom']
@@ -52,7 +52,7 @@ def audit(elf: Path, uf2: Path, flash_bytes: int, nm: str) -> dict:
             'static_ram_bytes': symbols['__end__'] - 0x20000000,
             'bss_bytes': symbols['__bss_end__'] - symbols['__bss_start__'],
             'stack_bytes': stack, 'unused_ram_margin_bytes': margin,
-            'storage_offset': flash_bytes - 512 * 1024, 'storage_bytes': 512 * 1024,
+            'storage_offset': flash_bytes - 4 * 1024 * 1024, 'storage_bytes': 4 * 1024 * 1024,
             'uf2_blocks': count, 'dynamic_allocator_symbols': allocators}
 
 

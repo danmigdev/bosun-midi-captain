@@ -36,8 +36,8 @@ class ImageAudit(unittest.TestCase):
         self.assertEqual(report['stack_bytes'], 16384)
         self.assertEqual(report['flash_image_bytes'], 256)
         self.assertEqual(report['dynamic_allocator_symbols'], [])
-        self.assertEqual(report['storage_offset'], 0x780000)
-        self.assertEqual(report['storage_bytes'], 512 * 1024)
+        self.assertEqual(report['storage_offset'], 0x400000)
+        self.assertEqual(report['storage_bytes'], 4 * 1024 * 1024)
 
     def test_storage_overlap(self):
         struct.pack_into('<I', self.block, 12, 0x10780000)
@@ -70,7 +70,7 @@ class ImageAudit(unittest.TestCase):
             self.audit()
 
     def test_explicit_smaller_flash_geometry_still_checked(self):
-        self.assertEqual(self.audit(2 * 1024 * 1024)['storage_offset'], 0x180000)
+        self.assertEqual(self.audit(5 * 1024 * 1024)['storage_offset'], 0x100000)
         struct.pack_into('<I', self.block, 12, 0x10180000)
         with self.assertRaisesRegex(ValueError, 'reserved storage'):
             self.audit(2 * 1024 * 1024)

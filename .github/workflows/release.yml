@@ -34,6 +34,7 @@ jobs:
     outputs:
       release: ${{ steps.version.outputs.release }}
       firmware_version: ${{ steps.version.outputs.firmware_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -266,7 +267,7 @@ jobs:
           files: dist/release-extras/*
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: ${{ github.event_name == 'push' }}
-          prerelease: false
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
 
       - name: Upload to release
@@ -276,7 +277,7 @@ jobs:
           files: ${{ steps.art.outputs.file }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: ${{ github.event_name == 'push' }}
-          prerelease: false
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -462,7 +463,7 @@ jobs:
           # unsigned throughout (found 2026-08-16 while chasing that bug).
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: ${{ github.event_name == 'push' }}
-          prerelease: false
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -490,4 +491,6 @@ jobs:
           notes="docs/releases/${RELEASE_TAG#v}.md"
           test -s "$notes"
           gh release edit "$RELEASE_TAG" --title "Bosun ${RELEASE_TAG#v}" \
-            --notes-file "$notes" --draft=false --latest
+            --notes-file "$notes" --draft=false \
+            --prerelease=${{ needs.verify.outputs.prerelease }} \
+            --latest=${{ needs.verify.outputs.prerelease != 'true' }}

@@ -16,7 +16,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def verify(root=ROOT, *, tag=None, package=None):
     root = Path(root)
-    release = json.loads((root / "editor/package.json").read_text(encoding="utf-8"))["version"]
+    metadata = json.loads((root / "editor/package.json").read_text(encoding="utf-8"))
+    release = metadata["version"]
+    channel = metadata.get("bosunReleaseChannel", "stable")
+    if channel not in ("stable", "experimental"):
+        raise ValueError("Unknown release channel")
     if not isinstance(release, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", release):
         raise ValueError("Editor release must be a plain X.Y.Z version")
     firmware_version = release + "-native"
@@ -49,7 +53,7 @@ def verify(root=ROOT, *, tag=None, package=None):
         versions = set(re.findall(rb"[0-9]+\.[0-9]+\.[0-9]+-native(?:-[A-Za-z0-9.-]+)?\x00", binary))
         if versions != {firmware_version.encode("ascii") + b"\0"}:
             raise ValueError(f"Native UF2 must embed only firmware version {firmware_version}, found {versions}")
-    return {"release": release, "firmware_version": firmware_version}
+    return {"release": release, "firmware_version": firmware_version, "prerelease": str(channel == "experimental").lower()}
 
 
 def main():

@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
 
 _Static_assert(sizeof(bosun_runtime_t) <= 8192, "runtime exceeds its 8 KiB storage budget");
 
@@ -15,7 +16,7 @@ static const char *const supported[] = {
     "captain_preview_cancel","captain_setlist_step","kemper_rig","kemper_step_rig",
     "kemper_effect_toggle","kemper_fixed_toggle","kemper_tuner","kemper_tap_tempo",
     "kemper_set_tempo","kemper_morph","kemper_morph_trigger","kemper_wah","kemper_volume",
-    "kemper_looper","kemper_rotary","kemper_query_state"
+    "kemper_looper","kemper_rotary","kemper_query_state","kemper_browse_rig"
 };
 
 static bool due(uint32_t now, uint32_t deadline) { return (int32_t)(now - deadline) >= 0; }
@@ -57,7 +58,13 @@ static bool decode(bosun_runtime_t *rt, const bosun_json_doc_t *d, int token,
     if (!is_type(d, token, BOSUN_JSON_OBJECT) ||
         !bosun_json_string(d, field(d, token, "type"), type, sizeof(type))) goto invalid;
     if (!bosun_runtime_supported(type)) { ++rt->unsupported_messages; return false; }
-    if (!strncmp(type, "kemper_", 7) && !rt->kemper_enabled) { ++rt->unsupported_messages; return false; }
+    if (!strncmp(type, "kemper_", 7) && (!rt->kemper_enabled ||
+        !bosun_kemper_message_supported(rt->kemper.model, type) ||
+        (!strcmp(type, "kemper_fixed_toggle") && !rt->kemper.fixed_effects) ||
+        (!strcmp(type, "kemper_rig") && rt->kemper.browse_mode) ||
+        (!strcmp(type, "kemper_browse_rig") && !rt->kemper.browse_mode))) {
+        ++rt->unsupported_messages; return false;
+    }
     if (!number(d, token, "channel", 1, 1, 16, &channel)) goto invalid;
     c->channel = (uint8_t)channel;
     if (!strcmp(type, "cc") || !strcmp(type, "cc_toggle")) {
@@ -84,9 +91,13 @@ static bool decode(bosun_runtime_t *rt, const bosun_json_doc_t *d, int token,
             !number(d, token, "program", 0, 0, 127, &value)) goto invalid;
     } else if (!strcmp(type, "captain_patch") || !strcmp(type, "kemper_rig")) {
         c->type = !strcmp(type, "captain_patch") ? BOSUN_COMMAND_PATCH : BOSUN_COMMAND_KEMPER_RIG;
-        if (!number(d, token, "bank", 1, 1, c->type == BOSUN_COMMAND_PATCH ? 99 : 25, &a) ||
+        if (!number(d, token, "bank", 1, 1, c->type == BOSUN_COMMAND_PATCH ? BOSUN_BANK_MAX : rt->kemper.model->max_banks, &a) ||
             !number(d, token, c->type == BOSUN_COMMAND_PATCH ? "slot" : "rig", 1,
                     1, c->type == BOSUN_COMMAND_PATCH ? 10 : 5, &b)) goto invalid;
+    } else if (!strcmp(type, "kemper_browse_rig")) {
+        c->type = BOSUN_COMMAND_KEMPER_RIG;
+        c->flags = 1;
+        if (!number(d, token, "program", 0, 0, 127, &a)) goto invalid;
     } else if (!strcmp(type, "captain_bank_step") || !strcmp(type, "captain_preview_step") ||
                !strcmp(type, "captain_setlist_step")) {
         c->type = !strcmp(type, "captain_bank_step") ? BOSUN_COMMAND_BANK_STEP :
@@ -113,10 +124,12 @@ static bool decode(bosun_runtime_t *rt, const bosun_json_doc_t *d, int token,
             value = on_off(d, token, "value", 1);
             if (a < 0 || value < 0) goto invalid;
         } else if (!strcmp(type, "kemper_looper")) {
-            static const char *const actions[] = {"rec_play","stop_erase","trigger","reverse","half_speed"};
+            static const char *const actions[] = {"rec_play","stop_erase","trigger","reverse","half_speed","cancel_overdub","erase"};
+            static const char *const states[] = {"release","press","tap"};
             c->index = BOSUN_KEMPER_LOOPER;
-            a = enumeration(d, token, "action", actions, 5, 0);
-            if (a < 0) goto invalid;
+            a = enumeration(d, token, "action", actions, 7, 0);
+            value = enumeration(d, token, "state", states, 3, 2);
+            if (a < 0 || value < 0) goto invalid;
         } else if (!strcmp(type, "kemper_step_rig")) {
             static const char *const directions[] = {"prev","next"};
             c->index = BOSUN_KEMPER_STEP;
@@ -292,13 +305,6 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
     if (!rt || !rt->config) return;
     if (rt->preview_active && rt->preview_bank > bosun_config_bank_count(rt->config))
         rt->preview_active = false;
-    if (rt->initialized && strcmp(rt->profile, rt->config->profile)) {
-        /* A profile switch ends macros and gestures belonging to the old
-         * target, including delayed commands and pending double taps. */
-        rt->queue_head = rt->queue_count = 0;
-        rt->waiting = rt->preview_active = false;
-        for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) bosun_switch_reset(&rt->switches[i]);
-    }
     const bosun_json_doc_t *device = &rt->config->device_doc, *patch_doc = &rt->config->patch_doc;
     int nav = field(device, field(device, 0, "preset_navigation"), "switches");
     int global_long = field(device, 0, "long_press_actions");
@@ -336,14 +342,30 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
         bool global_hold = bosun_config_bool(device, 0, "auto_momentary_on_hold", true);
         config->auto_momentary_on_hold = bosun_config_bool(patch_doc, binding->patch_token, "auto_momentary", global_hold);
     }
-    bool enabled = is_type(device, field(device, 0, "kemper"), BOSUN_JSON_OBJECT);
+    const bosun_kemper_model *model = bosun_kemper_model_for_kind(rt->config->kind);
+    bool enabled = model || is_type(device, field(device, 0, "kemper"), BOSUN_JSON_OBJECT);
+    if (!model) model = bosun_kemper_model_for_kind("kemper_player");
+    int kemper_config = field(device, 0, "kemper");
+    bool browse_mode = model->profiler && bosun_json_equal(device, field(device, kemper_config, "mode"), "browse");
+    bool fixed_effects = model->fixed_effects || (model->profiler &&
+        bosun_json_equal(device, field(device, kemper_config, "generation"), "MK2"));
     uint8_t channel = (uint8_t)bosun_config_int(device, 0, "midi_channel", 1);
     if (channel < 1 || channel > 16) channel = 1;
-    if (!rt->initialized || enabled != rt->kemper_enabled || strcmp(rt->profile, rt->config->profile)) {
-        bosun_kemper_init(&rt->kemper, channel, bound, transmit, rt);
+    if (!rt->initialized || enabled != rt->kemper_enabled || rt->kemper.model != model ||
+        strcmp(rt->profile, rt->config->profile) || rt->kemper.browse_mode != browse_mode ||
+        rt->kemper.fixed_effects != fixed_effects) {
+        /* A profile/capability change ends the old target's macros and
+         * gestures, including delayed commands and pending double taps. */
+        rt->queue_head = rt->queue_count = 0;
+        rt->waiting = rt->preview_active = false;
+        for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) bosun_switch_reset(&rt->switches[i]);
+        bosun_kemper_init_model(&rt->kemper, model, channel, bound, transmit, rt);
+        rt->kemper.browse_mode = browse_mode;
+        rt->kemper.fixed_effects = fixed_effects;
+        rt->kemper.wah_fixed = fixed_effects ? -1 : 0;
         memcpy(rt->profile, rt->config->profile, sizeof(rt->profile));
-        if (rt->config->bank >= 1 && rt->config->bank <= 25 && rt->config->slot >= 1 && rt->config->slot <= 5) {
-            rt->kemper.state.rig = (uint8_t)((rt->config->bank - 1) * 5 + rt->config->slot);
+        if (!browse_mode && rt->config->bank >= 1 && rt->config->bank <= model->max_banks && rt->config->slot >= 1 && rt->config->slot <= 5) {
+            rt->kemper.state.rig = (uint16_t)((rt->config->bank - 1) * 5 + rt->config->slot);
             rt->kemper.state.bank = (uint8_t)rt->config->bank;
             rt->kemper.state.rig_in_bank = (uint8_t)rt->config->slot;
         }
@@ -422,8 +444,8 @@ bosun_store_result_t bosun_runtime_switch_patch(bosun_runtime_t *rt,
     rt->preview_active = false;
     for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) bosun_switch_reset(&rt->switches[i]);
     bosun_runtime_config_changed(rt);
-    if (rt->kemper_enabled && fire_actions && bank <= 25 && slot <= 5)
-        (void)bosun_kemper_begin_rig(&rt->kemper, (uint8_t)((bank - 1) * 5 + slot), rt->now_ms);
+    if (rt->kemper_enabled && !rt->kemper.browse_mode && fire_actions && bank <= rt->kemper.model->max_banks && slot <= 5)
+        (void)bosun_kemper_begin_rig(&rt->kemper, (uint16_t)((bank - 1) * 5 + slot), rt->now_ms);
     if (!fire_actions) mirror_effects(rt, 0xff);
     if (!enqueue(rt, macros, check.count, true)) return storage_result(rt, BOSUN_STORE_LIMIT);
     return storage_result(rt, BOSUN_STORE_OK);
@@ -529,6 +551,7 @@ static bool execute(bosun_runtime_t *rt, const bosun_runtime_command_t *c) {
     case BOSUN_COMMAND_KEMPER_RIG:
         if (!rt->kemper_enabled) { ++rt->unsupported_messages; return false; }
         rt->waiting = true; rt->wait_until_ms = rt->now_ms + 5;
+        if (c->flags) return bosun_kemper_select_program_channel(&rt->kemper, c->channel, (uint8_t)c->first, rt->now_ms);
         return bosun_kemper_select_rig_channel(&rt->kemper, c->channel, (uint8_t)c->first, (uint8_t)c->second, rt->now_ms);
     case BOSUN_COMMAND_KEMPER:
         if (!rt->kemper_enabled) { ++rt->unsupported_messages; return false; }
@@ -719,8 +742,21 @@ static void sample_expression(bosun_runtime_t *rt, unsigned index, uint16_t raw)
 }
 
 static void follow_kemper_change(bosun_runtime_t *rt, uint32_t previous) {
-    if (previous != rt->kemper.state.external_rig_changes)
+    if (previous == rt->kemper.state.external_rig_changes) return;
+    if (!rt->kemper.browse_mode)
         (void)bosun_runtime_switch_patch(rt, rt->kemper.state.bank, rt->kemper.state.rig_in_bank, false);
+    else if (rt->kemper.rig_identity_known && rt->kemper.state.rig >= 1 && rt->kemper.state.rig <= 128) {
+        const bosun_json_doc_t *device = &rt->config->device_doc;
+        int kemper = field(device, 0, "kemper");
+        int map = field(device, kemper, "browse_program_map");
+        char program[4];
+        snprintf(program, sizeof program, "%u", rt->kemper.state.rig - 1u);
+        int destination = field(device, map, program);
+        int bank = bosun_config_int(device, destination, "bank", 0);
+        int slot = bosun_config_int(device, destination, "slot", 0);
+        if (bosun_config_coordinates((unsigned)bank, (unsigned)slot))
+            (void)bosun_runtime_switch_patch(rt, (uint8_t)bank, (uint8_t)slot, false);
+    }
 }
 
 void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_mask,
@@ -838,7 +874,9 @@ bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
         !string_field(w, "preview", rt->preview_active ? "on" : "") ||
         !string_field(w, "expression_mode", rt->kemper_enabled ? bosun_kemper_expression_label(k->expression_mode) : "")) return false;
     if (rt->kemper_enabled) {
-        if (!integer_field(w, "kemper_generation", rt->kemper.generation) ||
+        if (!string_field(w, "kemper_mode", rt->kemper.browse_mode ? "browse" : "performance") ||
+            !integer_field(w, "kemper_program", rt->kemper.browse_mode && rt->kemper.rig_identity_known ? (int)k->rig - 1 : -1) ||
+            !integer_field(w, "kemper_generation", rt->kemper.generation) ||
             !integer_field(w, "kemper_morph_revision", k->morph_revision) ||
             !string_field(w, "kemper_morph_source", k->morph_value >= 0 ? "commanded" : "unknown") ||
             !integer_field(w, "kemper_morph_value", k->morph_value) ||
@@ -846,8 +884,8 @@ bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
                 !bosun_kemper_transition_active(&rt->kemper) && !rt->preview_active ? "on" : "off")) return false;
         if ((rt->preview_active || k->rig_name_fresh) &&
             !string_field(w, "kemper_rig_name", rt->preview_active ? rt->preview_name : k->rig_name)) return false;
-        if (!integer_field(w, "kemper_bank", rt->preview_active ? rt->preview_bank : k->bank) ||
-            !integer_field(w, "kemper_rig_in_bank", rt->preview_active ? rt->preview_slot : k->rig_in_bank) ||
+        if (!integer_field(w, "kemper_bank", rt->preview_active ? rt->preview_bank : rt->kemper.browse_mode ? rt->config->bank : k->bank) ||
+            !integer_field(w, "kemper_rig_in_bank", rt->preview_active ? rt->preview_slot : rt->kemper.browse_mode ? rt->config->slot : k->rig_in_bank) ||
             !integer_field(w, "kemper_rig", rt->preview_active ? (rt->preview_bank - 1) * 5 + rt->preview_slot : k->rig) ||
             !string_field(w, "kemper_connected", k->connected ? "on" : "off") ||
             !string_field(w, "tuner", k->tuner_active ? "on" : "off") || !string_field(w, "kemper_tuner", k->tuner_active ? "on" : "off") ||

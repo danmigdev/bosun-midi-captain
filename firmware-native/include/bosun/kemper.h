@@ -22,6 +22,18 @@ typedef enum {
 } bosun_kemper_command_type;
 
 typedef struct {
+    const char *kind;
+    uint8_t product_id, max_banks;
+    bool fixed_effects, profiler;
+    const char *const *unsupported_messages;
+} bosun_kemper_model;
+
+/* Model differences are generated from plugins/kemper.json, shared with the
+ * manifest. Unknown profile kinds return NULL; legacy init defaults to Player. */
+const bosun_kemper_model *bosun_kemper_model_for_kind(const char *kind);
+bool bosun_kemper_message_supported(const bosun_kemper_model *model, const char *type);
+
+typedef struct {
     char rig_name[BOSUN_KEMPER_NAME_CAPACITY];
     char tuner_note[3];
     uint32_t revision, external_rig_changes;
@@ -29,7 +41,8 @@ typedef struct {
     /* Last successfully sent CC11, never a measurement of the Morph ramp. */
     int16_t morph_value;
     uint32_t morph_revision;
-    uint8_t rig, bank, rig_in_bank, effect_known;
+    uint16_t rig;
+    uint8_t bank, rig_in_bank, effect_known;
     bool effects[BOSUN_KEMPER_BLOCKS];
     bool connected, tuner_active, rig_name_fresh;
     bosun_expression_mode expression_mode;
@@ -37,7 +50,7 @@ typedef struct {
 
 typedef struct {
     uint32_t generation, expires_ms;
-    uint8_t rig;
+    uint16_t rig;
     bool valid;
 } bosun_kemper_pc_token;
 
@@ -46,6 +59,8 @@ typedef struct {
  * TX callback must copy/consume synchronously and must not reenter this object. */
 typedef struct {
     bosun_kemper_state state;
+    const bosun_kemper_model *model;
+    bool fixed_effects, browse_mode;
     bosun_midi_send_fn send;
     void *send_context;
     uint32_t generation, tx_failures;
@@ -63,41 +78,55 @@ typedef struct {
     bosun_kemper_pc_token local_pc, orphan_pc[BOSUN_KEMPER_PC_ORPHANS];
     uint8_t channel, bound_blocks, cache_known, cache_on;
     uint8_t reconcile_pending, reconcile_attempt, reconcile_queried;
-    uint8_t orphan_blocks, orphan_pc_count, last_name_rig;
+    uint8_t orphan_blocks, orphan_pc_count;
+    uint16_t last_name_rig;
     uint8_t guard_budget[BOSUN_KEMPER_BLOCKS], guard_on;
     uint8_t wah_attempts, wah_types, wah_slots, wah_states, wah_on;
-    uint8_t wah_target, wah_cursor, wah_queried_slots, scheduled_pc_rig;
+    uint8_t wah_target, wah_cursor, wah_queried_slots;
+    uint16_t scheduled_pc_rig;
     uint8_t scheduled_pc_channel;
-    uint8_t deferred_bank_pc;
+    uint16_t deferred_bank_pc;
+    uint8_t bank_lsb;
     int8_t wah_fixed;
     bool init_sent, settle_active, wah_pending, wah_query_valid, scheduled_pc;
     bool wah_retire_active;
     bool rig_identity_known, bootstrap_name_pending;
     bool name_query_active, name_query_retire_active, pending_name_requested;
     bool bank_snapshot_active, bank_snapshot_seen, bank_snapshot_fallback;
+    uint32_t identity_deadline_ms;
+    uint8_t identity[8]; /* Universal Identity family, member, revision (raw). */
+    bool identity_pending, identity_known;
 } bosun_kemper;
 
 void bosun_kemper_init(bosun_kemper *kemper, uint8_t channel,
     uint8_t bound_blocks, bosun_midi_send_fn send, void *context);
+void bosun_kemper_init_model(bosun_kemper *kemper, const bosun_kemper_model *model,
+    uint8_t channel, uint8_t bound_blocks, bosun_midi_send_fn send, void *context);
 void bosun_kemper_set_bound_blocks(bosun_kemper *kemper, uint8_t mask);
 void bosun_kemper_tick(bosun_kemper *kemper, uint32_t now_ms);
 void bosun_kemper_handle(bosun_kemper *kemper, uint8_t channel, uint8_t status,
     const uint8_t *data, size_t length, uint32_t now_ms);
 /* Local selection emits CC0/CC32 now; PC follows from tick after at least 5 ms.
- * One-based bank 1..25, slot 1..5. No sleep, no hardware dependency. */
+ * One-based bank 1..model.max_banks, slot 1..5. Head uses Performance Mode.
+ * No sleep, no hardware dependency. */
 bool bosun_kemper_select_rig(bosun_kemper *kemper, uint8_t bank, uint8_t slot,
     uint32_t now_ms);
 /* Per-message channel overrides do not change the configured inbound channel.
  * The deferred PC retains this override through later configuration changes. */
 bool bosun_kemper_select_rig_channel(bosun_kemper *kemper, uint8_t channel,
     uint8_t bank, uint8_t slot, uint32_t now_ms);
+/* Browse uses the PROFILER's assigned 0..127 MIDI programs, without Bank Select. */
+bool bosun_kemper_select_program_channel(bosun_kemper *kemper, uint8_t channel,
+    uint8_t program, uint32_t now_ms);
 /* Establish a local patch generation without MIDI, e.g. a non-rig patch edit. */
-bool bosun_kemper_begin_rig(bosun_kemper *kemper, uint8_t flat_rig,
+bool bosun_kemper_begin_rig(bosun_kemper *kemper, uint16_t flat_rig,
     uint32_t now_ms);
 bool bosun_kemper_request_rig_name(bosun_kemper *kemper, uint32_t now_ms);
+bool bosun_kemper_request_identity(bosun_kemper *kemper, uint32_t now_ms);
 bool bosun_kemper_query_blocks(bosun_kemper *kemper, uint8_t mask);
 /* EFFECT index=block enum; FIXED index=Compressor/Gate/Booster/Wah/Transpose
- * (0..4); LOOP index=rec-play/stop-erase/trigger/reverse/half-speed (0..4).
+ * (0..4); LOOP index=rec-play/stop-erase/trigger/reverse/half-speed/cancel/erase
+ * (0..6), value=0 release, 1 press, 2 tap (press followed by release).
  * Boolean commands use value!=0; STEP value>=0 next, value<0 previous. */
 bool bosun_kemper_command(bosun_kemper *kemper,
     bosun_kemper_command_type command, uint8_t index, int value);

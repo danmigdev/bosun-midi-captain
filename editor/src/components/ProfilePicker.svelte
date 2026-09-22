@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { createConfiguredProfile } from '../lib/create-profile';
+  import { readKemperSetup, setupProfileKind } from '../lib/setup-guide';
+  import ProfilerSetupFields from './ProfilerSetupFields.svelte';
+  let kemperSetup = $state(readKemperSetup());
   import { onMount } from "svelte";
   import { cmd, autoConnect, disconnect, isConnected, type ProfileInfo, type Manifest } from "../lib/protocol";
   import ColorField from "./ColorField.svelte";
@@ -129,7 +133,7 @@
     creating = true;
     newId = "";
     newName = "";
-    newKind = "ampero_ii_stage";
+    newKind = kinds.find(item => item.id === setupProfileKind(kemperSetup))?.id ?? kinds[0]?.id ?? "other";
     newColor = "#6fd99b";
   }
 
@@ -137,7 +141,7 @@
     if (!newId || !newName) { error = "id and name are required"; return; }
     busy = true; error = "";
     try {
-      await cmd.createProfile(newId, newName, newKind, newColor);
+      await createConfiguredProfile(newId, newName, newKind, newColor, kemperSetup);
       creating = false;
       await refresh();
     } catch (e) { error = String(e); }
@@ -222,6 +226,7 @@
             {#each kinds as k}<option value={k.id}>{k.label}</option>{/each}
           </select>
         </label>
+      {#if newKind === "kemper_head"}<ProfilerSetupFields bind:setup={kemperSetup} />{/if}
         <label class="colorrow">Colour
           <ColorField bind:value={newColor} />
         </label>
