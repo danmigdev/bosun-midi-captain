@@ -97,7 +97,7 @@ void bosun_board_watchdog_feed(void);
 void bosun_board_reboot(bool bootloader); /* ROM BOOTSEL when true. */
 
 /* Absolute offsets from physical flash start, NOT XIP pointers. Every access
- * is restricted to the reserved final 512 KiB. program/erase reject bad
+ * is restricted to the reserved final 4 MiB. program/erase reject bad
  * alignment and never format implicitly. Image linker excludes this area.
  * Flash erase/program briefly suspend IRQs on core 0, one sector/page at a
  * time, servicing USB before/after. Core 1 must remain unused. */

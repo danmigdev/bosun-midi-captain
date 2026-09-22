@@ -1,4 +1,6 @@
 <script lang="ts">
+  import BrowseProgramMap from "./BrowseProgramMap.svelte";
+  import KemperIdentity from "./KemperIdentity.svelte";
   import { untrack } from "svelte";
   import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
@@ -427,6 +429,10 @@
       {#if visibleFields.length > 0}
       <section class="block">
         <h3>{cfg.label}</h3>
+        {#if cfg.key === "kemper"}<KemperIdentity {connected} />{/if}
+        {#if activeKind === "kemper_head" && cfg.key === "kemper" && readField(cfg.key, "mode", "performance") === "browse"}
+          <BrowseProgramMap value={readField(cfg.key, "browse_program_map", {})} onChange={value => writeField(cfg.key, "browse_program_map", value)} />
+        {/if}
         {#if cfg.hint}<p class="hint">{cfg.hint}</p>{/if}
         <div class="grid">
           {#each visibleFields as [name, field] (name)}

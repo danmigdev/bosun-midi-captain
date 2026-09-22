@@ -1,0 +1,19 @@
+{
+  "kemper_player": {
+    "product_id": 2,
+    "fixed_effects": true
+  },
+  "kemper_head": {
+    "extends": "kemper_player",
+    "label": "Kemper PROFILER — Head / Rack / Stage (experimental)",
+    "profiler": true,
+    "product_id": 0,
+    "max_banks": 125,
+    "fixed_effects": false,
+    "hint": "Experimental: select your hardware generation and match the mode set on the PROFILER. MK2 Fixed FX requires compatible Kemper OS. Hardware validation is pending.",
+    "config_fields": {
+      "generation": {"type": "enum", "values": ["MK1", "MK2"], "default": "MK1", "label": "Hardware generation"},
+      "mode": {"type": "enum", "values": ["performance", "browse"], "default": "performance", "label": "PROFILER operating mode"}
+    }
+  }
+}

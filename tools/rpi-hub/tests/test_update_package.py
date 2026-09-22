@@ -383,7 +383,7 @@ class StorageBuilderTests(unittest.TestCase):
         self.assertEqual(args[3], "--output")
         self.assertNotIn("shell", kwargs)
         candidate = Path(args[4])
-        candidate.write_bytes(b"littlefs" + b"\xff" * (STORAGE_BYTES - 8))
+        candidate.write_bytes(b"\xff" * (STORAGE_BYTES - 512 * 1024) + b"littlefs" + b"\xff" * (512 * 1024 - 8))
         report = {"verified": True, "storage_bytes": STORAGE_BYTES, "block_bytes": 4096}
         return subprocess.CompletedProcess(args, 0, json.dumps(report), "")
 

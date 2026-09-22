@@ -16,10 +16,10 @@ function(bosun_configure_rp2040_target target)
     # Keep the physical size macro intact. Only the linker FLASH region is
     # shortened, so board_storage_offset() still addresses the real tail.
     if(NOT PICO_FLASH_SIZE_BYTES MATCHES "^[0-9]+$" OR
-       PICO_FLASH_SIZE_BYTES LESS 786432 OR PICO_FLASH_SIZE_BYTES GREATER 16777216)
-        message(FATAL_ERROR "PICO_FLASH_SIZE_BYTES must be integer bytes in [786432,16777216]")
+       PICO_FLASH_SIZE_BYTES LESS 4456448 OR PICO_FLASH_SIZE_BYTES GREATER 16777216)
+        message(FATAL_ERROR "PICO_FLASH_SIZE_BYTES must be integer bytes in [4456448,16777216]")
     endif()
-    math(EXPR BOSUN_PROGRAM_FLASH_BYTES "${PICO_FLASH_SIZE_BYTES} - 524288")
+    math(EXPR BOSUN_PROGRAM_FLASH_BYTES "${PICO_FLASH_SIZE_BYTES} - 4194304")
     math(EXPR remainder "${PICO_FLASH_SIZE_BYTES} % 4096")
     if(NOT remainder EQUAL 0)
         message(FATAL_ERROR "PICO_FLASH_SIZE_BYTES must be sector aligned")
@@ -45,7 +45,7 @@ function(bosun_configure_rp2040_target target)
         "LINKER:--defsym,SCRATCH_Y_LENGTH=16384"
         "LINKER:--defsym,HEAP_LIMIT=__end__")
     pico_set_program_name(${target} "Bosun Native MIDI Captain")
-    pico_set_program_version(${target} "0.6.10-native")
+    pico_set_program_version(${target} "0.7.0-native")
     pico_add_extra_outputs(${target})
     if(NOT PICO_NO_PICOTOOL AND NOT PICO_NO_UF2)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)

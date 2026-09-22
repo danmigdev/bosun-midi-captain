@@ -61,6 +61,17 @@ afterEach(async () => {
 });
 
 describe("patch list refresh after save", () => {
+  it("publishes only the complete paginated inventory", async () => {
+    respond = message => reply({ type: "PATCH_LIST", id: message.id, profile: "head",
+      revision: 7, total: 2, offset: message.offset,
+      patches: [{ bank: 125, slot: message.offset + 1 }], next_offset: message.offset === 0 ? 1 : -1 });
+    await cmd.listPatches();
+    expect(commands).toHaveLength(2);
+    const lists = received.filter(message => message.type === "PATCH_LIST");
+    expect(lists).toHaveLength(1);
+    expect(lists[0]).toMatchObject({ patches: [{ bank: 125, slot: 1 }, { bank: 125, slot: 2 }] });
+    expect(lists[0]).not.toHaveProperty("offset");
+  });
   it("waits for the actual list response, with no repeated write or read", async () => {
     let settled = false;
     const refresh = cmd.listPatches().then(() => { settled = true; });

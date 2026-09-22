@@ -104,8 +104,10 @@ static void codecs_and_beacon(void) {
     assert(bosun_kemper_command(&k, BOSUN_KEMPER_EFFECT, BOSUN_KEMPER_DELAY, 1));
     assert(w.packets[8][1] == 27 && w.packets[8][2] == 127);
     assert(bosun_kemper_command(&k, BOSUN_KEMPER_TEMPO, 0, 300));
-    assert(w.packets[9][1] == 92 && w.packets[9][2] == 1);
-    assert(w.packets[10][1] == 93 && w.packets[10][2] == 122);
+    assert(w.packets[9][1] == 99 && w.packets[9][2] == 4);
+    assert(w.packets[10][1] == 98 && w.packets[10][2] == 0);
+    assert(w.packets[11][1] == 6 && w.packets[11][2] == 125);
+    assert(w.packets[12][1] == 38 && w.packets[12][2] == 0);
     assert(!bosun_kemper_command(&k, BOSUN_KEMPER_EFFECT, 8, 1));
     bosun_kemper_tick(&k, 1103);
     size_t before = w.count;
@@ -336,11 +338,12 @@ static void message_channel_overrides(void) {
     assert(w.count == 2 && w.packets[0][0] == 0xb9 && w.packets[1][0] == 0xb9);
     assert(k.channel == 3);
     assert(bosun_kemper_command_channel(&k, 16, BOSUN_KEMPER_LOOPER, 2, 1));
-    assert(w.packets[2][0] == 0xbf && w.packets[2][1] == 91 && w.packets[2][2] == 127);
+    assert(w.packets[2][0] == 0xbf && w.packets[2][1] == 99 && w.packets[2][2] == 125);
+    assert(w.packets[3][0] == 0xbf && w.packets[3][1] == 98 && w.packets[3][2] == 90);
     assert(k.channel == 3);
     k.channel = 4; /* configuration edit before the deferred PC is emitted */
     bosun_kemper_tick(&k, 105);
-    assert(w.packets[3][0] == 0xc9 && w.packets[3][1] == 11);
+    assert(w.packets[6][0] == 0xc9 && w.packets[6][1] == 11);
     assert(k.channel == 4);
     w.fail = true;
     assert(!bosun_kemper_command_channel(&k, 12, BOSUN_KEMPER_FIXED, 3, 1));
@@ -692,7 +695,140 @@ static void delay_reverb_query_and_notification_addresses(void) {
     }
 }
 
+static void corrected_command_packets_and_browse(void) {
+    bosun_kemper k; wire w = {0};
+    bosun_kemper_init_model(&k, bosun_kemper_model_for_kind("kemper_head"), 3, 0, send_packet, &w);
+    for (uint8_t action = 0; action < 7; ++action) {
+        w.count = 0;
+        assert(bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, action, 2));
+        const uint8_t expected[][3] = {{0xb2,99,125}, {0xb2,98,(uint8_t)(88 + action)},
+            {0xb2,6,0}, {0xb2,38,1}, {0xb2,99,125}, {0xb2,98,(uint8_t)(88 + action)},
+            {0xb2,6,0}, {0xb2,38,0}};
+        assert(w.count == 8);
+        for (size_t i = 0; i < 8; ++i) assert(w.lengths[i] == 3 && !memcmp(w.packets[i], expected[i], 3));
+    }
+    w.count = 0;
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, 1, 1));
+    assert(w.count == 4 && w.packets[3][2] == 1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, 1, 0));
+    assert(w.count == 8 && w.packets[7][2] == 0);
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, 7, 2));
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_ROTARY, 0, 1));
+    assert(w.packets[8][1] == 33 && w.packets[8][2] == 1);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_ROTARY, 0, 0));
+    assert(w.packets[9][1] == 33 && w.packets[9][2] == 0);
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_TAP, 0, 0));
+    assert(w.packets[10][1] == 30 && w.packets[10][2] == 0);
+    const unsigned bpms[] = {40, 120, 250};
+    for (unsigned i = 0; i < 3; ++i) {
+        w.count = 0;
+        assert(bosun_kemper_command(&k, BOSUN_KEMPER_TEMPO, 0, (int)bpms[i]));
+        assert(w.count == 4 && w.packets[0][1] == 99 && w.packets[0][2] == 4);
+        assert(w.packets[1][1] == 98 && w.packets[1][2] == 0);
+        assert(w.packets[2][1] == 6 && w.packets[3][1] == 38);
+        assert(w.packets[2][2] * 128u + w.packets[3][2] == bpms[i] * 64u);
+    }
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_FIXED, 3, 1));
+    k.fixed_effects = true; /* MK2 */
+    assert(bosun_kemper_command(&k, BOSUN_KEMPER_FIXED, 3, 1));
+    assert(!bosun_kemper_select_program_channel(&k, 3, 127, 0));
+    k.channel = 1; /* Inbound channel 1, per-message outbound override 3. */
+    k.browse_mode = true;
+    w.count = 0;
+    assert(!bosun_kemper_select_rig(&k, 1, 1, 0));
+    assert(!bosun_kemper_select_program_channel(&k, 3, 128, 0));
+    assert(bosun_kemper_select_program_channel(&k, 3, 127, 0));
+    assert(!w.count); /* Browse must not send Bank Select. */
+    bosun_kemper_tick(&k, 5);
+    assert(w.lengths[0] == 2 && w.packets[0][0] == 0xc2 && w.packets[0][1] == 127);
+    cc(&k, 32, 4, 6); pc(&k, 127, 7);
+    assert(k.state.rig == 128 && k.state.external_rig_changes == 0);
+    pc(&k, 0, 8); assert(k.state.rig == 1 && k.state.external_rig_changes == 1);
+    bosun_kemper_tick(&k, 600);
+    cc(&k, 27, 1, 601); assert(k.state.effects[BOSUN_KEMPER_DELAY]);
+    cc(&k, 27, 0, 602); assert(!k.state.effects[BOSUN_KEMPER_DELAY]);
+    cc(&k, 31, 1, 603); assert(k.state.tuner_active);
+    cc(&k, 31, 0, 604); assert(!k.state.tuner_active);
+}
+
+static void head_model_uses_shared_engine(void) {
+    corrected_command_packets_and_browse();
+    bosun_kemper k; wire w = {0};
+    const bosun_kemper_model *head = bosun_kemper_model_for_kind("kemper_head");
+    const bosun_kemper_model *player = bosun_kemper_model_for_kind("kemper_player");
+    assert(head && player && !bosun_kemper_model_for_kind("unknown"));
+    bosun_kemper_init_model(&k, head, 1, 0, send_packet, &w);
+    bosun_kemper_tick(&k, 0);
+    assert(w.count == 1 && w.packets[0][4] == 0 && w.packets[0][6] == 0x7e);
+    assert(!bosun_kemper_select_rig(&k, 126, 1, 1));
+    assert(bosun_kemper_select_rig(&k, 125, 5, 100));
+    assert(k.state.rig == 625 && k.state.bank == 125 && k.state.rig_in_bank == 5);
+    assert(w.count == 3 && w.packets[2][1] == 32 && w.packets[2][2] == 4);
+    bosun_kemper_tick(&k, 104); assert(w.count == 3);
+    bosun_kemper_tick(&k, 105);
+    assert(w.packets[3][0] == 0xc0 && w.packets[3][1] == 112);
+    cc(&k, 32, 4, 110); pc(&k, 112, 111);
+    assert(k.state.rig == 625 && k.state.external_rig_changes == 0);
+
+    /* All Performance slots, including MIDI-bank boundaries, round-trip
+     * through the same engine. No 8-bit identity or PC truncation. */
+    const uint16_t rigs[] = {1, 128, 129, 256, 257, 512, 513, 625};
+    for (unsigned i = 0; i < sizeof rigs / sizeof *rigs; ++i) {
+        memset(&w, 0, sizeof w);
+        bosun_kemper_init_model(&k, head, 1, 0, send_packet, &w);
+        uint16_t rig = rigs[i];
+        cc(&k, 32, (uint8_t)((rig - 1) / 128), 10);
+        pc(&k, (uint8_t)((rig - 1) % 128), 11);
+        assert(k.state.rig == rig && k.state.bank == (rig - 1) / 5 + 1);
+        assert(k.state.rig_in_bank == (rig - 1) % 5 + 1);
+        bosun_kemper_tick(&k, 600);
+        assert(bosun_kemper_request_rig_name(&k, 601));
+        assert(w.packets[w.count - 1][4] == 0 && w.packets[w.count - 1][6] == 0x43);
+    }
+    /* Slot-based WAH discovery must never poll the Player-only fixed WAH. */
+    sense(&k, 610); name(&k, "HEAD", 620); bosun_kemper_tick(&k, 1120);
+    assert(!queries(&w, 5, 21) && queries(&w, 50, 0));
+    param(&k, 50, 0, 0, 1121); bosun_kemper_tick(&k, 1141);
+    assert(queries(&w, 51, 0));
+    assert(bosun_kemper_query_blocks(&k, 255));
+    for (size_t i = 0; i < w.count; ++i)
+        if (w.packets[i][0] == 0xf0) assert(w.packets[i][4] == 0);
+    assert(!bosun_kemper_command(&k, BOSUN_KEMPER_FIXED, 0, 1));
+
+    /* A fresh Player session retains its original addressing and identity. */
+    bosun_kemper_init(&k, 1, 0, send_packet, &w);
+    assert(k.model == player && !k.bank_lsb && k.wah_fixed == -1);
+    assert(!bosun_kemper_select_rig(&k, 26, 1, 900));
+    assert(bosun_kemper_select_rig(&k, 25, 5, 900));
+    assert(w.packets[w.count - 1][1] == 32 && w.packets[w.count - 1][2] == 0);
+    cc(&k, 32, 4, 901); pc(&k, 127, 902);
+    assert(k.state.rig == 125 && !k.bank_lsb);
+}
+
+static void universal_identity_is_bounded_and_never_changes_model(void) {
+    wire w = {0}; bosun_kemper k;
+    bosun_kemper_init_model(&k, bosun_kemper_model_for_kind("kemper_head"), 1, 0, send_packet, &w);
+    uint8_t reply[] = {0x7e,0,6,2,0,0x20,0x33,1,2,3,4,5,6,7,8};
+    bosun_kemper_handle(&k, 0, 0xf0, reply, sizeof reply, 0);
+    assert(!k.identity_known);
+    assert(bosun_kemper_request_identity(&k, 10));
+    const uint8_t expected[] = {0xf0,0x7e,0x7f,6,1,0xf7};
+    assert(w.lengths[0] == sizeof expected && !memcmp(w.packets[0], expected, sizeof expected));
+    reply[6] = 0x34;
+    bosun_kemper_handle(&k, 0, 0xf0, reply, sizeof reply, 11);
+    assert(!k.identity_known);
+    reply[6] = 0x33;
+    bosun_kemper_handle(&k, 0, 0xf0, reply, sizeof reply, 12);
+    assert(k.identity_known && !memcmp(k.identity, reply + 7, 8));
+    assert(!strcmp(k.model->kind, "kemper_head") && !k.fixed_effects && !k.browse_mode);
+    assert(bosun_kemper_request_identity(&k, UINT32_MAX - 10));
+    bosun_kemper_handle(&k, 0, 0xf0, reply, sizeof reply, 2000);
+    assert(!k.identity_known);
+}
+
 int main(void) {
+    universal_identity_is_bounded_and_never_changes_model();
+    head_model_uses_shared_engine();
     delay_reverb_query_and_notification_addresses();
     morph_commands_are_not_feedback();
     codecs_and_beacon(); tuner_and_defensive_input(); pc_echo_and_rig_names();

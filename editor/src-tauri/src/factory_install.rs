@@ -120,7 +120,7 @@ pub fn read_assets(root: &Path, package: &NativePackage) -> Result<Assets, Strin
         || firmware_package::sha256(&loader) != m.loader_sha256
         || firmware_package::sha256(&storage) != m.storage_sha256
         || storage.len() != FLASH_BYTES - STORAGE_OFFSET
-        || !storage[..8192].windows(8).any(|v| v == b"littlefs")
+        || !storage[firmware_package::STORAGE_HEADER_OFFSET..firmware_package::STORAGE_HEADER_OFFSET + 8192].windows(8).any(|v| v == b"littlefs")
     {
         return Err("Incomplete or mismatched native installer. Download the complete latest Bosun Desktop release.".into());
     }

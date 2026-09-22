@@ -223,7 +223,7 @@ static void begin_event(bosun_protocol_t *p, const char *name) {
 static void bitmap_coordinates(bosun_json_writer_t *w, const uint8_t *bits) {
     field(w, "patches"); bosun_json_puts(w, "[");
     bool comma = false;
-    for (unsigned key = 0; key < 990; ++key) if (bits[key / 8u] & (1u << (key % 8u))) {
+    for (unsigned key = 0; key < BOSUN_BANK_MAX * BOSUN_SLOT_MAX; ++key) if (bits[key / 8u] & (1u << (key % 8u))) {
         if (comma) bosun_json_puts(w, ",");
         bosun_json_puts(w, "{\"bank\":"); bosun_json_write_integer(w, (int32_t)(key / 10u + 1u));
         integer(w, "slot", (int32_t)(key % 10u + 1u)); bosun_json_puts(w, "}"); comma = true;
@@ -416,7 +416,20 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         if (r == BOSUN_STORE_OK && !*profile) p->ui_pending |= UI_GLOBAL;
     } else if (!strcmp(p->type, "LIST_PATCHES")) {
         begin(p, "PATCH_LIST"); string(&p->writer, "profile", *profile ? profile : c->profile);
-        field(&p->writer, "patches"); r = bosun_config_patches(c, profile, &p->writer);
+        int32_t offset = 0, limit = 0;
+        bool paged = get(p, "limit") >= 0;
+        if (paged && (!bosun_json_integer(&p->request, get(p, "limit"), &limit) || limit < 1 || limit > 64 ||
+            (get(p, "offset") >= 0 && !bosun_json_integer(&p->request, get(p, "offset"), &offset)) ||
+            offset < 0 || offset > (int32_t)BOSUN_PATCH_CATALOG_MAX)) r = BOSUN_STORE_INVALID;
+        else if (paged) {
+            size_t total = 0;
+            integer(&p->writer, "offset", offset);
+            integer(&p->writer, "revision", c->catalog_revision);
+            field(&p->writer, "patches");
+            r = bosun_config_patches_page(c, profile, &p->writer, (size_t)offset, (size_t)limit, &total);
+            integer(&p->writer, "total", (int32_t)total);
+            integer(&p->writer, "next_offset", (size_t)(offset + limit) < total ? offset + limit : -1);
+        } else { field(&p->writer, "patches"); r = bosun_config_patches(c, profile, &p->writer); }
     } else if (!strcmp(p->type, "GET_PATCH") || !strcmp(p->type, "PUT_PATCH") ||
                !strcmp(p->type, "PUT_BINDING") || !strcmp(p->type, "SWITCH_PATCH") || !strcmp(p->type, "DELETE_PATCH")) {
         if (!coordinates(p, &bank, &slot, false)) r = BOSUN_STORE_INVALID;
@@ -458,7 +471,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         else if (!strcmp(p->type, "CREATE_PROFILE")) {
             if (!text_arg(p, "name", name, sizeof name, true) || !text_arg(p, "kind", kind, sizeof kind, true) ||
                 !text_arg(p, "color", color, sizeof color, true)) r = BOSUN_STORE_INVALID;
-            else if (*kind && strcmp(kind, "kemper_player") && strcmp(kind, "generic_midi") && strcmp(kind, "unknown"))
+            else if (!bosun_config_kind_supported(kind))
                 { error(p, "unsupported_plugin"); goto done; }
             else r = bosun_config_create(target, name, kind, color);
         } else if (!strcmp(p->type, "RENAME_PROFILE")) {
@@ -487,6 +500,24 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             if (rt->midi_monitor != on) p->event_head = p->event_length = 0;
             rt->midi_monitor = on; field(&p->writer, "on"); bosun_json_puts(&p->writer, on ? "true" : "false");
         }
+    } else if (!strcmp(p->type, "GET_KEMPER_IDENTITY")) {
+        bool probe = false;
+        int token = get(p, "request");
+        if (token >= 0 && !bosun_json_boolean(&p->request, token, &probe)) r = BOSUN_STORE_INVALID;
+        else if (!rt->kemper_enabled) { error(p, "no_rig_info"); goto done; }
+        else if (probe && !bosun_kemper_request_identity(&rt->kemper, now_ms)) r = BOSUN_STORE_IO;
+        else {
+            begin(p, "KEMPER_IDENTITY");
+            string(&p->writer, "profile", c->profile);
+            string(&p->writer, "status", rt->kemper.identity_known ? "received" :
+                rt->kemper.identity_pending && (int32_t)(now_ms - rt->kemper.identity_deadline_ms) < 0 ? "pending" : "unavailable");
+            bosun_json_puts(&p->writer, ",\"model\":null,\"os_version\":null,\"mode\":null,\"raw\":[");
+            if (rt->kemper.identity_known) for (unsigned i = 0; i < sizeof rt->kemper.identity; ++i) {
+                if (i) bosun_json_puts(&p->writer, ",");
+                bosun_json_write_integer(&p->writer, rt->kemper.identity[i]);
+            }
+            bosun_json_puts(&p->writer, "]");
+        }
     } else if (!strcmp(p->type, "GET_RIG_INFO")) {
         bool want_request = true;
         int token = get(p, "request");
@@ -499,7 +530,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             else bosun_json_puts(&p->writer, ",\"rig\":null");
             static const char *const colors[] = {"#3a8eff", "#f5dc34", "#e54848", "#2a2a2a", "#3ecb6e",
                 "#3a8eff", "#f5dc34", "#e54848", "#3ecb6e", "#c08aff"};
-            unsigned rig = (c->bank - 1u) * 5u + c->slot;
+            unsigned rig = rt->kemper.browse_mode ? rt->kemper.state.rig : (c->bank - 1u) * 5u + c->slot;
             string(&p->writer, "color", rig >= 1 && rig <= 5 ? colors[rig - 1] :
                 rig >= 11 && rig <= 15 ? colors[rig - 6] : "#666666");
             field(&p->writer, "fresh"); bosun_json_puts(&p->writer,

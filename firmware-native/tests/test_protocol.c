@@ -37,6 +37,28 @@ static void request(const char *json, const char *type) {
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)"\n", 1, 1) == 1);
     read_reply(type, NULL);
 }
+static void full_catalog(void) {
+    assert(bosun_config_create("full", "All Performances", "kemper_head", "") == BOSUN_STORE_OK);
+    char path[160], patch[256], command[160];
+    for (unsigned bank = 1; bank <= 125; ++bank) {
+        snprintf(path, sizeof path, "/config/profiles/full/patches/%02u", bank);
+        assert(bosun_store_mkdir(path) == BOSUN_STORE_OK);
+        for (unsigned slot = 1; slot <= 5; ++slot) {
+            snprintf(path, sizeof path, "/config/profiles/full/patches/%02u/%02u.json", bank, slot);
+            snprintf(patch, sizeof patch, "{\"name\":\"Performance %u Slot %u %0120u\"}", bank, slot, bank);
+            assert(bosun_store_write_atomic(path, patch, strlen(patch)) == BOSUN_STORE_OK);
+        }
+    }
+    for (unsigned offset = 0; offset < 625; offset += 64) {
+        snprintf(command, sizeof command, "{\"type\":\"LIST_PATCHES\",\"profile\":\"full\",\"offset\":%u,\"limit\":64}", offset);
+        request(command, "PATCH_LIST");
+        assert(bosun_config_int(&reply, 0, "total", -1) == 625);
+        assert(bosun_config_int(&reply, 0, "offset", -1) == (int)offset);
+        assert(bosun_config_int(&reply, 0, "next_offset", -2) == (offset + 64 < 625 ? (int)offset + 64 : -1));
+        if (offset == 576) assert(strstr(output, "Performance 125 Slot 5"));
+    }
+    request("{\"type\":\"LIST_PATCHES\",\"profile\":\"full\",\"limit\":65}", "ERROR");
+}
 static void is_error(const char *value) {
     if (!bosun_json_equal(&reply, bosun_json_get(&reply, 0, "error"), value))
         fprintf(stderr, "Expected error %s, received %s\n", value, output);
@@ -311,6 +333,17 @@ static void rig_info(void) {
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "name"), "Cached rig"));
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "color"), "#c08aff"));
     assert(sent == before + 1); /* No untagged name request during transition. */
+    /* Browse program assignment is independent of Bosun patch coordinates. */
+    runtime.kemper.browse_mode = true;
+    runtime.kemper.state.rig = runtime.kemper.last_name_rig = 128;
+    runtime.kemper.state.rig_name_fresh = true;
+    request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "RIG_INFO");
+    assert(bosun_config_bool(&reply, 0, "fresh", false));
+    assert(bosun_config_int(&reply, 0, "rig", 0) == 128);
+    runtime.kemper.last_name_rig = 127;
+    request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "RIG_INFO");
+    assert(!bosun_config_bool(&reply, 0, "fresh", true));
+    runtime.kemper.browse_mode = false;
 }
 static void coordinates_are(unsigned bank, unsigned slot) {
     int32_t actual;
@@ -410,10 +443,10 @@ static void ui_events(void) {
     bosun_protocol_tick(&protocol, 200); event_is("patch_switched"); coordinates_are(1, 2);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "source"), "midi_in"));
     assert(!protocol.binding_pending[0]);
-    request("{\"type\":\"PUT_PATCH\",\"bank\":99,\"slot\":10,\"patch\":{\"name\":\"Far\"}}", "ACK");
+    request("{\"type\":\"PUT_PATCH\",\"bank\":125,\"slot\":10,\"patch\":{\"name\":\"Far\"}}", "ACK");
     bosun_protocol_tick(&protocol, 201); event_is("dirty_state_changed");
-    request("{\"type\":\"SAVE_NOW\",\"bank\":99,\"slot\":10}", "SAVED");
-    bosun_protocol_tick(&protocol, 202); event_is("saved"); one_patch_is(99, 10);
+    request("{\"type\":\"SAVE_NOW\",\"bank\":125,\"slot\":10}", "SAVED");
+    bosun_protocol_tick(&protocol, 202); event_is("saved"); one_patch_is(125, 10);
     bosun_protocol_tick(&protocol, 203); event_is("dirty_state_changed"); one_patch_is(1, 1);
     request("{\"type\":\"PUT_PATCH\",\"bank\":1,\"slot\":3,\"patch\":{\"name\":\"Cannot save\"}}", "ACK");
     bosun_protocol_tick(&protocol, 204); event_is("dirty_state_changed");
@@ -506,10 +539,23 @@ int main(void) {
     request("{\"type\":\"GET_MANIFEST\"}", "MANIFEST");
     int plugins = bosun_json_get(&reply, 0, "plugins");
     assert(bosun_json_get(&reply, plugins, "kemper_player") >= 0);
+    int head = bosun_json_get(&reply, plugins, "kemper_head");
+    assert(head >= 0);
+    int head_messages = bosun_json_get(&reply, head, "messages");
+    int fixed = bosun_json_get(&reply, head_messages, "kemper_fixed_toggle");
+    assert(fixed >= 0);
+    int requires = bosun_json_get(&reply, fixed, "requires");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, requires, "generation"), "MK2"));
+    assert(bosun_json_get(&reply, head_messages, "kemper_browse_rig") >= 0);
+    assert(bosun_json_get(&reply, head_messages, "kemper_morph") >= 0);
     assert(bosun_json_get(&reply, plugins, "generic_midi") >= 0);
     assert(bosun_json_get(&reply, plugins, "headrush_core") < 0);
+    request("{\"type\":\"CREATE_PROFILE\",\"profile_id\":\"head\",\"name\":\"Head\",\"kind\":\"kemper_head\"}", "ACK");
+    request("{\"type\":\"SWITCH_PROFILE\",\"profile_id\":\"head\"}", "ACK");
+    assert(!strcmp(config.kind, "kemper_head"));
     request("{\"type\":\"CREATE_PROFILE\",\"profile_id\":\"test\",\"name\":\"Test\",\"kind\":\"generic_midi\"}", "ACK");
     request("{\"type\":\"SWITCH_PROFILE\",\"profile_id\":\"test\"}", "ACK");
+    request("{\"type\":\"DELETE_PROFILE\",\"profile_id\":\"head\"}", "ACK");
     device_info_screen_projection();
     request("{\"type\":\"PUT_GLOBAL\",\"device\":{\"unknown\":{\"preserved\":[1,true,null]},\"autosave\":{\"enabled\":false}}}", "ACK");
     request("{\"type\":\"GET_GLOBAL\"}", "GLOBAL");
@@ -607,6 +653,7 @@ int main(void) {
     assert(!protocol.tx_length && !protocol.rx_length);
     request("{\"type\":\"PING\"}", "ACK");
     assert(sent == 0);
+    full_catalog();
     monitor_and_learn(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));

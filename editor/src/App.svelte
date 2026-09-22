@@ -1902,7 +1902,7 @@
                       onclick={() => editorTab = "simulate"}>Simulate</button>
             </div>
             {#if editorTab === "switches"}
-              {#if activeKind === "kemper_player"}
+              {#if manifest.plugins[activeKind]?.tft_fields?.kemper_rig_name}
                 <!-- Kemper-only: pull the current rig's real name off the
                      device and offer it as this patch's name (single-rig, see
                      the component's note on why bulk scanning is not done). -->

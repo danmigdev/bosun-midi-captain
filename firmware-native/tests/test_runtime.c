@@ -26,7 +26,7 @@ static void monitor(void *context, bool outbound, uint8_t port, uint8_t channel,
     memcpy(last_monitor.data, data, length);
 }
 static void patch(unsigned bank, unsigned slot, const char *json) {
-    assert(bosun_config_put_patch(&config, "test", bank, slot, json, strlen(json), 0) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&config, NULL, bank, slot, json, strlen(json), 0) == BOSUN_STORE_OK);
 }
 static void device(const char *json) {
     assert(bosun_config_put_device(&config, NULL, json, strlen(json)) == BOSUN_STORE_OK);
@@ -67,7 +67,7 @@ static void test_queue(void) {
         "{\"type\":\"cc\",\"value\":-1}", "{\"type\":\"delay\",\"ms\":60001}",
         "{\"type\":\"cc\",\"value\":1.5}", "{\"type\":\"pc\",\"program\":\"3\"}",
         "{\"type\":\"cc_toggle\",\"state\":\"maybe\"}",
-        "{\"type\":\"captain_patch\",\"bank\":100}", "{\"type\":\"captain_patch\",\"slot\":11}",
+        "{\"type\":\"captain_patch\",\"bank\":126}", "{\"type\":\"captain_patch\",\"slot\":11}",
         "{\"type\":\"captain_preview_step\",\"scope\":\"unknown\"}"};
     for (size_t i = 0; i < sizeof bad / sizeof *bad; ++i) assert(!submit(bad[i], false));
     assert(!submit("{\"type\":\"kemper_tuner\"}", false));
@@ -634,6 +634,102 @@ static void test_morph_expression_and_raw_cc(void) {
     assert(runtime.kemper.state.morph_value == -1); fail_send = false;
 }
 
+static void test_kemper_profile_separation(void) {
+    fixture(NULL, "{}");
+    assert(bosun_config_create("head", "Head", "kemper_head", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "head", false) == BOSUN_STORE_OK);
+    bosun_runtime_config_changed(&runtime);
+    assert(runtime.kemper_enabled && runtime.kemper.model->product_id == 0);
+    /* A new typed profile works without a redundant model setting/block. */
+    assert(submit("{\"type\":\"kemper_rig\",\"bank\":125,\"rig\":5}", false));
+    tick(100, 0); tick(105, 0);
+    assert(runtime.kemper.state.rig == 625);
+    assert(!submit("{\"type\":\"kemper_rig\",\"bank\":126}", false));
+    const char *unsupported[] = {"kemper_fixed_toggle", "kemper_browse_rig"};
+    for (unsigned i = 0; i < sizeof unsupported / sizeof *unsupported; ++i) {
+        char json[80]; snprintf(json, sizeof json, "{\"type\":\"%s\"}", unsupported[i]);
+        assert(!submit(json, false));
+    }
+    device("{\"kemper\":{\"debug\":false},\"midi_channel\":3}");
+    assert(runtime.kemper.model->product_id == 0 && runtime.kemper.channel == 3);
+    assert(submit("{\"type\":\"kemper_morph\",\"channel\":3,\"value\":64}", false));
+    tick(110, 0); expect(sent - 1, 0xb2, 11, 64, 3);
+    assert(runtime.kemper.state.morph_value == 64);
+    assert(submit("{\"type\":\"kemper_morph_trigger\"}", false));
+
+    assert(bosun_config_create("player", "Player", "kemper_player", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "player", false) == BOSUN_STORE_OK);
+    bosun_runtime_config_changed(&runtime);
+    assert(runtime.kemper.model->product_id == 2 && runtime.kemper.state.morph_value == -1);
+    assert(!runtime.queue_count && !runtime.kemper.scheduled_pc);
+    assert(!submit("{\"type\":\"kemper_rig\",\"bank\":26}", false));
+    assert(submit("{\"type\":\"kemper_fixed_toggle\"}", false));
+}
+
+static void test_profiler_modes_and_capabilities(void) {
+    fixture(NULL, "{}");
+    assert(bosun_config_create("profiler", "Stage", "kemper_head", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "profiler", false) == BOSUN_STORE_OK);
+    bosun_runtime_config_changed(&runtime);
+    patch(1, 1, "{}"); patch(1, 2, "{}");
+    assert(bosun_runtime_switch_patch(&runtime, 1, 1, false) == BOSUN_STORE_OK);
+    assert(submit("{\"type\":\"kemper_rig\",\"bank\":125,\"rig\":5}", false));
+    device("{\"kemper\":{\"generation\":\"MK2\",\"mode\":\"browse\"}}");
+    assert(!runtime.queue_count && runtime.kemper.browse_mode && runtime.kemper.fixed_effects);
+    assert(!submit("{\"type\":\"kemper_rig\"}", false));
+    assert(submit("{\"type\":\"kemper_fixed_toggle\"}", false));
+    tick(10, 0);
+    assert(submit("{\"type\":\"kemper_browse_rig\",\"program\":127}", false));
+    assert(submit("{\"type\":\"kemper_effect_toggle\",\"slot\":\"Delay\"}", false));
+    size_t before = sent;
+    tick(20, 0); assert(sent == before);
+    tick(25, 0);
+    expect(before, 0xc0, 127, 0, 2);
+    expect(before + 1, 0xb0, 27, 127, 3); /* Effect must follow the deferred PC. */
+    assert(runtime.kemper.state.rig == 128);
+    const uint8_t changed[] = {0xb0,32,4,0xc0,1};
+    bosun_runtime_feed_midi(&runtime, 0, changed, sizeof changed, 40);
+    assert(runtime.kemper.state.rig == 2 && config.bank == 1 && config.slot == 1);
+    char json[4096]; bosun_json_token_t tokens[256];
+    bosun_json_doc_t doc = context_doc(json, sizeof json, tokens);
+    assert(bosun_json_equal(&doc, bosun_json_get(&doc, 0, "kemper_mode"), "browse"));
+    assert(bosun_config_int(&doc, 0, "kemper_program", -1) == 1);
+    assert(bosun_config_int(&doc, 0, "kemper_rig_in_bank", -1) == 1);
+    assert(submit("{\"type\":\"kemper_looper\",\"action\":\"erase\"}", false));
+    sent = 0; tick(50, 0);
+    assert(sent == 8); expect(1, 0xb0, 98, 94, 3);
+    expect(3, 0xb0, 38, 1, 3); expect(7, 0xb0, 38, 0, 3);
+    assert(submit("{\"type\":\"kemper_browse_rig\",\"program\":0}", false));
+    device("{\"kemper\":{\"generation\":\"MK1\",\"mode\":\"performance\"}}");
+    assert(!runtime.queue_count && !runtime.kemper.browse_mode && !runtime.kemper.fixed_effects);
+    assert(!submit("{\"type\":\"kemper_fixed_toggle\"}", false));
+    assert(!submit("{\"type\":\"kemper_browse_rig\"}", false));
+    patch(125, 5, "{\"on_enter\":{\"messages\":[{\"type\":\"kemper_rig\",\"bank\":125,\"rig\":5}]}}");
+    assert(bosun_runtime_switch_patch(&runtime, 125, 5, true) == BOSUN_STORE_OK);
+    tick(60, 0); tick(65, 0);
+    assert(config.bank == 125 && runtime.kemper.state.rig == 625);
+}
+
+static void test_browse_program_mapping(void) {
+    fixture(NULL, "{}");
+    assert(bosun_config_create("mapped", "Browse", "kemper_head", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "mapped", false) == BOSUN_STORE_OK);
+    bosun_runtime_config_changed(&runtime);
+    patch(1, 1, "{}");
+    patch(125, 5, "{\"on_enter\":{\"messages\":[{\"type\":\"pc\",\"program\":99}]}}");
+    device("{\"kemper\":{\"mode\":\"browse\",\"browse_program_map\":{\"127\":{\"bank\":125,\"slot\":5},\"1\":{\"bank\":126,\"slot\":1}}}}");
+    assert(bosun_runtime_switch_patch(&runtime, 1, 1, false) == BOSUN_STORE_OK);
+    const uint8_t mapped[] = {0xc0,127};
+    bosun_runtime_feed_midi(&runtime, 0, mapped, sizeof mapped, 20);
+    assert(config.bank == 125 && config.slot == 5 && runtime.queue_count == 0);
+    const uint8_t unknown[] = {0xc0,2};
+    bosun_runtime_feed_midi(&runtime, 0, unknown, sizeof unknown, 30);
+    assert(config.bank == 125 && config.slot == 5 && runtime.queue_count == 0);
+    const uint8_t invalid[] = {0xc0,1};
+    bosun_runtime_feed_midi(&runtime, 0, invalid, sizeof invalid, 40);
+    assert(config.bank == 125 && config.slot == 5);
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-runtime-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -641,6 +737,9 @@ int main(void) {
     test_kemper_context_and_follow();
     test_delay_after_rapid_rig_change();
     test_morph_expression_and_raw_cc();
+    test_kemper_profile_separation();
+    test_profiler_modes_and_capabilities();
+    test_browse_program_mapping();
     test_kemper_bank_snapshot_follow();
     test_kemper_slow_bank_snapshot();
     test_remote_modes(); test_remote_guards(); test_remote_momentary_atomic();

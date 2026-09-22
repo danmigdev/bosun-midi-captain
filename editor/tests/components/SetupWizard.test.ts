@@ -10,6 +10,18 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype,"showModal",{ configurable:true,value() { this.setAttribute("open",""); } });
 });
 afterEach(cleanup);
+it('shows shared PROFILER settings, DIN feedback and the HDMI display together', async () => {
+  render(SetupWizard, { standalone: true });
+  await fireEvent.change(screen.getByLabelText('Kemper model'), { target: { value: 'stage' } });
+  await fireEvent.change(screen.getByLabelText('MIDI connection'), { target: { value: 'din' } });
+  await fireEvent.change(screen.getByLabelText('Hardware generation'), { target: { value: 'MK2' } });
+  await fireEvent.click(screen.getByRole('button', { name: /Raspberry Pi 3 \+ HDMI display/ }));
+  expect(screen.getByRole('img')).toHaveAccessibleName(/Kemper Stage MIDI OUT to Captain MIDI IN.*Pi HDMI/);
+  await fireEvent.click(screen.getByRole('button', { name: '4. Connect your devices' }));
+  expect(screen.getByText(/Leave the Kemper USB cable disconnected/)).toBeInTheDocument();
+  expect(screen.getByText(/HDMI does not power it/)).toBeInTheDocument();
+  expect(JSON.parse(localStorage.getItem('BOSUN_KEMPER_SETUP')!)).toMatchObject({ target: 'stage', generation: 'MK2', connection: 'din' });
+});
 it("shows six configurations, persists the choice and explains the direct connection", async () => {
   const install = vi.fn(); render(SetupWizard,{ standalone:true,onInstall:install });
   expect(screen.getByRole("button",{ name:"Next" })).toBeDisabled();

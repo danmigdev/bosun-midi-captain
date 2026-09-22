@@ -1,14 +1,15 @@
 #include "bosun/storage.h"
 #include "bosun/board.h"
+#include "bosun/storage_layout.h"
 #include "lfs.h"
 #include <string.h>
 
-enum { BLOCK_SIZE = 4096, CACHE_SIZE = 256, LOOKAHEAD_SIZE = 16,
-       STORAGE_SIZE = 512 * 1024 };
+enum { BLOCK_SIZE = 4096, CACHE_SIZE = 256, LOOKAHEAD_SIZE = 16 };
 static lfs_t filesystem;
 static struct lfs_config config;
 static bool mounted;
 static uint32_t flash_base;
+static uint32_t storage_size;
 static _Alignas(4) uint8_t read_cache[CACHE_SIZE];
 static _Alignas(4) uint8_t program_cache[CACHE_SIZE];
 static _Alignas(4) uint8_t lookahead[LOOKAHEAD_SIZE];
@@ -18,23 +19,26 @@ static const char temporary_name[] = ".bosun-atomic.tmp";
 
 static int flash_read(const struct lfs_config *c, lfs_block_t block,
                       lfs_off_t offset, void *buffer, lfs_size_t size) {
-    if (block >= c->block_count || offset > BLOCK_SIZE || size > BLOCK_SIZE - offset)
+    (void)c;
+    if (block >= storage_size / BLOCK_SIZE || offset > BLOCK_SIZE || size > BLOCK_SIZE - offset)
         return LFS_ERR_IO;
-    return bosun_board_flash_read(flash_base + block * BLOCK_SIZE + offset,
+    return bosun_board_flash_read(bosun_storage_physical_offset(flash_base, storage_size, block * BLOCK_SIZE + offset),
                                   buffer, size) ? 0 : LFS_ERR_IO;
 }
 
 static int flash_program(const struct lfs_config *c, lfs_block_t block,
                          lfs_off_t offset, const void *buffer, lfs_size_t size) {
-    if (block >= c->block_count || offset > BLOCK_SIZE || size > BLOCK_SIZE - offset)
+    (void)c;
+    if (block >= storage_size / BLOCK_SIZE || offset > BLOCK_SIZE || size > BLOCK_SIZE - offset)
         return LFS_ERR_IO;
-    return bosun_board_flash_program(flash_base + block * BLOCK_SIZE + offset,
+    return bosun_board_flash_program(bosun_storage_physical_offset(flash_base, storage_size, block * BLOCK_SIZE + offset),
                                      buffer, size) ? 0 : LFS_ERR_IO;
 }
 
 static int flash_erase(const struct lfs_config *c, lfs_block_t block) {
-    if (block >= c->block_count) return LFS_ERR_IO;
-    return bosun_board_flash_erase(flash_base + block * BLOCK_SIZE, BLOCK_SIZE)
+    (void)c;
+    if (block >= storage_size / BLOCK_SIZE) return LFS_ERR_IO;
+    return bosun_board_flash_erase(bosun_storage_physical_offset(flash_base, storage_size, block * BLOCK_SIZE), BLOCK_SIZE)
         ? 0 : LFS_ERR_IO;
 }
 
@@ -45,8 +49,9 @@ static int flash_sync(const struct lfs_config *c) {
 
 static bool configure(void) {
     flash_base = bosun_board_storage_offset();
-    if (bosun_board_storage_size() != STORAGE_SIZE || flash_base % BLOCK_SIZE ||
-        flash_base > UINT32_MAX - STORAGE_SIZE) return false;
+    storage_size = bosun_board_storage_size();
+    if ((storage_size != BOSUN_STORAGE_BYTES && storage_size != BOSUN_LEGACY_STORAGE_BYTES) ||
+        flash_base % BLOCK_SIZE || flash_base > UINT32_MAX - storage_size) return false;
     memset(&config, 0, sizeof config);
     config.read = flash_read;
     config.prog = flash_program;
@@ -55,7 +60,7 @@ static bool configure(void) {
     config.read_size = CACHE_SIZE;
     config.prog_size = CACHE_SIZE;
     config.block_size = BLOCK_SIZE;
-    config.block_count = STORAGE_SIZE / BLOCK_SIZE;
+    config.block_count = storage_size / BLOCK_SIZE;
     config.block_cycles = 500;
     config.cache_size = CACHE_SIZE;
     config.lookahead_size = LOOKAHEAD_SIZE;
@@ -87,11 +92,26 @@ bool bosun_store_mount(const char *host_root) {
     if (!configure()) return false;
     /* Unknown, damaged and erased media all stay untouched. In particular,
      * never fall back to formatting a pre-existing CircuitPython FAT volume. */
+    config.block_count = 0; /* Read the on-disk geometry; mounting is read-only. */
     mounted = lfs_mount(&filesystem, &config) == 0;
+    if (mounted && filesystem.block_count != storage_size / BLOCK_SIZE &&
+        filesystem.block_count != BOSUN_LEGACY_STORAGE_BYTES / BLOCK_SIZE) {
+        lfs_unmount(&filesystem); mounted = false;
+    }
     return mounted;
 }
 
 bool bosun_store_ready(void) { return mounted; }
+
+/* Grow only a successfully mounted legacy filesystem, before an authorized
+ * write. littlefs commits its new superblock atomically; no formatting/copy. */
+static bool writable(void) {
+    if (!mounted) return false;
+    if (filesystem.block_count == storage_size / BLOCK_SIZE) return true;
+    if (!lfs_fs_grow(&filesystem, storage_size / BLOCK_SIZE)) return true;
+    lfs_unmount(&filesystem); mounted = false;
+    return false;
+}
 
 bosun_store_result_t bosun_store_format(void) {
     if (mounted) lfs_unmount(&filesystem);
@@ -149,7 +169,7 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
     if (!bosun_store_safe_path(path) || (!data && length) || strcmp(path, "/") == 0)
         return BOSUN_STORE_INVALID;
     if (length > BOSUN_STORE_FILE_MAX) return BOSUN_STORE_LIMIT;
-    if (!mounted) return BOSUN_STORE_UNAVAILABLE;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
     char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
     const char *slash = strrchr(path, '/');
     size_t prefix = slash ? (size_t)(slash - path + 1) : 0;
@@ -178,13 +198,13 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
 
 bosun_store_result_t bosun_store_remove(const char *path) {
     if (!bosun_store_safe_path(path) || strcmp(path, "/") == 0) return BOSUN_STORE_INVALID;
-    if (!mounted) return BOSUN_STORE_UNAVAILABLE;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
     return result(lfs_remove(&filesystem, path));
 }
 
 bosun_store_result_t bosun_store_mkdir(const char *path) {
     if (!bosun_store_safe_path(path)) return BOSUN_STORE_INVALID;
-    if (!mounted) return BOSUN_STORE_UNAVAILABLE;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
     if (strcmp(path, "/") == 0) return BOSUN_STORE_OK;
     char part[BOSUN_PATH_MAX];
     strcpy(part, path);

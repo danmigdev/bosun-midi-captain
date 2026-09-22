@@ -1,4 +1,46 @@
 export type SetupId = "direct" | "android" | "desktop" | "pi" | "pi-display" | "pi-wireless";
+export type KemperTarget = 'player' | 'head' | 'rack' | 'stage';
+export type KemperConnection = 'usb' | 'din';
+export type KemperSetup = { target: KemperTarget; connection: KemperConnection; generation: 'MK1' | 'MK2'; mode: 'performance' | 'browse' };
+export const kemperTargets: Record<KemperTarget, string> = { player: 'Kemper Player', head: 'Kemper Head', rack: 'Kemper Rack', stage: 'Kemper Stage' };
+export function readKemperSetup(): KemperSetup {
+  const fallback: KemperSetup = { target: 'player', connection: 'usb', generation: 'MK1', mode: 'performance' };
+  try {
+    const value = JSON.parse(localStorage.getItem('BOSUN_KEMPER_SETUP') || '{}');
+    if (!value || !Object.prototype.hasOwnProperty.call(kemperTargets, value.target)) return fallback;
+    return { target: value.target, connection: value.target !== 'player' && value.connection === 'din' ? 'din' : 'usb',
+      generation: value.generation === 'MK2' ? 'MK2' : 'MK1', mode: value.mode === 'browse' ? 'browse' : 'performance' };
+  } catch { return fallback; }
+}
+export function saveKemperSetup(value: KemperSetup) {
+  try { localStorage.setItem('BOSUN_KEMPER_SETUP', JSON.stringify(value)); } catch {}
+}
+export function setupProfileKind(value: KemperSetup): string { return value.target === 'player' ? 'kemper_player' : 'kemper_head'; }
+export function setupsForKemper(value: KemperSetup): Setup[] {
+  if (value.target === 'player') return setups;
+  const label = kemperTargets[value.target];
+  const replace = (text: string) => text.replace(/Kemper PROFILER Player|Kemper Player|Player/g, label)
+    .replace(/USB-B/g, 'USB device port').replace(/USB-A port/g, 'USB host port');
+  return setups.map(item => {
+    const result = { ...item, title: replace(item.title), outcome: replace(item.outcome),
+      needs: item.needs.map(replace), steps: item.steps.map(replace), check: replace(item.check) };
+    result.steps.unshift(`Create the shared Kemper PROFILER profile. Select ${value.generation} and ${value.mode === 'performance' ? 'Performance' : 'Browse'} mode to match your ${label}. Head, Rack and Stage hardware validation is pending.`);
+    if (value.connection === 'din') {
+      if (item.id !== 'direct') result.outcome = 'The Captain controls the Kemper over MIDI DIN. Your chosen host provides the editor and Stage display over Captain USB.';
+      result.needs = result.needs.filter(text => !/USB.*cable|USB ports/.test(text));
+      result.needs.push('Two 5-pin MIDI DIN cables', 'Captain power supply, or USB power from the chosen host');
+      result.steps = [result.steps[0],
+        `Connect Captain MIDI OUT to ${label} MIDI IN, and ${label} MIDI OUT to Captain MIDI IN for feedback. Use OUT, not THRU. Match the MIDI channel in Bosun and on the Kemper.`,
+        item.id === 'direct' ? 'Power the Captain separately. Reconnect its USB port to your computer whenever you want to edit.' :
+          `Connect only the Captain by USB to ${item.pi ? 'the Pi' : item.id === 'android' ? 'Android through an OTG adapter' : 'your computer'}. Leave the Kemper USB cable disconnected. No USB MIDI bridge is needed for the DIN connection.`,
+        ...result.steps.filter(text => /HDMI|touchscreen|over the network|same Wi-Fi/.test(text))];
+      if (item.id === 'android') result.needs.push('USB data cable and Android OTG adapter');
+      else if (item.id !== 'direct') result.needs.push('USB data cable for the Captain');
+    }
+    if (value.mode === 'browse') result.check = `Select a Browse program and toggle an effect: ${label} should respond and effect feedback should return. External Browse changes follow Bosun patches only when you add a program mapping in Settings.`;
+    return result;
+  });
+}
 export type Setup = { id: SetupId; title: string; outcome: string; needs: string[]; steps: string[]; check: string; pi?: boolean; display?: boolean };
 export const setups: Setup[] = [
   { id: "direct", title: "Captain + Kemper Player", outcome: "Play using the pedal and its own display, without a phone or Raspberry Pi.",

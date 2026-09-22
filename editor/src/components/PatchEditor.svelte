@@ -174,7 +174,7 @@
   // Retain schemas for saved messages from another/older profile. Filtering
   // changes the available choices, never the saved value or its parameters.
   let typesByName = $derived<Record<string, FlattenedSchema>>(
-    Object.fromEntries(flattenManifest(manifest).map(t => [t.type, t]))
+    { ...Object.fromEntries(flattenManifest(manifest).map(t => [t.type, t])), ...availableTypesByName }
   );
   function savedTypeLabel(type: string): string {
     const schema = typesByName[type];

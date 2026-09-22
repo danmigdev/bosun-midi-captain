@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { createConfiguredProfile } from '../lib/create-profile';
+  import { readKemperSetup, setupProfileKind } from '../lib/setup-guide';
+  import ProfilerSetupFields from './ProfilerSetupFields.svelte';
+  let kemperSetup = $state(readKemperSetup());
   import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
   import ColorField from "./ColorField.svelte";
@@ -38,7 +42,7 @@
   });
 
   // Default kind once the list is known
-  $effect(() => { if (!profileKind && kinds.length) profileKind = kinds[0].id; });
+  $effect(() => { if (!profileKind && kinds.length) profileKind = kinds.find(item => item.id === setupProfileKind(kemperSetup))?.id ?? kinds[0].id; });
 
   // Auto-advance based on external state
   $effect(() => {
@@ -68,7 +72,7 @@
     if (!profileId || !profileName) { err = "Pick an id and a name"; return; }
     busy = true; err = "";
     try {
-      await cmd.createProfile(profileId, profileName, profileKind, profileColor);
+      await createConfiguredProfile(profileId, profileName, profileKind, profileColor, kemperSetup);
       step = "done";
     } catch (e) {
       err = String(e);
@@ -144,6 +148,7 @@
             {#each kinds as k}<option value={k.id}>{k.label}</option>{/each}
           </select>
         </label>
+      {#if profileKind === "kemper_head"}<ProfilerSetupFields bind:setup={kemperSetup} />{/if}
         <label>Profile name
           <input type="text" bind:value={profileName} placeholder="e.g. Live rig" />
         </label>

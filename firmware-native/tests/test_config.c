@@ -27,9 +27,9 @@ static void test_profiles(void) {
     assert(!bosun_config_profile_id("../other") && !bosun_config_profile_id("bad/name"));
     assert(!bosun_config_profile_id("bad\n") && !bosun_config_profile_id("a\xff"));
     assert(bosun_config_profile_id("Caf\xc3\xa8_1-2"));
-    assert(!bosun_config_coordinates(0, 1) && !bosun_config_coordinates(100, 1));
+    assert(!bosun_config_coordinates(0, 1) && !bosun_config_coordinates(126, 1));
     assert(!bosun_config_coordinates(1, 0) && !bosun_config_coordinates(1, 11));
-    assert(bosun_config_coordinates(99, 10));
+    assert(bosun_config_coordinates(125, 10));
     assert(!bosun_config_path(output, sizeof output, "test", "../bad"));
     assert(!bosun_config_patch_path(output, 2, "test", 1, 1, false));
     assert(bosun_config_create("test", "Duplicate", "generic", NULL) == BOSUN_STORE_INVALID);
@@ -92,12 +92,23 @@ static void test_profile_bank_layout(void) {
 
 static void test_navigation_bank_limit(void) {
     fixture();
-    const char *invalid[] = {"{}", "{\"bank_count\":0}", "{\"bank_count\":100}",
+    /* All 125 bank directories fit, survive save/reload and remain navigable. */
+    for (unsigned bank = 1; bank <= 125; ++bank) put(bank, 1, "{}", false, 0);
+    put(125, 10, "{\"name\":\"Last\"}", true, 0);
+    assert(bosun_config_save(&config, 125, 10, false, NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_init(&reloaded) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&reloaded, 125, 10) == BOSUN_STORE_OK);
+    name_is(&reloaded, "Last");
+    bosun_patch_key_t all_banks[128]; size_t all_count = 0;
+    assert(bosun_config_navigation_list(&reloaded, all_banks, 128, &all_count) == BOSUN_STORE_OK);
+    assert(all_count == 126 && all_banks[125].bank == 125 && all_banks[125].slot == 10);
+    fixture();
+    const char *invalid[] = {"{}", "{\"bank_count\":0}", "{\"bank_count\":126}",
         "{\"bank_count\":-1}", "{\"bank_count\":\"2\"}", "{\"bank_count\":2.5}",
         "{\"bank_count\":true}", "{\"bank_count\":null}"};
     for (size_t i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
         assert(bosun_config_put_device(&config, NULL, invalid[i], strlen(invalid[i])) == BOSUN_STORE_OK);
-        assert(bosun_config_bank_count(&config) == 99);
+        assert(bosun_config_bank_count(&config) == 125);
     }
     const char limited[] = "{\"bank_count\":2}";
     assert(bosun_config_put_device(&config, NULL, limited, strlen(limited)) == BOSUN_STORE_OK);

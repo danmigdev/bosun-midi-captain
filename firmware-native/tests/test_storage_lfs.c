@@ -3,16 +3,17 @@
 #include <setjmp.h>
 #include <stdio.h>
 
-enum { FLASH_BYTES = 512 * 1024, FLASH_BASE = 1536 * 1024, ERASE_SIZE = 4096, PAGE_SIZE = 256 };
+enum { FLASH_BYTES = 4 * 1024 * 1024, FLASH_BASE = 4 * 1024 * 1024,
+       LEGACY_BYTES = 512 * 1024, ERASE_SIZE = 4096, PAGE_SIZE = 256 };
 static uint8_t flash[FLASH_BYTES], snapshot[FLASH_BYTES];
 static uint8_t old_data[9000], new_data[17000], large_data[65536], output[65536];
 static size_t mutations;
 static int cut_at = -1, cut_mode;
 static bool write_failure, read_failure;
-static uint32_t geometry_size = FLASH_BYTES;
+static uint32_t geometry_size = LEGACY_BYTES;
 static jmp_buf power_loss;
 
-uint32_t bosun_board_storage_offset(void) { return FLASH_BASE; }
+uint32_t bosun_board_storage_offset(void) { return FLASH_BASE + FLASH_BYTES - geometry_size; }
 uint32_t bosun_board_storage_size(void) { return geometry_size; }
 
 static size_t checked_offset(uint32_t absolute, size_t length) {
@@ -143,6 +144,43 @@ static void test_capacity(void) {
     printf("littlefs: full 512 KiB volume retained %u committed 64 KiB files, rejected oversized replacement, and reclaimed space\n", created);
 }
 
+static void test_legacy_growth(void) {
+    geometry_size = LEGACY_BYTES;
+    assert(bosun_store_format() == BOSUN_STORE_OK);
+    assert(bosun_store_mkdir("/config") == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic("/config/device.json", old_data, sizeof old_data) == BOSUN_STORE_OK);
+    memcpy(snapshot, flash, sizeof flash);
+    geometry_size = FLASH_BYTES;
+    mutations = 0;
+    assert(bosun_store_mount(NULL));
+    assert(mutations == 0 && !memcmp(snapshot, flash, sizeof flash));
+    assert_complete_file();
+    assert(bosun_store_write_atomic("/config/device.json", new_data, sizeof new_data) == BOSUN_STORE_OK);
+    size_t operations = mutations;
+    assert(operations > 0 && operations < 200);
+    for (int mode = 0; mode < 3; ++mode) {
+        for (size_t op = 0; op < operations; ++op) {
+            memcpy(flash, snapshot, sizeof flash);
+            assert(bosun_store_mount(NULL));
+            cut_mode = mode;
+            cut_at = (int)op;
+            mutations = 0;
+            if (setjmp(power_loss) == 0) {
+                (void)bosun_store_write_atomic("/config/device.json", new_data, sizeof new_data);
+                assert(!"growth power cut not reached");
+            }
+            cut_at = -1;
+            assert(bosun_store_mount(NULL));
+            assert_complete_file();
+            assert(bosun_store_mkdir("/recovery") == BOSUN_STORE_OK);
+            assert(bosun_store_write_atomic("/recovery/check", "safe", 4) == BOSUN_STORE_OK);
+            assert(bosun_store_mount(NULL));
+            assert_complete_file();
+        }
+    }
+    printf("littlefs: legacy expansion survived %zu interrupted writes without moving existing blocks\n", operations * 3);
+}
+
 int main(void) {
     test_paths();
     for (size_t i = 0; i < sizeof old_data; ++i) old_data[i] = (uint8_t)(i * 17u + 3u);
@@ -158,9 +196,9 @@ int main(void) {
     assert(bosun_store_read("/config", output, sizeof output, &length) == BOSUN_STORE_UNAVAILABLE && length == 0);
     memset(flash, 0xff, sizeof flash);
     assert(!bosun_store_mount(NULL) && mutations == 0);
-    geometry_size = FLASH_BYTES / 2;
+    geometry_size = LEGACY_BYTES / 2;
     assert(!bosun_store_mount(NULL) && bosun_store_format() == BOSUN_STORE_UNAVAILABLE && mutations == 0);
-    geometry_size = FLASH_BYTES;
+    geometry_size = LEGACY_BYTES;
     assert(bosun_store_format() == BOSUN_STORE_OK);
     test_storage_api();
     memcpy(snapshot, flash, sizeof flash);
@@ -178,6 +216,7 @@ int main(void) {
     assert(bosun_store_mount(NULL));
     test_power_cuts();
     test_capacity();
+    test_legacy_growth();
     puts("littlefs storage: no automatic format, static caches, CP paths/raw JSON, remount, bounded reads/lists and I/O failures passed");
     return 0;
 }

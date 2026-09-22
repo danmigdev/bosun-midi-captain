@@ -36,7 +36,7 @@ class FactoryPackageTests(unittest.TestCase):
     def test_asset_checksums_and_firmware_binding(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
-            data=loader(); storage=bytearray(524288); storage[:8]=b'littlefs'
+            data=loader(); storage=bytearray(4194304); storage[3670016:3670024]=b'littlefs'
             (root/'loader.uf2').write_bytes(data); (root/'storage.bin').write_bytes(storage)
             manifest={'schema':1,'firmware_sha256':'native-release',
                       'loader_sha256':factory.hashlib.sha256(data).hexdigest(),

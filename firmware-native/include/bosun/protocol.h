@@ -2,13 +2,13 @@
 #define BOSUN_PROTOCOL_H
 #include "bosun/runtime.h"
 
-#define BOSUN_NATIVE_VERSION "0.6.10-native"
+#define BOSUN_NATIVE_VERSION "0.7.0-native"
 #define BOSUN_PROTOCOL_RX_BYTES 26624u
 #define BOSUN_PROTOCOL_TX_BYTES 30720u
 #define BOSUN_PROTOCOL_TOKENS 1792u
 #define BOSUN_PROTOCOL_TIMEOUT_MS 5000u
 #define BOSUN_PROTOCOL_EVENT_BYTES 2048u
-#define BOSUN_PROTOCOL_PATCH_BITMAP_BYTES 124u /* All 99 banks x 10 slots. */
+#define BOSUN_PROTOCOL_PATCH_BITMAP_BYTES ((BOSUN_BANK_MAX * BOSUN_SLOT_MAX + 7u) / 8u)
 
 /* One bounded, nonblocking line at a time. feed returns bytes consumed: callers
  * retain the suffix while a reply drains. consume_output accepts partial writes.

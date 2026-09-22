@@ -36,19 +36,46 @@ class FirmwareResponseTimeout(FirmwareInstallError):
     pass
 
 
+def _patch_inventory(client, profile):
+    """Never back up a partial or mixed-revision catalog."""
+    patches = []
+    revision = total = None
+    while True:
+        offset = len(patches)
+        page = client.request("LIST_PATCHES", "PATCH_LIST", profile=profile, limit=64, offset=offset)
+        items = page.get("patches")
+        if not isinstance(items, list) or page.get("profile") != profile:
+            raise FirmwareInstallError("Invalid patch inventory identity")
+        if "offset" not in page:
+            if offset or len(items) > 625:
+                raise FirmwareInstallError("Incomplete patch inventory")
+            return page
+        if offset == 0:
+            revision, total = page.get("revision"), page.get("total")
+        if (type(total) is not int or not 0 <= total <= 625 or type(revision) is not int or
+                page.get("revision") != revision or page.get("total") != total or
+                page.get("offset") != offset or len(items) > 64 or offset + len(items) > total):
+            raise FirmwareInstallError("Patch inventory changed or contains an invalid page")
+        patches.extend(items)
+        if page.get("next_offset") == -1 and len(patches) == total:
+            return {"type": "PATCH_LIST", "profile": profile, "patches": patches}
+        if not items or len(patches) >= total or page.get("next_offset") != len(patches):
+            raise FirmwareInstallError("Incomplete patch inventory")
+
+
 NATIVE_MESSAGES = frozenset({
     "cc", "pc", "note_on", "note_off", "delay", "program_change_bank", "cc_toggle",
     "captain_patch", "captain_bank_step", "captain_preview_step", "captain_preview_commit",
     "captain_preview_cancel", "captain_setlist_step", "kemper_rig", "kemper_step_rig",
     "kemper_effect_toggle", "kemper_fixed_toggle", "kemper_tuner", "kemper_tap_tempo",
     "kemper_set_tempo", "kemper_morph", "kemper_morph_trigger", "kemper_wah", "kemper_volume",
-    "kemper_looper", "kemper_rotary", "kemper_query_state",
+    "kemper_looper", "kemper_rotary", "kemper_query_state", "kemper_browse_rig",
 })
 NATIVE_SWITCHES = frozenset({"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"})
 NATIVE_MODES = frozenset({"tap", "latched", "momentary", "long_press_alt", "double_tap"})
 NATIVE_ACTIONS = frozenset({"press", "release", "toggle_on", "toggle_off", "long_press", "double_tap"})
 NATIVE_COMMAND_LIMIT = 128
-NATIVE_NAVIGATION_LIMIT = 128
+NATIVE_NAVIGATION_LIMIT = 625
 
 
 def _require_native_compatible(snapshot: dict) -> None:
@@ -64,12 +91,14 @@ def _require_native_compatible(snapshot: dict) -> None:
         if profile["metadata"].get("kind") not in ("kemper_player", "generic_midi", "unknown"):
             fail("plugin", "this plugin is not supported by native firmware")
         device, patches = profile["device"], profile["patches"]
-        kemper_enabled = isinstance(device.get("kemper"), dict)
+        kemper_enabled = profile["metadata"].get("kind") == "kemper_player" or isinstance(device.get("kemper"), dict)
         used_types = set()
         def message(value, location):
             if not isinstance(value, dict) or value.get("type") not in NATIVE_MESSAGES:
                 fail(location, "unsupported MIDI message type")
             kind = value["type"]
+            if kind == "kemper_browse_rig":
+                fail(location, "Browse programs require the native PROFILER plugin")
             used_types.add(kind)
             if kind.startswith("kemper_") and not kemper_enabled:
                 fail(location, "Kemper messages require the profile's Kemper configuration")
@@ -94,7 +123,7 @@ def _require_native_compatible(snapshot: dict) -> None:
                 number("note", 0, 127); number("velocity", 0, 127)
             elif kind == "delay": number("ms", 0, 60000)
             elif kind in ("captain_patch", "kemper_rig"):
-                number("bank", 1, 99 if kind == "captain_patch" else 25)
+                number("bank", 1, 125 if kind == "captain_patch" else 25)
                 number("slot" if kind == "captain_patch" else "rig", 1, 10 if kind == "captain_patch" else 5)
             elif kind in ("captain_bank_step", "captain_preview_step", "captain_setlist_step"):
                 number("delta", -32768, 32767); enum("scope", ("patch", "bank"))
@@ -102,7 +131,9 @@ def _require_native_compatible(snapshot: dict) -> None:
                 enum("slot", ("A", "B", "C", "D", "X", "Mod", "Delay", "Reverb")); enum("value", ("on", "off"))
             elif kind == "kemper_fixed_toggle":
                 enum("effect", ("Compressor", "Noise Gate", "Pure Booster", "Wah", "Transpose")); enum("value", ("on", "off"))
-            elif kind == "kemper_looper": enum("action", ("rec_play", "stop_erase", "trigger", "reverse", "half_speed"))
+            elif kind == "kemper_looper":
+                enum("action", ("rec_play", "stop_erase", "trigger", "reverse", "half_speed", "cancel_overdub", "erase"))
+                enum("state", ("tap", "press", "release"))
             elif kind == "kemper_step_rig": enum("direction", ("prev", "next"))
             elif kind == "kemper_set_tempo": number("bpm", 40, 250)
             elif kind in ("kemper_tuner", "kemper_morph_trigger"): enum("state", ("on", "off"))
@@ -158,11 +189,11 @@ def _require_native_compatible(snapshot: dict) -> None:
         if maximum_enter + maximum_exit > NATIVE_COMMAND_LIMIT:
             fail("patch transition", "combined on_exit/on_enter exceeds 128 messages")
         if used_types & {"captain_bank_step", "captain_preview_step"} and len(patches) > NATIVE_NAVIGATION_LIMIT:
-            fail("navigation", "native navigation supports at most 128 patches")
+            fail("navigation", "native navigation supports at most 625 patches")
         if "captain_setlist_step" in used_types:
             setlist = device.get("setlist", {})
             if not isinstance(setlist, dict) or not isinstance(setlist.get("items", []), list) or len(setlist.get("items", [])) > NATIVE_NAVIGATION_LIMIT:
-                fail("setlist", "native navigation supports at most 128 setlist entries")
+                fail("setlist", "native navigation supports at most 625 setlist entries")
 
 
 @dataclass(frozen=True)
@@ -390,7 +421,7 @@ class FirmwareInstaller:
                 extracted = extract_circuitpython_config(raw, config)
                 # The trusted host builder uses the production littlefs and
                 # native config parser, and verifies remount/readback before
-                # publishing a fresh 512 KiB image. No on-device formatting.
+                # publishing a fresh 4 MiB image. No on-device formatting.
                 storage_bytes = build_native_storage(config, storage, builder=self.converter)
                 if len(storage_bytes) != STORAGE_BYTES:
                     raise FirmwareInstallError("Invalid native storage image size")
@@ -619,19 +650,19 @@ class LinuxInstallIO:
                 if not isinstance(profile, str) or not profile or profile in snapshot["profiles"]:
                     raise FirmwareInstallError("Invalid or duplicate profile identifier")
                 device_reply = client.request("GET_GLOBAL", "GLOBAL", profile=profile)
-                patches_reply = client.request("LIST_PATCHES", "PATCH_LIST", profile=profile)
+                patches_reply = _patch_inventory(client, profile)
                 learn_reply = client.request("GET_MIDI_LEARN", "MIDI_LEARN", profile=profile)
                 for response in (device_reply, patches_reply, learn_reply):
                     if response.get("profile") != profile:
                         raise FirmwareInstallError("Firmware cannot confirm cross-profile backup identity")
                 patches = patches_reply.get("patches")
-                if not isinstance(patches, list) or len(patches) > 256:
+                if not isinstance(patches, list) or len(patches) > 625:
                     raise FirmwareInstallError("Unsupported or incomplete patch inventory")
                 row = {"metadata": {key: entry.get(key) for key in ("id", "name", "kind", "color")},
                        "device": device_reply.get("device"), "midi_learn": learn_reply.get("table"), "patches": {}}
                 for patch in patches:
                     bank, slot = patch.get("bank"), patch.get("slot")
-                    if type(bank) is not int or type(slot) is not int or not 1 <= bank <= 99 or not 1 <= slot <= 10:
+                    if type(bank) is not int or type(slot) is not int or not 1 <= bank <= 125 or not 1 <= slot <= 10:
                         raise FirmwareInstallError("Patch coordinates exceed native firmware limits")
                     key = f"{bank:02}/{slot:02}"
                     if key in row["patches"]:

@@ -15,6 +15,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bosun_hub import firmware_install as install
 
 
+def test_paginated_backup_reads_all_625_slots_and_rejects_changes():
+    entries = [{"bank": i // 5 + 1, "slot": i % 5 + 1} for i in range(625)]
+    class Client:
+        changing = False
+        def request(self, command, expected, **args):
+            offset, limit = args["offset"], args["limit"]
+            return {"type": expected, "profile": args["profile"], "offset": offset,
+                    "revision": 2 if self.changing and offset else 1,
+                    "total": 625, "patches": entries[offset:offset + limit],
+                    "next_offset": offset + limit if offset + limit < 625 else -1}
+    client = Client()
+    assert install._patch_inventory(client, "head")["patches"] == entries
+    client.changing = True
+    with pytest.raises(install.FirmwareInstallError, match="changed"):
+        install._patch_inventory(client, "head")
+
+
 def snapshot(firmware="0.6.4"):
     return {
         "info": {"type": "DEVICE_INFO", "fw": firmware,
@@ -501,8 +518,15 @@ def test_chunked_backup_failure_remains_prewrite_and_never_starts_flash_rollback
 
 
 @pytest.mark.parametrize("dirty", [True, False])
-def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty):
+@pytest.mark.parametrize("bank", [1, 100, 125])
+def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty, bank):
     expected = snapshot()
+    if bank > 1:
+        expected = snapshot("0.6.10-native")
+        row = expected["profiles"]["live"]
+        row["metadata"]["kind"] = "kemper_head"
+        row["device"]["kemper"] = {"generation": "MK2", "mode": "browse"}
+        row["patches"] = {f"{bank:02}/05": {"name": "PROFILER", "bindings": []}}
     calls = []
     class Client:
         def __init__(self, port):
@@ -526,7 +550,7 @@ def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty):
             if command == "GET_MIDI_LEARN":
                 return {**data, "table": row["midi_learn"]}
             if command == "LIST_PATCHES":
-                return {**data, "patches": [{"bank": int(key[:2]), "slot": int(key[3:])} for key in row["patches"]]}
+                return {**data, "patches": [{"bank": int(key.split("/")[0]), "slot": int(key.split("/")[1])} for key in row["patches"]]}
             if command == "GET_PATCH":
                 key = f"{fields['bank']:02}/{fields['slot']:02}"
                 return {**data, "bank": fields["bank"], "slot": fields["slot"], "patch": row["patches"][key]}
@@ -690,7 +714,7 @@ def test_behavior_incompatible_cp_configuration_is_rejected_before_bootsel(envir
     elif case == "cc": midi["cc"] = 128
     elif case == "navigation":
         midi["type"] = "captain_bank_step"
-        profile["patches"].update({f"{i // 10 + 1:02}/{i % 10 + 1:02}": {"bindings": []} for i in range(1, 129)})
+        profile["patches"].update({f"{i // 10 + 1:02}/{i % 10 + 1:02}": {"bindings": []} for i in range(1, 626)})
     result = run_job(environment, io)
     assert result["status"] == "failed", result
     assert "CircuitPython was left unchanged" in result["error"]
@@ -716,6 +740,16 @@ def test_supported_kemper_actions_global_long_press_and_expression_are_accepted(
     assert run_job(environment, io)["status"] == "complete"
 
 
+def test_player_migration_accepts_typed_profile_but_rejects_profiler_only_programs():
+    before = snapshot()
+    profile = before["profiles"]["live"]
+    profile["patches"]["01/01"]["on_enter"] = {"messages": [{"type": "kemper_rig"}]}
+    install._require_native_compatible(before)
+    profile["patches"]["01/01"]["on_enter"] = {"messages": [{"type": "kemper_browse_rig"}]}
+    with pytest.raises(install.FirmwareInstallError, match="native PROFILER plugin"):
+        install._require_native_compatible(before)
+
+
 def test_cp_preflight_limits_and_names_match_the_native_runtime_source():
     root = Path(__file__).resolve().parents[3]
     runtime = (root / "firmware-native/src/runtime.c").read_text(encoding="utf-8")
@@ -725,7 +759,7 @@ def test_cp_preflight_limits_and_names_match_the_native_runtime_source():
         body = re.search(r"\b" + name + r"\[[^]]*\]\s*=\s*\{([^}]+)\}", runtime).group(1)
         assert set(re.findall(r'"([^"]+)"', body)) == actual
     assert int(re.search(r"#define BOSUN_RUNTIME_COMMANDS (\d+)u", header).group(1)) == install.NATIVE_COMMAND_LIMIT
-    assert int(re.search(r"#define BOSUN_RUNTIME_NAV_PATCHES (\d+)u", header).group(1)) == install.NATIVE_NAVIGATION_LIMIT
+    assert int(re.search(r"#define BOSUN_PATCH_CATALOG_MAX (\d+)u", (root / "firmware-native/include/bosun/config.h").read_text()).group(1)) == install.NATIVE_NAVIGATION_LIMIT
 
 
 def test_rp2040_picotool_serial_filter_uses_flash_uid_not_rom_usb_serial(tmp_path, monkeypatch):

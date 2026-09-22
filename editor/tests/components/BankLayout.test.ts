@@ -19,9 +19,9 @@ beforeEach(() => vi.clearAllMocks());
 const patches = [1, 2, 3].map(slot => ({ bank: 1, slot, name: `Rig ${slot}`, dirty: false }));
 
 describe("profile bank layout", () => {
-  it.each([undefined, null, 0, -1, 100, 2.5, "2", true, NaN, Infinity])(
-    "keeps all 99 banks for missing or invalid stored limit %s", value => {
-      expect(getBankCount({ bank_count: value })).toBe(99);
+  it.each([undefined, null, 0, -1, 126, 2.5, "2", true, NaN, Infinity])(
+    "keeps all 125 banks for missing or invalid stored limit %s", value => {
+      expect(getBankCount({ bank_count: value })).toBe(125);
     },
   );
 
@@ -29,8 +29,8 @@ describe("profile bank layout", () => {
     const view = render(Settings, { device: { rigs_per_bank: 3, custom: { keep: 42 } } });
     const input = screen.getByLabelText("Number of banks");
     const save = screen.getByRole("button", { name: "Save settings" });
-    expect(input).toHaveValue(99);
-    for (const value of ["0", "100", "1.5", ""]) {
+    expect(input).toHaveValue(125);
+    for (const value of ["0", "126", "1.5", ""]) {
       await fireEvent.input(input, { target: { value } });
       expect(save).toBeDisabled();
       await fireEvent.click(save);
@@ -43,7 +43,7 @@ describe("profile bank layout", () => {
     await view.rerender({ device: { bank_count: 2 } });
     expect(input).toHaveValue(2);
     await view.rerender({ device: { kemper: {} }, activeKind: "kemper_player" });
-    expect(input).toHaveValue(99);
+    expect(input).toHaveValue(125);
   });
 
   it("stops New and Clone at the configured bank limit", async () => {
@@ -131,7 +131,7 @@ describe("profile bank layout", () => {
   });
 
   it("does not overwrite the first patch when all configured bank slots are full", async () => {
-    const full = Array.from({ length: 99 }, (_, index) => ({ bank: index + 1, slot: 1, name: "Full", dirty: false }));
+    const full = Array.from({ length: 125 }, (_, index) => ({ bank: index + 1, slot: 1, name: "Full", dirty: false }));
     expect(nextFreePatch(full, 1)).toBeNull();
     render(PatchActions, { patches: full, currentPatchEnvelope: null, rigsPerBank: 1 });
     await fireEvent.click(screen.getByRole("button", { name: "+ New patch" }));
