@@ -28,6 +28,10 @@ __pycache__/
 # Additional development checkouts stay inside this repository directory.
 /.worktrees/
 
+# Private recovery archives retained during workspace cleanup.
+/recovery/*
+!/recovery/README.md
+
 # Claude Code local settings (personal, machine-specific)
 .claude/settings.local.json
 

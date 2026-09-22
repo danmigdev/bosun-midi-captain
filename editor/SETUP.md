@@ -85,9 +85,10 @@ For Android requirements and APK installation, see
 | `firmware-native/` | Maintained C firmware, host tests and RP2040 build tooling. |
 | `firmware/` | Frozen CircuitPython resources, shared schemas and migration/regression references. Still required by builds. |
 | `tools/` | Packaging, release checks, USB installer and Raspberry Pi services. |
-| `docs/` | User guides, hardware validation, release notes and the pinned F-Droid reference recipe. |
+| `docs/` | Current user guides, hardware validation, current release notes and the pinned F-Droid reference recipe. |
 | `samples/`, `fastlane/` | Example configurations and Android store descriptions. |
-| `dist/` | Ignored release packages, previews and local validation evidence. |
+| `dist/release-0.7.1/` | Verified downloads for the current release, including SHA256SUMS.txt. |
+| `recovery/` | Private hardware backups, recovery records and archived unfinished work; see its README. |
 | `.worktrees/` | Ignored additional Git worktrees, kept inside the project folder. |
 
 Create additional checkouts under `.worktrees/`, for example
@@ -96,8 +97,10 @@ to move or remove them so their registration stays valid. Review uncommitted
 changes before retiring a checkout.
 
 Old build logs, downloaded release copies and compiler output can be removed
-when no running process uses them. Keep recovery backups, installation journals,
-signing keys and validation evidence. In particular, `dist/` may contain hardware
-backups as well as disposable packages; do not erase it wholesale. Generated
+when no running process uses them. Keep one copy of the current release under
+`dist/`; keep recovery backups, installation journals and validation evidence
+under `recovery/`. Preserve signing keys and any uncommitted source edits.
+Previous release notes remain available in Git history and GitHub Releases.
+Generated
 installer resources under `editor/src-tauri/resources/` are required for packaging
 and must be rebuilt using the instructions above if removed.
