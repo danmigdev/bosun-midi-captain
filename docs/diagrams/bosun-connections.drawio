@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Bosun" type="device" compressed="false" pages="2">
+<mxfile host="app.diagrams.net" agent="Bosun" type="device" compressed="false" pages="3">
   <diagram id="bosun-connections-1" name="1 - Wiring">
     <mxGraphModel dx="1600" dy="1080" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1080" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -74,7 +74,7 @@
         <mxCell id="title" value="BOSUN / Hardware connections" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=30;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="48" y="30" width="1504" height="42" />
         </mxCell>
-        <mxCell id="subtitle" value="Three alternative setups - The Captain USB cable carries MIDI and Bosun data; the Player uses MIDI for commands and feedback." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="USB examples show Player ports. Kemper family support is experimental; Head/Rack/Stage DIN wiring is on page 3." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="48" y="82" width="1504" height="44" />
         </mxCell>
         <mxCell id="direct-title" value="01  Captain directly to Player" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
@@ -238,7 +238,7 @@
         <mxCell id="title" value="BOSUN / Android, Desktop and network" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=30;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="48" y="30" width="1504" height="42" />
         </mxCell>
-        <mxCell id="subtitle" value="Three ways to connect the apps to the Captain. The Player is optional for editing alone; to play, use the wiring on page 1." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Three ways to connect the apps to the Captain. The Kemper is optional for editing alone; to play, use the wiring on page 1." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=17;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="48" y="82" width="1504" height="44" />
         </mxCell>
         <mxCell id="usb-title" value="01  Direct USB - select USB in the app" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=21;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
@@ -328,4 +328,16 @@
       </root>
     </mxGraphModel>
   </diagram>
+<diagram id="bosun-profiler-din" name="3 - Head Rack Stage (experimental)"><mxGraphModel page="1" pageWidth="1200" pageHeight="800"><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="title" value="Kemper Head / Rack / Stage - experimental" style="text;html=0;fontSize=28;" vertex="1" parent="1"><mxGeometry x="50" y="30" width="1100" height="60" as="geometry"/></mxCell>
+<mxCell id="captain" value="MIDI Captain" style="rounded=1;whiteSpace=wrap;html=0;fontSize=18;" vertex="1" parent="1"><mxGeometry x="60" y="170" width="230" height="100" as="geometry"/></mxCell>
+<mxCell id="kemper" value="Kemper Head / Rack / Stage" style="rounded=1;whiteSpace=wrap;html=0;fontSize=18;" vertex="1" parent="1"><mxGeometry x="670" y="170" width="360" height="100" as="geometry"/></mxCell>
+<mxCell id="out" value="Captain OUT to Kemper IN" style="edgeStyle=orthogonalEdgeStyle;html=0;endArrow=block;" edge="1" parent="1" source="captain" target="kemper"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="return" value="Kemper OUT to Captain IN (feedback)" style="edgeStyle=orthogonalEdgeStyle;html=0;endArrow=block;" edge="1" parent="1" source="kemper" target="captain"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="host" value="Optional Android / Desktop / Pi: editor + Bosun Stage" style="rounded=1;whiteSpace=wrap;html=0;fontSize=18;" vertex="1" parent="1"><mxGeometry x="60" y="440" width="400" height="100" as="geometry"/></mxCell>
+<mxCell id="usb" value="Captain USB data" style="edgeStyle=orthogonalEdgeStyle;html=0;endArrow=block;" edge="1" parent="1" source="captain" target="host"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="hdmi" value="Pi HDMI display + separate power" style="rounded=1;whiteSpace=wrap;html=0;fontSize=18;" vertex="1" parent="1"><mxGeometry x="730" y="440" width="350" height="100" as="geometry"/></mxCell>
+<mxCell id="screen" value="Pi only: HDMI" style="edgeStyle=orthogonalEdgeStyle;html=0;endArrow=block;" edge="1" parent="1" source="host" target="hdmi"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="notes" value="Match MIDI channel, generation and Performance/Browse mode. Leave Kemper USB disconnected: no USB MIDI bridge is needed for DIN. Power each device appropriately. Head/Rack/Stage hardware validation is pending. See docs/kemper-head.md." style="rounded=1;whiteSpace=wrap;html=0;fontSize=18;" vertex="1" parent="1"><mxGeometry x="60" y="630" width="1020" height="100" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram>
 </mxfile>

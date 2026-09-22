@@ -2,7 +2,7 @@
 #define BOSUN_PROTOCOL_H
 #include "bosun/runtime.h"
 
-#define BOSUN_NATIVE_VERSION "0.7.0-native"
+#define BOSUN_NATIVE_VERSION "0.7.1-native"
 #define BOSUN_PROTOCOL_RX_BYTES 26624u
 #define BOSUN_PROTOCOL_TX_BYTES 30720u
 #define BOSUN_PROTOCOL_TOKENS 1792u

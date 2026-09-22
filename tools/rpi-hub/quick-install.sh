@@ -16,6 +16,6 @@ bash "$root/tools/rpi-hub/install.sh"
 for service in bosun-hub.service bosun-midi.timer bosun-kiosk.service; do
     systemctl is-active --quiet "$service"
 done
-printf '\nBosun ready. Connect Captain and Player to the Pi USB ports.\n'
+printf '\nBosun ready. Connect Captain to the Pi; connect Kemper by supported USB or two-way MIDI DIN to Captain.\n'
 printf 'In Bosun choose Raspberry Pi (network), then Find Raspberry Pi.\n'
 printf 'Stage in your browser: http://%s.local:8080/\n' "$(hostname -s)"

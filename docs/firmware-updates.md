@@ -2,13 +2,20 @@
 
 Bosun Desktop updates existing native firmware directly over USB or through a
 Raspberry Pi. The Pi updater also migrates supported CircuitPython configurations. It
-supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player or
-Generic MIDI profiles. CircuitPython is no longer maintained separately.
+supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player,
+Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper family
+support is experimental; see [model setup and validation](kemper-head.md).
+CircuitPython is no longer maintained separately.
+
+When upgrading from 0.6.x, configuration storage expands from 512 KiB to 4 MiB
+on the first configuration write. Keep the verified full-flash backup:
+after expansion, an older UF2 cannot read the filesystem. Downgrading requires
+restoring the full-flash backup. See [storage and downgrade details](kemper-head.md#choosing-rigs).
 
 ## Enter the bootloader from Bosun
 
-The following options are implemented on `main`; the startup shortcut requires
-firmware built with this change. Older installed firmware does not gain the
+The following options are included in Bosun 0.7.1; the startup shortcut requires
+0.7.1 or later firmware. Older installed firmware does not gain the
 shortcut by updating Desktop alone.
 
 - **Bosun Desktop:** connect the Captain directly to the computer by USB, open

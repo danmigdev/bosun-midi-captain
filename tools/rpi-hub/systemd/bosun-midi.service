@@ -1,5 +1,5 @@
 [Unit]
-Description=Wire MIDI Captain <-> Kemper Player in the ALSA sequencer
+Description=Wire MIDI Captain <-> Kemper PROFILER in the ALSA sequencer
 After=sound.target
 
 [Service]

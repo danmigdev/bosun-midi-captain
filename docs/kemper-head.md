@@ -1,13 +1,15 @@
 # Kemper PROFILER support (experimental)
 
-The `feat/kemper-head` branch provides **Kemper PROFILER — Head / Rack / Stage
-(experimental)** as a separate target alongside **Kemper Player**. Head, Rack
-and Stage use one plugin. Physical validation of these models is still pending;
-release 0.7.0 is an experimental prerelease, not a verified compatibility claim.
+Bosun 0.7.1 on `main` provides experimental support for the Kemper family:
+**Player, Head, Rack and Stage**. Select **Kemper Player** for Player, or
+**Kemper PROFILER — Head / Rack / Stage (experimental)** for the other models.
+Head, Rack and Stage use one plugin and share the common Kemper engine with
+Player. Physical validation of Head/Rack/Stage is still pending; this is an
+experimental release, not a claim that every model/OS combination is verified.
 
 ## Setup
 
-1. Use the native Captain firmware and editor built from this branch.
+1. Use matching native Captain firmware, editor and Pi/Stage assets from 0.7.1.
 2. Create a profile targeting **Kemper PROFILER — Head / Rack / Stage**.
 3. In Settings, choose the MIDI channel used by the PROFILER.
 4. In the PROFILER target section, select **Hardware generation** (`MK1` or

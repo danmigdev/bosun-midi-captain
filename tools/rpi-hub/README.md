@@ -1,6 +1,6 @@
 # Raspberry Pi setup
 
-Connect the MIDI Captain and Kemper Player to a Raspberry Pi to use Bosun over the local network and show Stage on an HDMI display. The installer sets up the hub, automatic MIDI connection, Stage startup, firmware update support and the read-only display viewer.
+Connect the MIDI Captain and Kemper to a Raspberry Pi to use Bosun over the local network and show Bosun Stage on an HDMI display. Player, Head, Rack and Kemper Stage are included in the experimental Kemper support; Head/Rack/Stage hardware validation is pending. The installer sets up the hub, automatic MIDI connection, Stage startup, firmware update support and the read-only display viewer.
 
 ## Requirements
 
@@ -9,7 +9,13 @@ Connect the MIDI Captain and Kemper Player to a Raspberry Pi to use Bosun over t
 - A full copy of this repository. Keep the Pi software and desktop app on matching releases.
 - For remote administration, enable SSH using your own account and connection settings.
 
-Native firmware updates require the supported RP2040 Captain with 8 MiB flash. The automatic USB-MIDI connection is configured for the Captain and Kemper Player.
+Native firmware updates require the supported RP2040 Captain with 8 MiB flash. The automatic USB-MIDI connection matches Captain and Kemper/PROFILER device names. Use the USB connection supported by your model and installed Kemper OS.
+
+For Head/Rack/Stage connected by MIDI DIN, connect Captain OUT to Kemper IN
+and Kemper OUT to Captain IN. Connect only the Captain to the Pi by USB and
+leave Kemper USB disconnected to avoid duplicate MIDI routes. The Pi still
+provides editing and the Bosun Stage display; the DIN connection needs no USB
+MIDI bridge. See [PROFILER setup](../../docs/kemper-head.md).
 
 ## Install on the Pi
 

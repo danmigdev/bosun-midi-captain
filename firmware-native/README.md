@@ -1,12 +1,13 @@
 # Native firmware: build and installation
 
 Bosun's maintained MIDI Captain firmware runs in C. Supported native profile
-kinds are Kemper Player and generic MIDI. Existing CircuitPython installations
+kinds are Kemper Player, Kemper PROFILER (Head/Rack/Stage), and Generic MIDI.
+Kemper family support is experimental. Existing CircuitPython installations
 can migrate through **Update Bosun**; CircuitPython is no longer maintained as a
 parallel firmware target.
 
-This branch also includes a separate [experimental Kemper PROFILER plugin](../docs/kemper-head.md)
-for Head, Rack and Stage, sharing the Player engine and schemas. It adds MK1/MK2
+The shared [experimental Kemper PROFILER plugin](../docs/kemper-head.md)
+for Head, Rack and Stage shares the Player engine and schemas. It adds MK1/MK2
 capabilities, Performance/Browse selection and banks 1–125. Hardware validation remains pending.
 
 ## Install or update
@@ -21,7 +22,7 @@ RP2040 MIDI Captain with **8 MiB flash**.
 A raw UF2 does not migrate configuration or create a recovery backup. Use the
 complete update procedure when replacing an existing installation.
 
-Builds containing the manual recovery shortcut can enter **RPI-RP2** by holding
+From Bosun 0.7.1, enter **RPI-RP2** by holding
 **switch 1 (top-left)** alone while powering on and keeping it held for three
 seconds. Bosun Desktop also offers **Maintenance → Enter bootloader** over a
 direct USB connection. See [bootloader entry](../docs/firmware-updates.md#enter-the-bootloader-from-bosun)

@@ -1,17 +1,25 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.6.10 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.6.10) includes `Bosun-0.6.10-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.7.1 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.7.1) includes `Bosun-0.7.1-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
-These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper PROFILER Player**. Other Captain or Kemper models need their own compatibility check. Use **Desktop 0.6.8 or later** for stock PaintAudio 5.15; 0.6.7 cannot discover it. The corrected installer passed a complete Windows installation from 5.15, including configuration restoration. See the [hardware test and release status](stock-installation-test.md). macOS/Linux operation, other stock versions and installation on a fresh Pi card remain unverified.
+These instructions target the **10-switch RP2040 MIDI Captain with 8 MiB flash** and **Kemper Player, Head, Rack and Stage**. Kemper family support is experimental; Head/Rack/Stage hardware validation is pending. Select your model in the wizard, then the connection, host and display. Use the **Kemper Player** profile for Player and **Kemper PROFILER** for Head/Rack/Stage. For PROFILER profiles, select the matching MK1/MK2 generation and Performance/Browse mode; Bosun does not switch the Kemper's mode for you. See [PROFILER setup and limitations](kemper-head.md).
+
+Windows first installation from stock PaintAudio 5.15 passed a hardware test with Desktop 0.6.8 or later, including configuration restoration. See the [hardware test record](stock-installation-test.md). macOS/Linux operation, other stock versions, other Captain models and installation on a fresh Pi card remain unverified.
 
 ## 1. Choose what you want
+
+For USB, use the host/device ports and USB MIDI support appropriate to your
+Kemper model and OS. The direct USB diagram below shows the Player's ports;
+do not assume every Kemper generation has the same ports or capabilities.
+Head/Rack/Stage can alternatively use the two-cable DIN layout below with any
+of the host/display choices.
 
 | Setup | What handles MIDI? | Where is Stage? | Must stay running while playing |
 | --- | --- | --- | --- |
 | Captain directly to Player | Player USB host | Captain display only; no external Stage | Captain and Player |
-| Captain + Android + Player | Bosun on Android | Phone/tablet | Android and Bosun |
-| Captain + computer + Player | Bosun Desktop | Computer | Computer and Bosun |
-| Captain + Pi 3 + Player | Raspberry Pi | Optional app/browser over the network | Pi |
+| Captain + Android + Kemper | Bosun on Android | Phone/tablet | Android and Bosun |
+| Captain + computer + Kemper | Bosun Desktop | Computer | Computer and Bosun |
+| Captain + Pi 3 + Kemper | Raspberry Pi | Optional app/browser over the network | Pi |
 | Pi 3 + HDMI display | Raspberry Pi | HDMI screen, starts automatically | Pi and display |
 | Pi + Android over Wi-Fi | Raspberry Pi | Phone/tablet over Wi-Fi | Pi; phone can disconnect |
 
@@ -24,40 +32,54 @@ flowchart LR
 
 Prepare and save the Captain profile on your computer first. Then move its USB cable to the Player. Reconnect to your computer when you want to edit. Connecting a phone to the Player's other USB port does not expose the Captain's Bosun data connection.
 
+### Head, Rack or Kemper Stage over MIDI DIN
+
+```mermaid
+flowchart LR
+  Captain["Captain MIDI OUT"] --> KemperIn["Kemper MIDI IN"]
+  KemperOut["Kemper MIDI OUT (not THRU)"] --> CaptainIn["Captain MIDI IN"]
+  CaptainUSB["Captain USB-B"] <-->|"Optional USB data"| Host["Android, Desktop or Pi: editor + Bosun Stage"]
+```
+
+Match the MIDI channel and connect both DIN cables for feedback. Power the
+Captain separately or from the USB host. Leave Kemper USB disconnected in
+this layout; no USB MIDI bridge is needed. Without a host, use the Captain's
+built-in display. With a Pi, HDMI and wireless Android work as shown below.
+
 ### Android as hub and Stage
 
 ```mermaid
 flowchart LR
   Captain["Captain USB-B"] <-->|USB data| Hub["USB hub"]
-  Player["Player USB-B"] <-->|USB data| Hub
+  Kemper["Kemper USB device port"] <-->|USB data| Hub
   Hub <-->|USB host / OTG adapter| Android["Android: Bosun MIDI bridge + editor + Stage"]
 ```
 
-Install `bosun.apk` from the latest release. Android 10 or later and USB host/OTG support are required. Accept USB permissions, connect the Captain, check **Bridge ON**, and open **Stage**. Leave Bosun running while playing. Use a powered hub if the phone cannot supply enough power; simultaneous phone charging depends on the phone and hub. The Player uses its own power supply.
+Install `bosun.apk` from the latest release. Android 10 or later and USB host/OTG support are required. Accept USB permissions, connect the Captain, check **Bridge ON**, and open **Stage**. Leave Bosun running while playing. Use a powered hub if the phone cannot supply enough power; simultaneous phone charging depends on the phone and hub. The Kemper uses its own power supply.
 
-For the computer setup, connect both USB-B ports to the computer's USB ports or a hub. Bosun Desktop provides the same MIDI bridge and Stage roles.
+For the computer setup, connect both USB device ports to the computer's USB ports or a hub. Bosun Desktop provides the same MIDI bridge and Stage roles.
 
 ### Raspberry Pi, with optional HDMI and wireless Android
 
 ```mermaid
 flowchart LR
   Captain["Captain USB-B"] <-->|USB data| Pi["Pi 3 USB-A ports: Bosun hub + MIDI"]
-  Player["Player USB-B"] <-->|USB data| Pi
+  Kemper["Kemper USB device port"] <-->|USB data| Pi
   Pi -->|HDMI video| Display["Optional Stage screen"]
   Power["Separate display supply"] -->|Power| Display
   Pi <-.->|Same LAN / configured hotspot| App["Optional Android or Desktop: editor + Stage"]
 ```
 
-Power the Pi and Player with their own supplies. HDMI supplies video, not display power. For touch input, also connect the display's USB touch cable to the Pi; a plain screen only shows Stage. Once configured, the Pi handles MIDI independently of the editing app.
+Power the Pi and Kemper with their own supplies. HDMI supplies video, not display power. For touch input, also connect the display's USB touch cable to the Pi; a plain screen only shows Stage. Once configured, the Pi handles MIDI independently of the editing app.
 
 ## 2. Install native firmware on the Captain
 
-1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/latest). On Windows, extract the entire folder and open `Bosun.exe`.
+1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.7.1). On Windows, extract the entire folder and open `Bosun.exe`.
 2. Connect **Captain USB-B directly to the computer**, using a data cable. This temporary connection is needed even if your final setup uses Android or a Pi.
 3. Open **Setup guide → Prepare the Captain → Install native firmware**. Confirm the supported model, selected device and displayed native version, then press **Install**.
 4. Bosun saves and verifies the full original firmware and files before writing. Keep the computer and Captain powered and the USB cable connected. The firmware installs directly as native Bosun; no old Bosun or CircuitPython installation is needed.
-5. Bosun requests the USB bootloader automatically. Keep the Captain on the **same USB port**. If this fails, follow your current firmware's bootloader procedure. PaintAudio 5 supplies `MIDICAPTAINBOOT.HTML`: open it in Chrome or Edge, choose **BOOT**, and select the Captain serial device. The installer continues when `RPI-RP2` appears. Holding footswitch **1** while powering on opens **USB Setup**, not the ROM bootloader.
-6. Wait for **Bosun installed**, close the installer, and connect in the editor. Create a **Kemper Player** profile, assign the footswitches and save.
+5. Bosun requests the USB bootloader automatically. Keep the Captain on the **same USB port**. If this fails, follow your current firmware's bootloader procedure. PaintAudio 5 supplies `MIDICAPTAINBOOT.HTML`: open it in Chrome or Edge, choose **BOOT**, and select the Captain serial device. The installer continues when `RPI-RP2` appears. On **stock PaintAudio firmware**, holding footswitch **1** while powering on opens **USB Setup**, not the ROM bootloader. With Bosun 0.7.1 installed, hold switch 1 for three seconds at power-on to enter RPI-RP2 instead.
+6. Wait for **Bosun installed**, close the installer, and connect in the editor. Create the **Kemper Player** or **Kemper PROFILER** profile for your model, assign the footswitches and save.
 
 Factory settings remain in the full backup; they are not translated into Bosun profiles. Already-native devices use **Update firmware (USB)** instead of first installation. Existing Bosun CircuitPython profiles use the existing Pi migration procedure.
 
@@ -70,7 +92,7 @@ You need a Pi 3, its power supply, a microSD of at least 16 GB, a card reader, a
 3. Write and verify the card. Eject it, insert it into the powered-off Pi, connect its network and power, and let first boot finish. If Windows asks to format a partition, cancel.
 4. In Desktop's guide select your Pi configuration and **Prepare the host → Save Raspberry Pi package**. Save the file, enter the username chosen in Imager and `bosun.local` (or the Pi's IP address).
 5. Open **PowerShell** on Windows and paste the generated command. It copies the package and runs the installer. Enter your SSH password when prompted; password characters are not displayed. For a first SSH connection, compare the host-key fingerprint with the Pi before accepting it.
-6. Wait for **Bosun ready**. Stage is already compiled in the package; you do not need Node, npm or Git on the Pi. Connect Captain and Player to two Pi USB-A ports. If using a screen, connect HDMI and its separate power.
+6. Wait for **Bosun ready**. Stage is already compiled in the package; you do not need Node, npm or Git on the Pi. Connect Captain and Kemper to two Pi USB-A ports. If using a screen, connect HDMI and its separate power.
 7. In the app choose **Raspberry Pi (network) → Find Raspberry Pi**. For Stage in a browser, open `http://bosun.local:8080/`; replace the hostname with your chosen name or Pi IP if necessary.
 
 The package installs the hub, MIDI bridge and Stage services. It does not flash the Captain, enable a hotspot, or install an early boot logo on a fresh card. Desktop does not yet write the entire card itself. The existing [Pi setup instructions](../tools/rpi-hub/README.md) cover manual installation, optional hotspot and boot branding.
@@ -79,19 +101,19 @@ If installation fails, keep the error and check the Pi's Internet connection, us
 
 ## 4. Check the result
 
-Press a Captain footswitch assigned to a rig. The Player must change rig, the Captain should receive feedback, and Stage should follow wherever your setup includes it. Test an effect too. Save the profile before unplugging.
+Press a Captain footswitch assigned to a rig. The Kemper must change rig, the Captain should receive feedback, and Stage should follow wherever your setup includes it. Test an effect too. Save the profile before unplugging.
 
-For Android or Desktop acting as the MIDI host, check **Bridge ON** and leave Bosun running. For a Pi host, close the remote editing app and confirm the Captain still controls the Player.
+For Android or Desktop bridging USB MIDI, check **Bridge ON** and leave Bosun running. DIN needs no USB bridge. For a Pi host, close the remote editing app and confirm the Captain still controls the Kemper.
 
 ## Frequently asked questions
 
 **Can Android replace the Pi?** Yes, with compatible USB host/OTG and a hub. It runs the MIDI bridge, editor and Stage. Firmware installation still uses Desktop. Android does not provide the Pi's network-sharing service.
 
-**Can I edit without a Player?** Yes. Connect the Captain directly to Desktop or Android USB host/OTG, select **USB** and accept any Android USB permission prompt. A Player and a USB hub are not needed just to configure the Captain.
+**Can I edit without a Kemper?** Yes. Connect the Captain directly to Desktop or Android USB host/OTG, select **USB** and accept any Android USB permission prompt. A Kemper and a USB hub are not needed just to configure the Captain.
 
-**Does a USB hub alone route MIDI?** No. It adds USB ports. Android, Desktop or the Pi must run the MIDI bridge. The direct Player USB-A connection uses the Player's USB host instead.
+**Does a USB hub alone route MIDI?** No. It adds USB ports. Android, Desktop or the Pi must run the MIDI bridge. A direct connection to a compatible Kemper USB host uses that host instead; check your model's USB MIDI support.
 
-**Can the Captain connect to two USB hosts at once?** No. Choose the Player, Android, computer or Pi as its host. A splitter cannot share the Captain's USB-B data connection. Access a Pi-connected Captain through the Pi network connection.
+**Can the Captain connect to two USB hosts at once?** No. Choose the Kemper, Android, computer or Pi as its host. A splitter cannot share the Captain's USB-B data connection. Access a Pi-connected Captain through the Pi network connection.
 
 **Is Internet required on stage?** No, after setup. Network access requires a local network or the separately configured Pi hotspot; it does not require Internet.
 
@@ -101,6 +123,14 @@ For Android or Desktop acting as the MIDI host, check **Bridge ON** and leave Bo
 
 **The Pi is missing.** Keep Desktop or Android on the same LAN as the Pi and choose **Raspberry Pi (network) → Find Raspberry Pi → Connect**. If discovery fails, enter the Pi's hostname/IP and port **9876** manually. With the [configured Pi hotspot](../tools/rpi-hub/hotspot/README.md), join its Wi-Fi and use **10.42.0.1**, unless you changed the default address. Keep that Wi-Fi connection if the device reports no internet. The Captain stays connected to the Pi by USB.
 
-**Stage opens but does not follow the Player.** Check the chosen wiring diagram, the Kemper Player profile and the bridge. Seeing the page alone does not verify the MIDI connection.
+**Stage opens but does not follow the Kemper.** Check the chosen wiring diagram, the correct Kemper profile and MIDI channel. With a USB host, check the bridge; with DIN, check both cables and avoid a duplicate USB MIDI route. Seeing the page alone does not verify the MIDI connection.
+
+**Can I restore the stock firmware without Bosun?** Yes. Enter RPI-RP2 using
+**Maintenance → Enter bootloader** over direct USB, or hold **switch 1
+(top-left)** alone for three seconds while powering on with Bosun 0.7.1 or
+later installed. Then follow PaintAudio's official recovery procedure for your
+exact Captain model. You are responsible for retaining and restoring your
+pre-Bosun system backup and settings; a fresh stock installation is not the
+same as restoring your previous configuration.
 
 For Morph footswitches, expression pedals and the Stage bar, follow the [Morph guide](morph.md).

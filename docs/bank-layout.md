@@ -1,9 +1,9 @@
 # Bank layout
 
 Open **Settings → Banks** and set **Rigs per bank** (1–10) and **Number of banks**
-(1–99), then click **Save settings**. Both settings belong to the active profile
+(1–125), then click **Save settings**. Both settings belong to the active profile
 and are included in configuration backups. Profiles without these settings use
-five slots and allow all 99 banks. For a device with three rigs per bank and only
+five slots and allow all 125 banks. For a device with three rigs per bank and only
 two banks in use, select three rigs and two banks in its Generic MIDI profile.
 
 The Patches grid uses the selected number of columns. **New patch** and **Clone**
@@ -34,8 +34,9 @@ These settings describe the layout in Bosun; they do not change the target
 device's MIDI protocol or rewrite saved Program Changes. In a Generic MIDI
 profile, configure the target preset's Program Change (and Bank Select where
 needed) in each patch's **On enter** action. Use **Preset navigation row** in
-Settings to assign switches to rig slots within the current bank. Kemper-specific
-MIDI addressing retains its five-rig structure. Explicit patch selections, saved
+Settings to assign switches to rig slots within the current bank. Player and PROFILER Performance
+MIDI addressing retain their five-rig structure. PROFILER Browse uses assigned
+MIDI programs instead; see [PROFILER modes](kemper-head.md#choosing-rigs). Explicit patch selections, saved
 MIDI actions, setlist sequences and following rig changes from the Kemper remain
 available even for banks outside the navigation limit.
 
@@ -46,3 +47,7 @@ physical switches**. Update the editor and Stage as well; the Pi version receive
 the limit through the firmware's compact device information. Changing only the
 rigs-per-bank layout does not require a firmware update. Desktop and Android
 share the same editor components.
+
+Native firmware supports up to 625 configured patches across banks 1–125.
+This is a catalog limit, not a promise of 125 banks of ten patches. Save in
+batches when editing large setups: at most 128 unsaved drafts are supported.

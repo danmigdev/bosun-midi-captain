@@ -1,9 +1,12 @@
-# Bosun: MIDI Captain firmware for Kemper Player
+# Bosun: MIDI Captain firmware for Kemper
 
 Bosun is open-source alternative firmware for the **10-switch PaintAudio MIDI
 Captain with RP2040 and 8 MiB flash**. Configure footswitches, banks, rigs, LEDs
 and expression pedals with Bosun Desktop or Android. The maintained native
-firmware supports **Kemper PROFILER Player** and **Generic MIDI** profiles.
+firmware supports **Kemper Player, Head, Rack and Stage**, plus **Generic MIDI**.
+Kemper support across the family is experimental: Player has previous hardware
+validation; Head/Rack/Stage validation is pending. Choose the Player profile or
+the shared [PROFILER profile](docs/kemper-head.md) for Head/Rack/Stage.
 
 **Stage** shows rig names, effect states, a tuner and Morph controls on a phone,
 tablet, computer or Raspberry Pi display. Android and Desktop can also handle
@@ -17,9 +20,9 @@ the MIDI bridge; a Pi shares the Captain connection across the local network.
 
 ## Download and install
 
-These instructions cover **Bosun 0.6.10**. Download the matching packages from
+These instructions cover **Bosun 0.7.1**. Download the matching packages from
 [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
-See [what changed in 0.6.10](docs/releases/0.6.10.md).
+See [what changed in 0.7.1](docs/releases/0.7.1.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
@@ -32,17 +35,18 @@ See [what changed in 0.6.10](docs/releases/0.6.10.md).
 [illustrated setup guide and FAQ](docs/first-setup.md). It covers six
 configurations, including Android as hub and a Pi with an HDMI display.
 The same wizard is available as an
-[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.6.10/Bosun-0.6.10-setup-guide.html).
+[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.7.1/Bosun-0.7.1-setup-guide.html).
 Keep the app, Captain firmware and Pi components on matching releases.
 
 ## Connections
 
 The Captain's USB cable carries MIDI commands/feedback and the Bosun data
 connection used by the editor and Stage. Its USB-B port connects to one host:
-the Player, Android, a computer or a Pi. A USB hub alone does not route MIDI.
+a compatible Kemper USB host, Android, a computer or a Pi. A USB hub alone does not route MIDI.
 
 Choose the matching [wiring diagram](docs/first-setup.md#1-choose-what-you-want)
-before connecting the devices. The guide covers direct Player USB, Android,
+before connecting the devices. Select your Kemper model and USB or, for
+Head/Rack/Stage, two-way MIDI DIN. The guide covers direct control, Android,
 Desktop, a Pi without a display, a Pi with HDMI, and a Pi with wireless Android.
 An [editable draw.io overview](docs/diagrams/bosun-connections.drawio) is also
 available.
@@ -60,7 +64,7 @@ discovery is unavailable. Stage opens in a browser at
 Connect the Captain directly to the computer and open **Setup guide → Prepare
 the Captain → Install native firmware**. Desktop installs the bundled native
 release and saves a verified full factory backup first. Create and save a
-Kemper Player or Generic MIDI profile after installation.
+profile for your Kemper model or a Generic MIDI profile after installation.
 
 Follow the [installation steps](docs/first-setup.md#2-install-native-firmware-on-the-captain)
 for model checks, USB bootloader instructions and backup handling. The
@@ -92,7 +96,7 @@ version of pending patch changes.
 
 <a id="stage"></a>
 
-## Stage: external display for Kemper Player
+## Stage: external display for Kemper
 
 Stage follows the playing rig, bank, effects and expression mode. Tap a switch
 tile to operate its configured action. Activating the Kemper tuner opens the
