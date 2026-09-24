@@ -1,0 +1,2 @@
+# Keep generated exports byte-identical to their verification manifest.
+/final_stand/** -text

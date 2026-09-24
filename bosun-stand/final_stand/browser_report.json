@@ -1,0 +1,5093 @@
+{
+  "browser": "Chrome headless / WebGL",
+  "language": "en",
+  "checks": [
+    {
+      "fixed_parts_use_CAD_coordinates": true
+    },
+    {
+      "light_grey_background": {
+        "pixel": [
+          230,
+          232,
+          235,
+          255
+        ],
+        "clear": [
+          0.9019607901573181,
+          0.9098039269447327,
+          0.9215686321258545,
+          1
+        ],
+        "viewport": "rgb(230, 232, 235)",
+        "canvas": "rgb(230, 232, 235)",
+        "hint": "rgb(68, 80, 92)"
+      }
+    },
+    {
+      "camera_pointer_full_revolution": "horizontal",
+      "periodic": true,
+      "finite_orthonormal_frames": true,
+      "underside_accessible": false
+    },
+    {
+      "camera_pointer_full_revolution": "vertical",
+      "periodic": true,
+      "finite_orthonormal_frames": true,
+      "underside_accessible": true
+    },
+    {
+      "camera_repeated_pointer_drags": 4,
+      "both_axes_periodic": true
+    },
+    {
+      "camera_vertical_poles_and_angle_wrap": true,
+      "exact_poles_finite_and_orthonormal": true,
+      "orientation_continuous": true
+    },
+    {
+      "camera_rotation_preserves_arm_and_display_pose": true
+    },
+    {
+      "camera_view_buttons_restore_orientation": [
+        "iso",
+        "rear",
+        "side",
+        "top"
+      ]
+    },
+    {
+      "all_motion_path_endpoints": true
+    },
+    {
+      "independent_control_ranges": {
+        "armPosition": {
+          "min": -180,
+          "max": 180,
+          "step": "any"
+        },
+        "displayRotation": {
+          "min": -180,
+          "max": 180,
+          "step": "any"
+        }
+      }
+    },
+    {
+      "independent_controls_from_preset": "front",
+      "arm_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": true,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_pivot_unchanged": true
+    },
+    {
+      "independent_controls_from_preset": "rear_flat",
+      "arm_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": true,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_pivot_unchanged": true
+    },
+    {
+      "independent_controls_from_preset": "rear",
+      "arm_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": 12.857142857142858,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_pivot_unchanged": true
+    },
+    {
+      "independent_controls_from_preset": "transport",
+      "arm_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_state": {
+        "mode": "custom",
+        "armAngle": -12.345,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          12.337444829060846,
+          140.54906369989126
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "display_pivot_unchanged": true
+    },
+    {
+      "joint_release_directions": [
+        1.4,
+        -1.4
+      ]
+    },
+    {
+      "free_control": "armPosition",
+      "target": -180,
+      "state": {
+        "mode": "custom",
+        "armAngle": -180,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          34.999999999999986,
+          -69
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_control": "armPosition",
+      "target": 180,
+      "state": {
+        "mode": "custom",
+        "armAngle": 180,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          35.000000000000014,
+          -69
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_control": "armPosition",
+      "target": 12.375,
+      "state": {
+        "mode": "custom",
+        "armAngle": 12.375,
+        "angle": -37.625,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          57.716770224895384,
+          140.53718342001247
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_control": "displayRotation",
+      "target": -180,
+      "state": {
+        "mode": "custom",
+        "armAngle": 12.375,
+        "angle": -180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          57.716770224895384,
+          140.53718342001247
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_control": "displayRotation",
+      "target": 180,
+      "state": {
+        "mode": "custom",
+        "armAngle": 12.375,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          57.716770224895384,
+          140.53718342001247
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_control": "displayRotation",
+      "target": 43.875,
+      "state": {
+        "mode": "custom",
+        "armAngle": 12.375,
+        "angle": 43.875,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          57.716770224895384,
+          140.53718342001247
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_arm_key": "Home",
+      "shift": false,
+      "state": {
+        "mode": "custom",
+        "armAngle": -180,
+        "angle": 43.875,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          34.999999999999986,
+          -69
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_arm_key": "ArrowRight",
+      "shift": false,
+      "state": {
+        "mode": "custom",
+        "armAngle": -179,
+        "angle": 43.875,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          33.15004491764795,
+          -68.98385568657747
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_arm_key": "ArrowRight",
+      "shift": true,
+      "state": {
+        "mode": "custom",
+        "armAngle": -178.9,
+        "angle": 43.875,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          32.965071105632916,
+          -68.98046548489428
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_arm_key": "End",
+      "shift": false,
+      "state": {
+        "mode": "custom",
+        "armAngle": 180,
+        "angle": 43.875,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 1.4,
+        "teethAligned": false,
+        "locked": false,
+        "horizontal": false,
+        "pivot": [
+          0,
+          35.000000000000014,
+          -69
+        ],
+        "clearance": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "03_arm_right",
+              "obstacle": "floor",
+              "label": "Right arm / floor"
+            },
+            {
+              "part": "03_arm_left",
+              "obstacle": "floor",
+              "label": "Left arm / floor"
+            },
+            {
+              "part": "07_upper_knob_right",
+              "obstacle": "floor",
+              "label": "Hand knob / floor"
+            },
+            {
+              "part": "04_display_crossbar",
+              "obstacle": "floor",
+              "label": "Display crossbar / floor"
+            },
+            {
+              "part": "06_spacer_1",
+              "obstacle": "floor",
+              "label": "Display spacer / floor"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "explicit_snap_to_teeth": {
+        "mode": "custom",
+        "armAngle": 25.714285714285715,
+        "angle": 51.42857142857143,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          80.99167634646116,
+          132.50269999765644
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "free_angle_clearance": {
+        "floor_contact": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "floor",
+              "label": "Display / floor"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "cable_contact": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "cable_space",
+              "label": "Display / Reserved cable space"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "body_contact": {
+          "status": "possible_contact",
+          "contacts": [
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "Captain_nominal_envelope",
+              "label": "Display / MIDI Captain"
+            },
+            {
+              "part": "Display_nominal_envelope",
+              "obstacle": "Switch_reference_-116_-25",
+              "label": "Display / Front switches"
+            }
+          ],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "clear_pose": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "clear_diagonal": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        }
+      }
+    },
+    {
+      "custom_to_preset_without_unchecked_animation": {
+        "mode": "front",
+        "armAngle": -90,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      }
+    },
+    {
+      "pose": "rear_flat",
+      "state": {
+        "mode": "rear_flat",
+        "armAngle": 64.28571428571429,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          130.50269999765644,
+          82.99167634646113
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": true,
+      "motion_samples": [
+        [
+          -90,
+          90,
+          0
+        ],
+        [
+          -90,
+          90,
+          0.8214705884807232
+        ],
+        [
+          -88.86554621591144,
+          90,
+          1.4
+        ],
+        [
+          -79.86554621591146,
+          90,
+          1.4
+        ],
+        [
+          -70.85474189418277,
+          90,
+          1.4
+        ],
+        [
+          -61.84393757245407,
+          90,
+          1.4
+        ],
+        [
+          -52.84393757245405,
+          90,
+          1.4
+        ],
+        [
+          -43.85474189418276,
+          90,
+          1.4
+        ],
+        [
+          -34.833133250725375,
+          90,
+          1.4
+        ],
+        [
+          -25.84393757245408,
+          90,
+          1.4
+        ],
+        [
+          -18.637454979416844,
+          90,
+          1.4
+        ],
+        [
+          -9.637454979416873,
+          90,
+          1.4
+        ],
+        [
+          -0.6158463359594748,
+          90,
+          1.4
+        ],
+        [
+          8.38415366404054,
+          90,
+          1.4
+        ],
+        [
+          17.394957985769196,
+          90,
+          1.4
+        ],
+        [
+          26.384153664040582,
+          90,
+          1.4
+        ],
+        [
+          35.39495798576924,
+          90,
+          1.4
+        ],
+        [
+          44.39495798576925,
+          90,
+          1.4
+        ],
+        [
+          51.61224490053519,
+          90,
+          1.4
+        ],
+        [
+          60.612244900535075,
+          90,
+          1.4
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.8914705879898609
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.034999999754568294
+        ],
+        [
+          64.28571428571429,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "front",
+      "state": {
+        "mode": "front",
+        "armAngle": -90,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": true,
+      "motion_samples": [
+        [
+          64.28571428571429,
+          90,
+          -0.10366176433773863
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.7545588238975542
+        ],
+        [
+          62.070828327468575,
+          90,
+          1.4
+        ],
+        [
+          53.06002400573992,
+          90,
+          1.4
+        ],
+        [
+          44.04921968401127,
+          90,
+          1.4
+        ],
+        [
+          35.060024005739876,
+          90,
+          1.4
+        ],
+        [
+          27.831932769245334,
+          90,
+          1.4
+        ],
+        [
+          18.842737090974033,
+          90,
+          1.4
+        ],
+        [
+          9.82112844751665,
+          90,
+          1.4
+        ],
+        [
+          0.8211284475166281,
+          90,
+          1.4
+        ],
+        [
+          -8.168067230754644,
+          90,
+          1.4
+        ],
+        [
+          -17.20048019594077,
+          90,
+          1.4
+        ],
+        [
+          -26.178871552483315,
+          90,
+          1.4
+        ],
+        [
+          -35.17887155248336,
+          90,
+          1.4
+        ],
+        [
+          -42.40696278897801,
+          90,
+          1.4
+        ],
+        [
+          -51.41776711070665,
+          90,
+          1.4
+        ],
+        [
+          -60.39615846724932,
+          90,
+          1.4
+        ],
+        [
+          -69.41776711070669,
+          90,
+          1.4
+        ],
+        [
+          -78.40696278897799,
+          90,
+          1.4
+        ],
+        [
+          -87.41776711070663,
+          90,
+          1.4
+        ],
+        [
+          -89.99999999999999,
+          90,
+          0.7864705878671497
+        ],
+        [
+          -90,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear_flat",
+      "state": {
+        "mode": "rear_flat",
+        "armAngle": 64.28571428571429,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          130.50269999765644,
+          82.99167634646113
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": true,
+      "motion_samples": [
+        [
+          -90,
+          90,
+          0
+        ],
+        [
+          -90,
+          90,
+          0.8101470588235274
+        ],
+        [
+          -87.18007202881148,
+          90,
+          1.4
+        ],
+        [
+          -79.97358943577429,
+          90,
+          1.4
+        ],
+        [
+          -70.97358943577427,
+          90,
+          1.4
+        ],
+        [
+          -61.97358943577436,
+          90,
+          1.4
+        ],
+        [
+          -52.9627851140456,
+          90,
+          1.4
+        ],
+        [
+          -43.951980792316945,
+          90,
+          1.4
+        ],
+        [
+          -34.962785114045666,
+          90,
+          1.4
+        ],
+        [
+          -25.951980792316903,
+          90,
+          1.4
+        ],
+        [
+          -18.73469387755098,
+          90,
+          1.4
+        ],
+        [
+          -9.745498199279695,
+          90,
+          1.4
+        ],
+        [
+          -0.7346938775509528,
+          90,
+          1.4
+        ],
+        [
+          8.276110444177718,
+          90,
+          1.4
+        ],
+        [
+          17.286914765906346,
+          90,
+          1.4
+        ],
+        [
+          26.28691476590629,
+          90,
+          1.4
+        ],
+        [
+          35.276110444177675,
+          90,
+          1.4
+        ],
+        [
+          42.48259303721497,
+          90,
+          1.4
+        ],
+        [
+          51.48259303721491,
+          90,
+          1.4
+        ],
+        [
+          60.493397358943525,
+          90,
+          1.4
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.9027941176470656
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.045294117647055314
+        ],
+        [
+          64.28571428571429,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear",
+      "state": {
+        "mode": "rear",
+        "armAngle": 77.14285714285714,
+        "angle": 12.857142857142858,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          138.34235869127332,
+          60.58721899936933
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          90,
+          -0.02598333323398947
+        ],
+        [
+          -90,
+          90,
+          0.3208333334326729
+        ],
+        [
+          -90,
+          90,
+          0.6675000000993425
+        ],
+        [
+          -90,
+          90,
+          1.015000000099341
+        ],
+        [
+          -90,
+          90,
+          1.2925000000993427
+        ],
+        [
+          -77.36151602977202,
+          90,
+          1.4
+        ],
+        [
+          -59.19096209391229,
+          90,
+          1.4
+        ],
+        [
+          -40.954810490413436,
+          90,
+          1.4
+        ],
+        [
+          -22.74052477612787,
+          90,
+          1.4
+        ],
+        [
+          -4.48250728341651,
+          90,
+          1.4
+        ],
+        [
+          13.753644320081946,
+          90,
+          1.4
+        ],
+        [
+          28.316326535825482,
+          90,
+          1.4
+        ],
+        [
+          46.5087463608985,
+          90,
+          1.4
+        ],
+        [
+          64.17091836604361,
+          90,
+          1.4
+        ],
+        [
+          59.611880465169,
+          90,
+          1.4
+        ],
+        [
+          55.06377550890073,
+          90,
+          1.4
+        ],
+        [
+          50.49927113572289,
+          90,
+          1.4
+        ],
+        [
+          45.9456997071515,
+          90,
+          1.4
+        ],
+        [
+          42.305029153215614,
+          90,
+          1.4
+        ],
+        [
+          37.740524780037774,
+          90,
+          1.4
+        ],
+        [
+          33.1869533514664,
+          90,
+          1.4
+        ],
+        [
+          28.62791545059178,
+          90,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          84.55174926679265,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          69.35495626387728,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          54.17638483530566,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          42.00437317349822,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          26.825801744926885,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          11.66545189069933,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -3.5131195378719013,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -18.72813411513134,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -33.906705543703026,
+          1.4
+        ],
+        [
+          28.70991253818085,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          34.78134110960948,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          40.85276968103799,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          46.92419825246667,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          53.00291545363284,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          59.07434402506135,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          65.16034985596515,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          70.01457726121298,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          76.09329446237915,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -33.54227405074042,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -27.470845479311762,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -21.399416907883246,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.320699706717075,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -9.249271135288424,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -4.387755100303103,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          1.6763848413879003,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          7.755102042554064,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.3441666665673278
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.99708333323399
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.6495833332339931
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.30249999990066107
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.02499999990066032
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "transport",
+      "state": {
+        "mode": "transport",
+        "armAngle": -90,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          90,
+          -0.06166666651765809
+        ],
+        [
+          -90,
+          90,
+          0.2854166668156798
+        ],
+        [
+          -90,
+          90,
+          0.6329166668156783
+        ],
+        [
+          -90,
+          90,
+          0.9800000001490086
+        ],
+        [
+          -90,
+          90,
+          1.3275000001490145
+        ],
+        [
+          -89.27842565558568,
+          90,
+          1.4
+        ],
+        [
+          -88.3677113698714,
+          90,
+          1.4
+        ],
+        [
+          -87.63848396462357,
+          90,
+          1.4
+        ],
+        [
+          -86.72667638444865,
+          90,
+          1.4
+        ],
+        [
+          -85.81596209873437,
+          90,
+          1.4
+        ],
+        [
+          -84.90524781302008,
+          90,
+          1.4
+        ],
+        [
+          -83.9945335273058,
+          90,
+          1.4
+        ],
+        [
+          -83.08272594713088,
+          90,
+          1.4
+        ],
+        [
+          -82.17091836695593,
+          90,
+          1.4
+        ],
+        [
+          -81.44169096170813,
+          90,
+          1.4
+        ],
+        [
+          -80.53097667599384,
+          90,
+          1.4
+        ],
+        [
+          -79.62135568474021,
+          90,
+          1.4
+        ],
+        [
+          -78.70954810456527,
+          90,
+          1.4
+        ],
+        [
+          -77.79774052439033,
+          90,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          91.79081632926756,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          98.17346939049202,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          103.27806122722679,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          109.65306122722671,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          116.03571428845119,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          122.40306122722674,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          128.7857142884512,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          135.1683673496757,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          140.2653061251859,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          146.6479591864104,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          153.0306122476349,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          159.4056122476349,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          165.78826530885937,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          172.16326530885948,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          178.5382653088594,
+          1.4
+        ],
+        [
+          -77.6621720120528,
+          180,
+          1.4
+        ],
+        [
+          -78.57397959222773,
+          180,
+          1.4
+        ],
+        [
+          -79.48469387794201,
+          180,
+          1.4
+        ],
+        [
+          -80.39650145811694,
+          180,
+          1.4
+        ],
+        [
+          -81.30830903829185,
+          180,
+          1.4
+        ],
+        [
+          -82.21902332400617,
+          180,
+          1.4
+        ],
+        [
+          -83.12973760972045,
+          180,
+          1.4
+        ],
+        [
+          -83.85896501496826,
+          180,
+          1.4
+        ],
+        [
+          -84.77077259514317,
+          180,
+          1.4
+        ],
+        [
+          -85.68148688085745,
+          180,
+          1.4
+        ],
+        [
+          -86.59220116657177,
+          180,
+          1.4
+        ],
+        [
+          -87.50400874674668,
+          180,
+          1.4
+        ],
+        [
+          -88.41581632692161,
+          180,
+          1.4
+        ],
+        [
+          -89.14395043770877,
+          180,
+          1.4
+        ],
+        [
+          -90,
+          180,
+          1.3787499998509851
+        ],
+        [
+          -90,
+          180,
+          1.031666666517655
+        ],
+        [
+          -90,
+          180,
+          0.6841666665176485
+        ],
+        [
+          -90,
+          180,
+          0.33708333318431843
+        ],
+        [
+          -90,
+          180,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "front",
+      "state": {
+        "mode": "front",
+        "armAngle": -90,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": true,
+      "motion_samples": [
+        [
+          64.28571428571429,
+          90,
+          0
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.7977941178925047
+        ],
+        [
+          61.595438172694244,
+          90,
+          1.4
+        ],
+        [
+          54.37815125792841,
+          90,
+          1.4
+        ],
+        [
+          45.36734693619957,
+          90,
+          1.4
+        ],
+        [
+          36.378151257928174,
+          90,
+          1.4
+        ],
+        [
+          27.388955579656788,
+          90,
+          1.4
+        ],
+        [
+          18.378151257928344,
+          90,
+          1.4
+        ],
+        [
+          9.378151257928423,
+          90,
+          1.4
+        ],
+        [
+          0.3565426144710244,
+          90,
+          1.4
+        ],
+        [
+          -8.654261707257817,
+          90,
+          1.4
+        ],
+        [
+          -15.839135656837655,
+          90,
+          1.4
+        ],
+        [
+          -24.83913565683757,
+          90,
+          1.4
+        ],
+        [
+          -33.860744300294954,
+          90,
+          1.4
+        ],
+        [
+          -42.86074430029488,
+          90,
+          1.4
+        ],
+        [
+          -51.860744300295195,
+          90,
+          1.4
+        ],
+        [
+          -60.860744300295124,
+          90,
+          1.4
+        ],
+        [
+          -69.87154862202358,
+          90,
+          1.4
+        ],
+        [
+          -77.06722689333232,
+          90,
+          1.4
+        ],
+        [
+          -86.08883553678972,
+          90,
+          1.4
+        ],
+        [
+          -89.99999999999999,
+          90,
+          0.9151470585780975
+        ],
+        [
+          -89.99999999999999,
+          90,
+          0.05764705857810664
+        ],
+        [
+          -90,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear",
+      "state": {
+        "mode": "rear",
+        "armAngle": 77.14285714285714,
+        "angle": 12.857142857142858,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          138.34235869127332,
+          60.58721899936933
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          64.28571428571429,
+          90,
+          -0.04166666651766111
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.3058333334823449
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.653333333482351
+        ],
+        [
+          64.28571428571429,
+          90,
+          1.0012500001490177
+        ],
+        [
+          64.28571428571429,
+          90,
+          1.3475000001490116
+        ],
+        [
+          61.92419824916496,
+          90,
+          1.4
+        ],
+        [
+          58.27696792846519,
+          90,
+          1.4
+        ],
+        [
+          54.63411078560807,
+          90,
+          1.4
+        ],
+        [
+          50.9868804649083,
+          90,
+          1.4
+        ],
+        [
+          47.33527696636603,
+          90,
+          1.4
+        ],
+        [
+          43.69679300135142,
+          90,
+          1.4
+        ],
+        [
+          40.05393585849431,
+          90,
+          1.4
+        ],
+        [
+          36.40233235995204,
+          90,
+          1.4
+        ],
+        [
+          33.49416909464591,
+          90,
+          1.4
+        ],
+        [
+          29.846938773946306,
+          90,
+          1.4
+        ],
+        [
+          26.204081631089032,
+          90,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          79.47521865367898,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          67.31778425134644,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          55.17492710848942,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          43.01749270615681,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          33.30903789566141,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          21.151603493328835,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          8.979591831521248,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -3.1486880518602476,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -15.291545194717813,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -27.463556856525386,
+          1.4
+        ],
+        [
+          26.128279885467254,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          30.017492713455653,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          34.868804666808266,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          39.73177842774126,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          44.594752188674306,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          49.4460641420269,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          54.30903790295994,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          59.166180760102755,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          63.061224491881134,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          67.92419825281418,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          72.77551020616697,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -38.08163265097592,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -33.2244897938331,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -28.361516032900056,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -23.504373175757266,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -19.609329443978865,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -14.74635568304582,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -9.889212825903027,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -5.026239064970007,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -0.17492711161739294,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          4.699708456895856,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          9.556851314038674,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.3587499998509875
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.011249999850983
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.6641666665176529
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.31666666651766173
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "transport",
+      "state": {
+        "mode": "transport",
+        "armAngle": -90,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          64.28571428571429,
+          90,
+          0
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.3191666668156813
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.6666666668156721
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.9441666668156812
+        ],
+        [
+          64.28571428571429,
+          90,
+          1.2916666668156722
+        ],
+        [
+          54.26239066429781,
+          90,
+          1.4
+        ],
+        [
+          39.67346938149936,
+          90,
+          1.4
+        ],
+        [
+          25.084548098700274,
+          90,
+          1.4
+        ],
+        [
+          10.530612238641822,
+          90,
+          1.4
+        ],
+        [
+          -4.040816332786619,
+          90,
+          1.4
+        ],
+        [
+          -15.72594752812175,
+          90,
+          1.4
+        ],
+        [
+          -30.297376099550206,
+          90,
+          1.4
+        ],
+        [
+          -44.86880467097863,
+          90,
+          1.4
+        ],
+        [
+          -59.475218665147736,
+          90,
+          1.4
+        ],
+        [
+          -74.04664723657682,
+          90,
+          1.4
+        ],
+        [
+          -88.6530612307459,
+          90,
+          1.4
+        ],
+        [
+          -88.90087463504719,
+          90,
+          1.4
+        ],
+        [
+          -87.92711370210259,
+          90,
+          1.4
+        ],
+        [
+          -86.71428571376438,
+          90,
+          1.4
+        ],
+        [
+          -85.49708454758363,
+          90,
+          1.4
+        ],
+        [
+          -84.28134110735037,
+          90,
+          1.4
+        ],
+        [
+          -83.06851311901222,
+          90,
+          1.4
+        ],
+        [
+          -81.85568513067402,
+          90,
+          1.4
+        ],
+        [
+          -80.88046647178187,
+          90,
+          1.4
+        ],
+        [
+          -79.66472303154866,
+          90,
+          1.4
+        ],
+        [
+          -78.45189504321046,
+          90,
+          1.4
+        ],
+        [
+          -77.23760932892476,
+          90,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          97.83673469752695,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          106.35714286079228,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          114.85714286079221,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          123.35714286079214,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          130.16326530977182,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          138.66326530977173,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          147.18367347303706,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          155.69387755466983,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          164.20408163630228,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          172.6938775546697,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          179.4897959220165,
+          1.4
+        ],
+        [
+          -78.2871720121831,
+          180,
+          1.4
+        ],
+        [
+          -79.50145772646887,
+          180,
+          1.4
+        ],
+        [
+          -80.71720116670207,
+          180,
+          1.4
+        ],
+        [
+          -81.92857142909277,
+          180,
+          1.4
+        ],
+        [
+          -83.14431486932598,
+          180,
+          1.4
+        ],
+        [
+          -84.36151603550674,
+          180,
+          1.4
+        ],
+        [
+          -85.33381924250384,
+          180,
+          1.4
+        ],
+        [
+          -86.54810495678953,
+          180,
+          1.4
+        ],
+        [
+          -87.76239067107524,
+          180,
+          1.4
+        ],
+        [
+          -88.97521865941346,
+          180,
+          1.4
+        ],
+        [
+          -90,
+          180,
+          1.3449999998509918
+        ],
+        [
+          -90,
+          180,
+          0.9983333331843208
+        ],
+        [
+          -90,
+          180,
+          0.7195833331843154
+        ],
+        [
+          -90,
+          180,
+          0.37333333318432105
+        ],
+        [
+          -90,
+          180,
+          0.025833333184316354
+        ],
+        [
+          -90,
+          180,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "front",
+      "state": {
+        "mode": "front",
+        "armAngle": -90,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          77.14285714285714,
+          12.857142857142858,
+          -0.04708333333333029
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.3004166666666606
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.6483333333333273
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.9954166666666725
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          1.3420833333333273
+        ],
+        [
+          77.14285714285714,
+          7.791545189504373,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          2.9227405247813962,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -3.148688046647127,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -9.22011661807591,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.291545189504433,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -21.37026239067045,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -27.448979591836736,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -33.520408163265245,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -38.37463556851323,
+          1.4
+        ],
+        [
+          71.2536443148687,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          65.19679300291546,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          59.11807580174916,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          53.032069970845384,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          46.953352769679356,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          40.88921282798834,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          36.03498542274063,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          29.963556851311843,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -33.97959183673442,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -18.80102040816308,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -3.6042274052481176,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          11.57434402332386,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          26.752915451895205,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          38.94314868804638,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          54.103498542273925,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          69.28206997084521,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          84.46064139941713,
+          1.4
+        ],
+        [
+          28.60604956268228,
+          90,
+          1.4
+        ],
+        [
+          33.1650874635568,
+          90,
+          1.4
+        ],
+        [
+          37.7241253644315,
+          90,
+          1.4
+        ],
+        [
+          42.27223032069976,
+          90,
+          1.4
+        ],
+        [
+          45.92383381924202,
+          90,
+          1.4
+        ],
+        [
+          50.47740524781339,
+          90,
+          1.4
+        ],
+        [
+          55.03097667638479,
+          90,
+          1.4
+        ],
+        [
+          59.59548104956262,
+          90,
+          1.4
+        ],
+        [
+          64.14358600583091,
+          90,
+          1.4
+        ],
+        [
+          46.63994169096242,
+          90,
+          1.4
+        ],
+        [
+          28.4037900874635,
+          90,
+          1.4
+        ],
+        [
+          13.819241982507123,
+          90,
+          1.4
+        ],
+        [
+          -4.395043731778415,
+          90,
+          1.4
+        ],
+        [
+          -22.63119533527734,
+          90,
+          1.4
+        ],
+        [
+          -40.86734693877543,
+          90,
+          1.4
+        ],
+        [
+          -59.08163265306098,
+          90,
+          1.4
+        ],
+        [
+          -77.29591836734734,
+          90,
+          1.4
+        ],
+        [
+          -89.99999999999999,
+          90,
+          1.2941666666666616
+        ],
+        [
+          -89.99999999999999,
+          90,
+          1.0166666666666664
+        ],
+        [
+          -89.99999999999999,
+          90,
+          0.6695833333333364
+        ],
+        [
+          -89.99999999999999,
+          90,
+          0.3225000000000064
+        ],
+        [
+          -90,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear_flat",
+      "state": {
+        "mode": "rear_flat",
+        "armAngle": 64.28571428571429,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          130.50269999765644,
+          82.99167634646113
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.30291666681567525
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.6500000001490054
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.9975000001490114
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          1.3445833334823418
+        ],
+        [
+          77.14285714285714,
+          9.74344023115086,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          4.880466470217828,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          0.02332361307501607,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -4.839650147857807,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -9.696793005000828,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -14.553935862143437,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -19.41690962307646,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -23.306122451065054,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -28.163265308207666,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -33.026239069140686,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -37.88338192628372,
+          1.4
+        ],
+        [
+          72.96793002706939,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          68.11078716992635,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          63.24781340899334,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          59.35860058100518,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          54.507288627652144,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          49.65014577050954,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          44.78717200957651,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          39.93002915243348,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          35.06705539150088,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          30.209912534357848,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          26.320699706369687,
+          -38.57142857142857,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -27.944606408780942,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -15.78717200644833,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          -3.644314863591859,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          8.513119538740753,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          20.65597668159836,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          30.379008751568733,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          42.53644315390129,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          54.67930029675884,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          66.83673469909037,
+          1.4
+        ],
+        [
+          25.714285714285715,
+          78.99416910142298,
+          1.4
+        ],
+        [
+          26.055393587569878,
+          90,
+          1.4
+        ],
+        [
+          29.69825073042682,
+          90,
+          1.4
+        ],
+        [
+          32.61953352926078,
+          90,
+          1.4
+        ],
+        [
+          36.258017494275215,
+          90,
+          1.4
+        ],
+        [
+          39.905247814975,
+          90,
+          1.4
+        ],
+        [
+          43.548104957832265,
+          90,
+          1.4
+        ],
+        [
+          47.19096210068921,
+          90,
+          1.4
+        ],
+        [
+          50.838192421388996,
+          90,
+          1.4
+        ],
+        [
+          53.75510204238045,
+          90,
+          1.4
+        ],
+        [
+          57.39795918523739,
+          90,
+          1.4
+        ],
+        [
+          61.04081632809466,
+          90,
+          1.4
+        ],
+        [
+          64.28571428571429,
+          90,
+          1.3616666665176425
+        ],
+        [
+          64.28571428571429,
+          90,
+          1.014583333184328
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.6666666665176602
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.3199999998509756
+        ],
+        [
+          64.28571428571429,
+          90,
+          0.0420833331843215
+        ],
+        [
+          64.28571428571429,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "transport",
+      "state": {
+        "mode": "transport",
+        "armAngle": -90,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          77.14285714285714,
+          12.857142857142858,
+          -0.06541666651764898
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.2816666668156661
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.6291666668156722
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.9762500001490176
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          1.3233333334823327
+        ],
+        [
+          77.14285714285714,
+          8.961775184121851,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          3.9637188187184584,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -0.03352769893604801,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -5.025591190999716,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -10.023647556403105,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.01571104846634,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -20.007774540530004,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -24.999838032593676,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -29.997894397996628,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -33.989148042311854,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -38.9872044077148,
+          1.4
+        ],
+        [
+          71.32653060911709,
+          -40,
+          1.4
+        ],
+        [
+          64.03206996771753,
+          -40,
+          1.4
+        ],
+        [
+          56.74635568200301,
+          -40,
+          1.4
+        ],
+        [
+          49.4693877519741,
+          -40,
+          1.4
+        ],
+        [
+          43.626822154306204,
+          -40,
+          1.4
+        ],
+        [
+          36.33236151290729,
+          -40,
+          1.4
+        ],
+        [
+          29.046647227192757,
+          -40,
+          1.4
+        ],
+        [
+          21.76093294147821,
+          -40,
+          1.4
+        ],
+        [
+          14.475218655764323,
+          -40,
+          1.4
+        ],
+        [
+          7.18075801436477,
+          -40,
+          1.4
+        ],
+        [
+          0,
+          -39.70068026318763,
+          1.4
+        ],
+        [
+          0,
+          -23.03854874391434,
+          1.4
+        ],
+        [
+          0,
+          -2.210884344821416,
+          1.4
+        ],
+        [
+          0,
+          18.51700681164077,
+          1.4
+        ],
+        [
+          0,
+          39.29478458941935,
+          1.4
+        ],
+        [
+          0,
+          60.07256236719785,
+          1.4
+        ],
+        [
+          0,
+          80.92517007694808,
+          1.4
+        ],
+        [
+          0,
+          97.51247166424972,
+          1.4
+        ],
+        [
+          0,
+          118.29024944202635,
+          1.4
+        ],
+        [
+          0,
+          139.06802721980483,
+          1.4
+        ],
+        [
+          0,
+          159.87074830824062,
+          1.4
+        ],
+        [
+          -0.2755102077312266,
+          180,
+          1.4
+        ],
+        [
+          -8.775510207730758,
+          180,
+          1.4
+        ],
+        [
+          -17.295918370996084,
+          180,
+          1.4
+        ],
+        [
+          -24.091836738342845,
+          180,
+          1.4
+        ],
+        [
+          -32.591836738343176,
+          180,
+          1.4
+        ],
+        [
+          -41.09183673834346,
+          180,
+          1.4
+        ],
+        [
+          -49.60204081997549,
+          180,
+          1.4
+        ],
+        [
+          -58.10204081997582,
+          180,
+          1.4
+        ],
+        [
+          -66.61224490160865,
+          180,
+          1.4
+        ],
+        [
+          -75.11224490160818,
+          180,
+          1.4
+        ],
+        [
+          -81.9081632689557,
+          180,
+          1.4
+        ],
+        [
+          -90,
+          180,
+          1.3824999998509757
+        ],
+        [
+          -90,
+          180,
+          1.034999999851
+        ],
+        [
+          -90,
+          180,
+          0.6883333331843154
+        ],
+        [
+          -90,
+          180,
+          0.34083333318430886
+        ],
+        [
+          -90,
+          180,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "front",
+      "state": {
+        "mode": "front",
+        "armAngle": -90,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          180,
+          0
+        ],
+        [
+          -90,
+          180,
+          0.32500000014900554
+        ],
+        [
+          -90,
+          180,
+          0.6712500001489994
+        ],
+        [
+          -90,
+          180,
+          0.9491666668156842
+        ],
+        [
+          -90,
+          180,
+          1.2966666668156903
+        ],
+        [
+          -89.35823615121248,
+          180,
+          1.4
+        ],
+        [
+          -88.44642857103761,
+          180,
+          1.4
+        ],
+        [
+          -87.5357142853233,
+          180,
+          1.4
+        ],
+        [
+          -86.62499999960897,
+          180,
+          1.4
+        ],
+        [
+          -85.71319241943411,
+          180,
+          1.4
+        ],
+        [
+          -84.98396501418625,
+          180,
+          1.4
+        ],
+        [
+          -84.07543731739327,
+          180,
+          1.4
+        ],
+        [
+          -83.1625364427577,
+          180,
+          1.4
+        ],
+        [
+          -82.25182215704338,
+          180,
+          1.4
+        ],
+        [
+          -81.34110787132914,
+          180,
+          1.4
+        ],
+        [
+          -80.43039358561482,
+          180,
+          1.4
+        ],
+        [
+          -79.51967929990059,
+          180,
+          1.4
+        ],
+        [
+          -78.78935860019209,
+          180,
+          1.4
+        ],
+        [
+          -77.87864431447778,
+          180,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          178.7678571401204,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          172.3928571401202,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          166.01020407889558,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          159.63520407889592,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          154.5382653033853,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          148.1632653033856,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          141.780612242161,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          135.40561224216077,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          129.02295918093677,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          122.64795918093652,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          116.26530611971191,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          111.16071428297747,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          104.78571428297722,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          98.40306122175261,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          92.02806122175296,
+          1.4
+        ],
+        [
+          -77.76384839689247,
+          90,
+          1.4
+        ],
+        [
+          -78.67565597706741,
+          90,
+          1.4
+        ],
+        [
+          -79.58746355724227,
+          90,
+          1.4
+        ],
+        [
+          -80.31559766802951,
+          90,
+          1.4
+        ],
+        [
+          -81.22740524820438,
+          90,
+          1.4
+        ],
+        [
+          -82.13811953391868,
+          90,
+          1.4
+        ],
+        [
+          -83.04992711409363,
+          90,
+          1.4
+        ],
+        [
+          -83.96173469426857,
+          90,
+          1.4
+        ],
+        [
+          -84.87244897998282,
+          90,
+          1.4
+        ],
+        [
+          -85.78316326569714,
+          90,
+          1.4
+        ],
+        [
+          -86.51239067094492,
+          90,
+          1.4
+        ],
+        [
+          -87.42310495665923,
+          90,
+          1.4
+        ],
+        [
+          -88.33381924237347,
+          90,
+          1.4
+        ],
+        [
+          -89.24562682254842,
+          90,
+          1.4
+        ],
+        [
+          -90,
+          90,
+          1.340416666517648
+        ],
+        [
+          -90,
+          90,
+          0.9929166665176432
+        ],
+        [
+          -90,
+          90,
+          0.6458333331843268
+        ],
+        [
+          -90,
+          90,
+          0.3679166665176436
+        ],
+        [
+          -90,
+          90,
+          0.02083333318432717
+        ],
+        [
+          -90,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear_flat",
+      "state": {
+        "mode": "rear_flat",
+        "armAngle": 64.28571428571429,
+        "angle": 90,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": true,
+        "pivot": [
+          0,
+          130.50269999765644,
+          82.99167634646113
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          180,
+          -0.05181666656732583
+        ],
+        [
+          -90,
+          180,
+          0.2954166667660198
+        ],
+        [
+          -90,
+          180,
+          0.6429166667659955
+        ],
+        [
+          -90,
+          180,
+          0.9900000000993409
+        ],
+        [
+          -90,
+          180,
+          1.3375000000993469
+        ],
+        [
+          -89.00291545154745,
+          180,
+          1.4
+        ],
+        [
+          -88.03061224455041,
+          180,
+          1.4
+        ],
+        [
+          -86.81632653026465,
+          180,
+          1.4
+        ],
+        [
+          -85.6034985419265,
+          180,
+          1.4
+        ],
+        [
+          -84.38629737574574,
+          180,
+          1.4
+        ],
+        [
+          -83.17201166145999,
+          180,
+          1.4
+        ],
+        [
+          -81.95772594717434,
+          180,
+          1.4
+        ],
+        [
+          -80.98542274017719,
+          180,
+          1.4
+        ],
+        [
+          -79.77113702589153,
+          180,
+          1.4
+        ],
+        [
+          -78.55685131160578,
+          180,
+          1.4
+        ],
+        [
+          -77.34110787137251,
+          180,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          172.8877550996081,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          164.37755101797535,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          155.87755101797504,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          149.06122448736323,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          140.56122448736295,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          132.06122448736338,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          123.54081632409806,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          115.04081632409778,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          106.55102040573074,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          98.04081632409792,
+          1.4
+        ],
+        [
+          -77.14285714285714,
+          91.2346938751179,
+          1.4
+        ],
+        [
+          -78.18221574378774,
+          90,
+          1.4
+        ],
+        [
+          -79.39650145807349,
+          90,
+          1.4
+        ],
+        [
+          -80.61078717235925,
+          90,
+          1.4
+        ],
+        [
+          -81.8265306125924,
+          90,
+          1.4
+        ],
+        [
+          -83.04373177877316,
+          90,
+          1.4
+        ],
+        [
+          -84.25510204116392,
+          90,
+          1.4
+        ],
+        [
+          -85.22740524816096,
+          90,
+          1.4
+        ],
+        [
+          -86.44314868839422,
+          90,
+          1.4
+        ],
+        [
+          -87.65743440267987,
+          90,
+          1.4
+        ],
+        [
+          -88.87317784291312,
+          90,
+          1.4
+        ],
+        [
+          -88.95043731361334,
+          90,
+          1.4
+        ],
+        [
+          -74.36151603081427,
+          90,
+          1.4
+        ],
+        [
+          -59.79008745938644,
+          90,
+          1.4
+        ],
+        [
+          -48.122448975420696,
+          90,
+          1.4
+        ],
+        [
+          -33.53352769262286,
+          90,
+          1.4
+        ],
+        [
+          -18.944606409823805,
+          90,
+          1.4
+        ],
+        [
+          -4.373177838394739,
+          90,
+          1.4
+        ],
+        [
+          10.18075802166311,
+          90,
+          1.4
+        ],
+        [
+          24.752186593092176,
+          90,
+          1.4
+        ],
+        [
+          39.341107875891225,
+          90,
+          1.4
+        ],
+        [
+          53.93002915868914,
+          90,
+          1.4
+        ],
+        [
+          64.28571428571428,
+          90,
+          1.3683333332339924
+        ],
+        [
+          64.28571428571428,
+          90,
+          1.021666666567337
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.6741666665673323
+        ],
+        [
+          64.28571428571428,
+          90,
+          0.3262499999006646
+        ],
+        [
+          64.28571428571429,
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear",
+      "state": {
+        "mode": "rear",
+        "armAngle": 77.14285714285714,
+        "angle": 12.857142857142858,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          138.34235869127332,
+          60.58721899936933
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          180,
+          0
+        ],
+        [
+          -90,
+          180,
+          0.31916666681566613
+        ],
+        [
+          -90,
+          180,
+          0.6666666668156721
+        ],
+        [
+          -90,
+          180,
+          0.9437500001490055
+        ],
+        [
+          -90,
+          180,
+          1.2916666668156722
+        ],
+        [
+          -84.15306122084039,
+          180,
+          1.4
+        ],
+        [
+          -75.66326530247333,
+          180,
+          1.4
+        ],
+        [
+          -67.14285713920803,
+          180,
+          1.4
+        ],
+        [
+          -58.65306122084023,
+          180,
+          1.4
+        ],
+        [
+          -50.142857139208175,
+          180,
+          1.4
+        ],
+        [
+          -43.33673469022814,
+          180,
+          1.4
+        ],
+        [
+          -34.83673469022858,
+          180,
+          1.4
+        ],
+        [
+          -26.32653060859579,
+          180,
+          1.4
+        ],
+        [
+          -17.816326526962968,
+          180,
+          1.4
+        ],
+        [
+          -9.33673469022844,
+          180,
+          1.4
+        ],
+        [
+          -0.8061224453306437,
+          180,
+          1.4
+        ],
+        [
+          0,
+          161.2426303765664,
+          1.4
+        ],
+        [
+          0,
+          144.58049885729312,
+          1.4
+        ],
+        [
+          0,
+          123.80272107951458,
+          1.4
+        ],
+        [
+          0,
+          103.02494330173786,
+          1.4
+        ],
+        [
+          0,
+          82.19727890264488,
+          1.4
+        ],
+        [
+          0,
+          61.444444435523664,
+          1.4
+        ],
+        [
+          0,
+          40.6167800364307,
+          1.4
+        ],
+        [
+          0,
+          19.863945569311227,
+          1.4
+        ],
+        [
+          0,
+          3.2267573606934263,
+          1.4
+        ],
+        [
+          0,
+          -17.551020417083322,
+          1.4
+        ],
+        [
+          0,
+          -38.378684816176275,
+          1.4
+        ],
+        [
+          6.717201169308816,
+          -40,
+          1.4
+        ],
+        [
+          14.002915455022732,
+          -40,
+          1.4
+        ],
+        [
+          21.297376096422266,
+          -40,
+          1.4
+        ],
+        [
+          27.122448982719522,
+          -40,
+          1.4
+        ],
+        [
+          34.42565597980409,
+          -40,
+          1.4
+        ],
+        [
+          41.711370265518624,
+          -40,
+          1.4
+        ],
+        [
+          49.00583090691819,
+          -40,
+          1.4
+        ],
+        [
+          56.28279883694707,
+          -40,
+          1.4
+        ],
+        [
+          63.56851312266161,
+          -40,
+          1.4
+        ],
+        [
+          70.87172011974617,
+          -40,
+          1.4
+        ],
+        [
+          76.69679300604339,
+          -40,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -35.301587299444066,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -30.31551668072057,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -25.317460315317163,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -20.331389696593224,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.327340457850095,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -10.335276965786878,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -6.344023321472115,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -1.3459669560687075,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          3.646096535994957,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          8.650145774738064,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.3458333331843275
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.9987499998509819
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.7212499998509888
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.3737499998509821
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.026666666517667637
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "transport",
+      "state": {
+        "mode": "transport",
+        "armAngle": -90,
+        "angle": 180,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          -71,
+          37.00000000000001
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          77.14285714285714,
+          12.857142857142858,
+          -0.04348333318433409
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.303333333482351
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.6504166668156661
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0.997916666815672
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          1.3454166668156784
+        ],
+        [
+          77.14285714285714,
+          9.650955618200246,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          4.652899252796853,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -0.34515711260654136,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -5.3372206046697706,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -10.335276970073163,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.327340462136831,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -20.325396827540228,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -24.322643345194724,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -29.314706837258395,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -34.30677032932162,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -39.30482669472502,
+          1.4
+        ],
+        [
+          70.87172011348987,
+          -40,
+          1.4
+        ],
+        [
+          63.586005827775985,
+          -40,
+          1.4
+        ],
+        [
+          57.752186585793076,
+          -40,
+          1.4
+        ],
+        [
+          50.457725944394184,
+          -40,
+          1.4
+        ],
+        [
+          43.17201165867963,
+          -40,
+          1.4
+        ],
+        [
+          35.886297372965096,
+          -40,
+          1.4
+        ],
+        [
+          28.591836731566183,
+          -40,
+          1.4
+        ],
+        [
+          21.30612244585165,
+          -40,
+          1.4
+        ],
+        [
+          14.020408160137109,
+          -40,
+          1.4
+        ],
+        [
+          6.725947518738195,
+          -40,
+          1.4
+        ],
+        [
+          0.9008746324403063,
+          -40,
+          1.4
+        ],
+        [
+          0,
+          -21.766439900377392,
+          1.4
+        ],
+        [
+          0,
+          -0.9886621225989103,
+          1.4
+        ],
+        [
+          0,
+          19.814058965836892,
+          1.4
+        ],
+        [
+          0,
+          40.616780054272695,
+          1.4
+        ],
+        [
+          0,
+          61.41950114270665,
+          1.4
+        ],
+        [
+          0,
+          82.19727892048513,
+          1.4
+        ],
+        [
+          0,
+          98.8344671291012,
+          1.4
+        ],
+        [
+          0,
+          119.61224490687968,
+          1.4
+        ],
+        [
+          0,
+          140.39002268465816,
+          1.4
+        ],
+        [
+          0,
+          161.1927437730921,
+          1.4
+        ],
+        [
+          -0.8163265342614201,
+          180,
+          1.4
+        ],
+        [
+          -9.30612245262921,
+          180,
+          1.4
+        ],
+        [
+          -17.81632653426124,
+          180,
+          1.4
+        ],
+        [
+          -24.6224489832413,
+          180,
+          1.4
+        ],
+        [
+          -33.132653064874084,
+          180,
+          1.4
+        ],
+        [
+          -41.64285714650612,
+          180,
+          1.4
+        ],
+        [
+          -50.13265306487391,
+          180,
+          1.4
+        ],
+        [
+          -58.642857146506735,
+          180,
+          1.4
+        ],
+        [
+          -67.13265306487381,
+          180,
+          1.4
+        ],
+        [
+          -75.6530612281391,
+          180,
+          1.4
+        ],
+        [
+          -82.46938775875165,
+          180,
+          1.4
+        ],
+        [
+          -90,
+          180,
+          1.360833333184322
+        ],
+        [
+          -90,
+          180,
+          1.0137499998509765
+        ],
+        [
+          -90,
+          180,
+          0.666249999851001
+        ],
+        [
+          -90,
+          180,
+          0.31916666651765535
+        ],
+        [
+          -90,
+          180,
+          0
+        ]
+      ]
+    },
+    {
+      "pose": "rear",
+      "state": {
+        "mode": "rear",
+        "armAngle": 77.14285714285714,
+        "angle": 12.857142857142858,
+        "folding": false,
+        "manualAdjusting": false,
+        "release": 0,
+        "teethAligned": true,
+        "locked": true,
+        "horizontal": false,
+        "pivot": [
+          0,
+          138.34235869127332,
+          60.58721899936933
+        ],
+        "clearance": {
+          "status": "no_contact_detected",
+          "contacts": [],
+          "method": "Conservative convex mesh projections; fixed obstacles and floor only. Intended gear contacts and moving-to-moving contacts are excluded."
+        },
+        "frontGap": {
+          "minimum_distance_mm": 9.345424586731294,
+          "front_clearance_y_mm": 6.191684803531402
+        },
+        "printed": 13
+      },
+      "horizontal_only": false,
+      "motion_samples": [
+        [
+          -90,
+          180,
+          -0.06416666666667273
+        ],
+        [
+          -90,
+          180,
+          0.2833333333333333
+        ],
+        [
+          -90,
+          180,
+          0.6304166666666786
+        ],
+        [
+          -90,
+          180,
+          0.9774999999999938
+        ],
+        [
+          -90,
+          180,
+          1.325
+        ],
+        [
+          -83.33673469387725,
+          180,
+          1.4
+        ],
+        [
+          -74.8265306122452,
+          180,
+          1.4
+        ],
+        [
+          -68.03061224489765,
+          180,
+          1.4
+        ],
+        [
+          -59.53061224489811,
+          180,
+          1.4
+        ],
+        [
+          -51.02040816326531,
+          180,
+          1.4
+        ],
+        [
+          -42.4897959183675,
+          180,
+          1.4
+        ],
+        [
+          -34.01020408163295,
+          180,
+          1.4
+        ],
+        [
+          -25.500000000000156,
+          180,
+          1.4
+        ],
+        [
+          -16.999999999999844,
+          180,
+          1.4
+        ],
+        [
+          -10.183673469388054,
+          180,
+          1.4
+        ],
+        [
+          -1.683673469387756,
+          180,
+          1.4
+        ],
+        [
+          0,
+          163.33786848072486,
+          1.4
+        ],
+        [
+          0,
+          142.56009070294823,
+          1.4
+        ],
+        [
+          0,
+          121.78231292516969,
+          1.4
+        ],
+        [
+          0,
+          101.00453514739301,
+          1.4
+        ],
+        [
+          0,
+          80.20181405895727,
+          1.4
+        ],
+        [
+          0,
+          63.539682539682175,
+          1.4
+        ],
+        [
+          0,
+          42.73696145124643,
+          1.4
+        ],
+        [
+          0,
+          21.959183673469738,
+          1.4
+        ],
+        [
+          0,
+          1.2063492063485342,
+          1.4
+        ],
+        [
+          0,
+          -19.646258503401725,
+          1.4
+        ],
+        [
+          0.1486880466469704,
+          -40,
+          1.4
+        ],
+        [
+          5.973760932944878,
+          -40,
+          1.4
+        ],
+        [
+          13.250728862973762,
+          -40,
+          1.4
+        ],
+        [
+          20.536443148688296,
+          -40,
+          1.4
+        ],
+        [
+          27.848396501457827,
+          -40,
+          1.4
+        ],
+        [
+          35.116618075801746,
+          -40,
+          1.4
+        ],
+        [
+          42.41107871720131,
+          -40,
+          1.4
+        ],
+        [
+          49.70553935860088,
+          -40,
+          1.4
+        ],
+        [
+          55.5218658892131,
+          -40,
+          1.4
+        ],
+        [
+          62.81632653061198,
+          -40,
+          1.4
+        ],
+        [
+          70.10204081632655,
+          -40,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -39.82620667314535,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -34.82815030774194,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -29.836086815678726,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -25.838840298023772,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -20.840783932620813,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -15.848720440557148,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -10.856656948493487,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -5.858600583090528,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          -0.8665370910268635,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          4.131519274376522,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          8.128765792031054,
+          1.4
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.3816666666666595
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          1.034583333333345
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.6874999999999994
+        ],
+        [
+          77.14285714285714,
+          12.857142857142861,
+          0.33999999999999475
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858,
+          0
+        ]
+      ]
+    },
+    {
+      "camera_touch_drag": true,
+      "underside_accessible": true,
+      "arm_and_display_pose_unchanged": true
+    }
+  ],
+  "pose_cycle": true,
+  "independent_arm_and_display_controls": true,
+  "free_angles_retained_on_release": true,
+  "explicit_snap_to_teeth": true,
+  "free_angle_clearance": true,
+  "custom_to_preset_without_unchecked_animation": true,
+  "display_level_during_orbit": true,
+  "light_grey_background_pixel": true,
+  "default_pose": "front",
+  "camera_full_rotation": true,
+  "camera_touch_rotation": true,
+  "CAD_motion_paths": true,
+  "mobile_layout": true,
+  "monoblock_exploded_centered": true,
+  "runtime_errors": []
+}

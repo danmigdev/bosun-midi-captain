@@ -1,0 +1,544 @@
+{
+  "status": "PASS",
+  "method": "Independent verification of all 13 STEP/STL parts using dimensions, sections, teeth, nut pockets, screw passages and collision checks; no stand generator is imported. Captain and display envelopes are independently reconstructed from dimensions; clearance is measured between solids.",
+  "reimport": [
+    {
+      "part": "01_base_right",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 41.1045,
+      "stl_volume_relative_error": 5.22e-05
+    },
+    {
+      "part": "01_base_left",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 41.1045,
+      "stl_volume_relative_error": 5.22e-05
+    },
+    {
+      "part": "02_clamp_plate_right",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 2.3283,
+      "stl_volume_relative_error": 6.93e-05
+    },
+    {
+      "part": "02_clamp_plate_left",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 2.3283,
+      "stl_volume_relative_error": 6.93e-05
+    },
+    {
+      "part": "03_arm_right",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 12.1721,
+      "stl_volume_relative_error": 0.0002381
+    },
+    {
+      "part": "03_arm_left",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 12.1721,
+      "stl_volume_relative_error": 0.0002381
+    },
+    {
+      "part": "04_display_crossbar",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 37.7732,
+      "stl_volume_relative_error": 0.0001524
+    },
+    {
+      "part": "06_spacer_1",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 0.3758,
+      "stl_volume_relative_error": 0.0005967
+    },
+    {
+      "part": "06_spacer_2",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 0.3758,
+      "stl_volume_relative_error": 0.0005967
+    },
+    {
+      "part": "07_lower_knob_right",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 1.9829,
+      "stl_volume_relative_error": 0.0003289
+    },
+    {
+      "part": "07_lower_knob_left",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 1.9829,
+      "stl_volume_relative_error": 0.0003289
+    },
+    {
+      "part": "07_upper_knob_right",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 1.9829,
+      "stl_volume_relative_error": 0.0003289
+    },
+    {
+      "part": "07_upper_knob_left",
+      "valid_step": true,
+      "solids": 1,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "step_volume_cm3": 1.9829,
+      "stl_volume_relative_error": 0.0003289
+    }
+  ],
+  "arms": [
+    {
+      "side": "right",
+      "center_distance_mm": 106.0,
+      "web_thickness_mm": 4.0,
+      "discs": [
+        {
+          "center_yz_mm": [
+            35.0,
+            37.0
+          ],
+          "radius_mm": 15,
+          "thickness_mm": 5.0
+        },
+        {
+          "center_yz_mm": [
+            35.0,
+            143.0
+          ],
+          "radius_mm": 15,
+          "thickness_mm": 5.0
+        }
+      ]
+    },
+    {
+      "side": "left",
+      "center_distance_mm": 106.0,
+      "web_thickness_mm": 4.0,
+      "discs": [
+        {
+          "center_yz_mm": [
+            35.0,
+            37.0
+          ],
+          "radius_mm": 15,
+          "thickness_mm": 5.0
+        },
+        {
+          "center_yz_mm": [
+            35.0,
+            143.0
+          ],
+          "radius_mm": 15,
+          "thickness_mm": 5.0
+        }
+      ]
+    }
+  ],
+  "round_ears": [
+    {
+      "side": "right",
+      "outer_diameter_mm": 30,
+      "arm_disc_outer_diameter_mm": 30,
+      "body_thickness_mm": 8,
+      "section_offset_from_inner_face_mm": 7,
+      "ring_section_symmetric_difference_mm3": 0.0
+    },
+    {
+      "side": "left",
+      "outer_diameter_mm": 30,
+      "arm_disc_outer_diameter_mm": 30,
+      "body_thickness_mm": 8,
+      "section_offset_from_inner_face_mm": 7,
+      "ring_section_symmetric_difference_mm3": 0.0
+    }
+  ],
+  "radial_teeth": [
+    {
+      "surface": "base_right",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 162.545
+    },
+    {
+      "surface": "arm_lower_right",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 161.495
+    },
+    {
+      "surface": "arm_upper_right",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 161.495
+    },
+    {
+      "surface": "crossbar_right",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000047,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 162.545
+    },
+    {
+      "surface": "base_left",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 162.545
+    },
+    {
+      "surface": "arm_lower_left",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 161.495
+    },
+    {
+      "surface": "arm_upper_left",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000019,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 161.495
+    },
+    {
+      "surface": "crossbar_left",
+      "count": 28,
+      "uniform_pitch_deg": 12.857142857142858,
+      "measured_pitch_min_deg": 12.857139999999958,
+      "measured_pitch_max_deg": 12.857150000000047,
+      "measurement_radius_mm": 9,
+      "measured_axial_level_mm": 162.545
+    }
+  ],
+  "display_bracket": {
+    "band_thickness_mm": 5.0,
+    "boss_thickness_mm": 7.0,
+    "mount_hole_pitch_mm": 75.0,
+    "mount_hole_diameter_mm": 4.5,
+    "pivot_yz_mm": [
+      138.342359,
+      60.587219
+    ]
+  },
+  "shoes": [
+    {
+      "side": "right",
+      "wall_front_height_from_shelf_mm": 21.99999999997981,
+      "wall_rear_height_from_shelf_mm": 32.0,
+      "pivot_z_mm": 37.0,
+      "wall_height_excludes_raised_joint_hub": true,
+      "captain_interference_mm3": 0,
+      "cap_interference_mm3": 0,
+      "screw_through_checks": [
+        {
+          "local_y_mm": -10,
+          "test_gauge_diameter_mm": 4.4,
+          "material_inside_through_gauge_mm3": 0.0,
+          "nominal_screw_diameter_mm": 4,
+          "countersunk_screw_total_length_mm": 30,
+          "screw_lower_envelope_above_floor_mm": 8.173793455544304,
+          "screw_captain_distance_mm": 6.0,
+          "nut_pocket_clear_gauge_mm": [
+            7.3,
+            3.5
+          ],
+          "nut_retaining_bearing_gauges_mm3": [
+            2.954668,
+            2.954668
+          ],
+          "nut_lateral_retention_present": true
+        },
+        {
+          "local_y_mm": 10,
+          "test_gauge_diameter_mm": 4.4,
+          "material_inside_through_gauge_mm3": 0.0,
+          "nominal_screw_diameter_mm": 4,
+          "countersunk_screw_total_length_mm": 30,
+          "screw_lower_envelope_above_floor_mm": 11.331688192386407,
+          "screw_captain_distance_mm": 6.0,
+          "nut_pocket_clear_gauge_mm": [
+            7.3,
+            3.5
+          ],
+          "nut_retaining_bearing_gauges_mm3": [
+            2.954668,
+            2.954668
+          ],
+          "nut_lateral_retention_present": true
+        }
+      ]
+    },
+    {
+      "side": "left",
+      "wall_front_height_from_shelf_mm": 21.99999999997981,
+      "wall_rear_height_from_shelf_mm": 32.0,
+      "pivot_z_mm": 37.0,
+      "wall_height_excludes_raised_joint_hub": true,
+      "captain_interference_mm3": 0,
+      "cap_interference_mm3": 0,
+      "screw_through_checks": [
+        {
+          "local_y_mm": -10,
+          "test_gauge_diameter_mm": 4.4,
+          "material_inside_through_gauge_mm3": 0.0,
+          "nominal_screw_diameter_mm": 4,
+          "countersunk_screw_total_length_mm": 30,
+          "screw_lower_envelope_above_floor_mm": 8.173793455544304,
+          "screw_captain_distance_mm": 6.0,
+          "nut_pocket_clear_gauge_mm": [
+            7.3,
+            3.5
+          ],
+          "nut_retaining_bearing_gauges_mm3": [
+            2.954668,
+            2.954668
+          ],
+          "nut_lateral_retention_present": true
+        },
+        {
+          "local_y_mm": 10,
+          "test_gauge_diameter_mm": 4.4,
+          "material_inside_through_gauge_mm3": 0.0,
+          "nominal_screw_diameter_mm": 4,
+          "countersunk_screw_total_length_mm": 30,
+          "screw_lower_envelope_above_floor_mm": 11.331688192386407,
+          "screw_captain_distance_mm": 6.0,
+          "nut_pocket_clear_gauge_mm": [
+            7.3,
+            3.5
+          ],
+          "nut_retaining_bearing_gauges_mm3": [
+            2.954668,
+            2.954668
+          ],
+          "nut_lateral_retention_present": true
+        }
+      ]
+    }
+  ],
+  "clamping_plates": [
+    {
+      "side": "right",
+      "normal_plate_thickness_mm": 2.974912,
+      "normal_screw_boss_thickness_mm": 4.9498237977460455,
+      "countersinks": 2,
+      "countersink_depth_mm": 2.35
+    },
+    {
+      "side": "left",
+      "normal_plate_thickness_mm": 2.974912,
+      "normal_screw_boss_thickness_mm": 4.9498237977460455,
+      "countersinks": 2,
+      "countersink_depth_mm": 2.35
+    }
+  ],
+  "spacers": [
+    {
+      "part": "06_spacer_1",
+      "outer_diameter_mm": 10,
+      "bore_diameter_mm": 4.5,
+      "length_mm": 6
+    },
+    {
+      "part": "06_spacer_2",
+      "outer_diameter_mm": 10,
+      "bore_diameter_mm": 4.5,
+      "length_mm": 6
+    }
+  ],
+  "knobs": [
+    {
+      "part": "07_lower_knob_right",
+      "center_yz_mm": [
+        35.0,
+        37.0
+      ],
+      "bore_diameter_mm": 6.6,
+      "nut_pocket_af_mm": 10.3,
+      "nut_pocket_depth_mm": 3.4,
+      "nut_retaining_floor_present": true
+    },
+    {
+      "part": "07_lower_knob_left",
+      "center_yz_mm": [
+        35.0,
+        37.0
+      ],
+      "bore_diameter_mm": 6.6,
+      "nut_pocket_af_mm": 10.3,
+      "nut_pocket_depth_mm": 3.4,
+      "nut_retaining_floor_present": true
+    },
+    {
+      "part": "07_upper_knob_right",
+      "center_yz_mm": [
+        35.0,
+        143.0
+      ],
+      "bore_diameter_mm": 6.6,
+      "nut_pocket_af_mm": 10.3,
+      "nut_pocket_depth_mm": 3.4,
+      "nut_retaining_floor_present": true
+    },
+    {
+      "part": "07_upper_knob_left",
+      "center_yz_mm": [
+        35.0,
+        143.0
+      ],
+      "bore_diameter_mm": 6.6,
+      "nut_pocket_af_mm": 10.3,
+      "nut_pocket_depth_mm": 3.4,
+      "nut_retaining_floor_present": true
+    }
+  ],
+  "front_clearance": {
+    "arm_deg": -90.0,
+    "display_deg": 90,
+    "body_distance_mm": 9.345424586731301,
+    "horizontal_gap_mm": 6.191684803531388,
+    "maximum_horizontal_gap_mm": 6.2,
+    "floor_clearance_mm": 33.00000000000001,
+    "plan_projection_gap_mm": 6.191684803531388,
+    "note": "The configured limit applies to horizontal clearance. The 3D distance also includes the vertical offset."
+  },
+  "locked_pose_indexing": {
+    "step_deg": 12.857142857142858,
+    "poses": {
+      "rear": [
+        77.14285714285714,
+        12.857142857142858
+      ],
+      "front": [
+        -90.0,
+        90
+      ],
+      "rear_flat": [
+        64.28571428571429,
+        90
+      ],
+      "transport": [
+        -90,
+        180.0
+      ]
+    },
+    "all_indexed": true
+  },
+  "critical_front_path": {
+    "waypoints": [
+      [
+        -90,
+        180.0
+      ],
+      [
+        -77.14285714285714,
+        180.0
+      ],
+      [
+        -77.14285714285714,
+        90
+      ],
+      [
+        -90.0,
+        90
+      ]
+    ],
+    "samples": 27,
+    "step_max_deg": 5,
+    "minimum_display_body_distance_mm": 8.157684803531403,
+    "minimum_display_floor_clearance_mm": 20.999999999999996,
+    "collisions": 0
+  },
+  "horizontal_arc": {
+    "waypoints": [
+      [
+        -90.0,
+        90
+      ],
+      [
+        64.28571428571429,
+        90
+      ]
+    ],
+    "moving_samples": 156,
+    "sample_max_deg": 1,
+    "clamped_stops": [
+      -90.0,
+      -77.14285714285714,
+      -64.28571428571429,
+      -51.42857142857143,
+      -38.57142857142857,
+      -25.714285714285715,
+      -12.857142857142858,
+      0.0,
+      12.857142857142858,
+      25.714285714285715,
+      38.57142857142857,
+      51.42857142857143,
+      64.28571428571429
+    ],
+    "display_surface_horizontal_and_facing_up": true,
+    "minimum_clearances_mm": {
+      "body": 9.345424586731301,
+      "switch": 19.6859856228013,
+      "cable": 6.991676346461134,
+      "moving_floor": 20.00000030873001
+    },
+    "collisions": 0
+  },
+  "limitations": [
+    "Nominal geometric verification of exported files; strength and friction are not measured.",
+    "The stock feet and actual equipment envelopes require confirmed dimensions.",
+    "The complete motion path and UI are checked separately from this verifier."
+  ]
+}

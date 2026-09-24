@@ -14,7 +14,7 @@ the MIDI bridge; a Pi shares the Captain connection across the local network.
 
 [Download](#download-and-install) · [Setup and FAQ](docs/first-setup.md) ·
 [Connections](#connections) · [Editor](#configure-your-sounds) ·
-[Stage](#stage) · [Firmware updates](#update-firmware)
+[Stage](#stage) · [Bosun Stand](#bosun-stand) · [Firmware updates](#update-firmware)
 
 ![Bosun Stage on Raspberry Pi showing the current rig, bank and effect switches](docs/ui-test-screenshots/stage_vnc.png)
 
@@ -111,6 +111,25 @@ Use the dedicated guides for [Stage appearance and tuner](docs/stage-instrument-
 [Morph controls and expression pedals](docs/morph.md).
 The [Pi guide](tools/rpi-hub/README.md) covers automatic HDMI startup and
 viewing the actual Pi display through VNC.
+
+## Bosun Stand
+
+[Bosun Stand](bosun-stand/README.md) is a 3D-printable display stand for the
+10-switch MIDI Captain. Its side clamps, articulated arms and adjustable display
+mount let you position the screen in front of or behind the pedal, tilt it
+towards you, or fold it into the transport position. Arm position and display
+angle adjust independently and lock with toothed joints and hand knobs.
+
+![Bosun Stand CAD preview showing the MIDI Captain with the display raised and tilted behind it](bosun-stand/final_stand/images/rear_tilted.png)
+
+The project includes **13 printable parts**, editable CAD sources, STEP models
+and an interactive 3D preview. Download the
+[print files](bosun-stand/Bosun_Stand_Print_Files.zip), or the
+[complete CAD package](bosun-stand/Bosun_Stand_Final_Complete.zip) and open
+`preview_3d.html` locally in your browser to explore the positions.
+See the [dimensions and assembly guide](bosun-stand/final_stand/README.md)
+for the reference display, fasteners and printer requirements. The design has
+been checked in CAD; physical fit and load testing remain to be completed.
 
 ## Update firmware
 

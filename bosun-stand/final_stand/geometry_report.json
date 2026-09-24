@@ -1,0 +1,508 @@
+{
+  "status": "PASS nominal geometry; physical fit and strength have not been tested",
+  "angles_checked_deg": [
+    0.0,
+    12.857142857142858,
+    25.714285714285715,
+    38.57142857142857,
+    51.42857142857143
+  ],
+  "parts": [
+    {
+      "part": "01_base_right",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        43.05,
+        94.0,
+        52.0
+      ],
+      "volume_cm3": 41.1,
+      "stl_watertight": true
+    },
+    {
+      "part": "02_clamp_plate_right",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        21.0,
+        36.0,
+        4.95
+      ],
+      "volume_cm3": 2.33,
+      "stl_watertight": true
+    },
+    {
+      "part": "01_base_left",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        43.05,
+        94.0,
+        52.0
+      ],
+      "volume_cm3": 41.1,
+      "stl_watertight": true
+    },
+    {
+      "part": "02_clamp_plate_left",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        21.0,
+        36.0,
+        4.95
+      ],
+      "volume_cm3": 2.33,
+      "stl_watertight": true
+    },
+    {
+      "part": "03_arm_right",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        136.0,
+        30.0,
+        6.2
+      ],
+      "volume_cm3": 12.17,
+      "stl_watertight": true
+    },
+    {
+      "part": "03_arm_left",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        136.0,
+        30.0,
+        6.2
+      ],
+      "volume_cm3": 12.17,
+      "stl_watertight": true
+    },
+    {
+      "part": "07_lower_knob_right",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        25.19,
+        28.0,
+        5.0
+      ],
+      "volume_cm3": 1.98,
+      "stl_watertight": true
+    },
+    {
+      "part": "07_lower_knob_left",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        25.19,
+        28.0,
+        5.0
+      ],
+      "volume_cm3": 1.98,
+      "stl_watertight": true
+    },
+    {
+      "part": "07_upper_knob_right",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        25.19,
+        28.0,
+        5.0
+      ],
+      "volume_cm3": 1.98,
+      "stl_watertight": true
+    },
+    {
+      "part": "07_upper_knob_left",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        25.19,
+        28.0,
+        5.0
+      ],
+      "volume_cm3": 1.98,
+      "stl_watertight": true
+    },
+    {
+      "part": "04_display_crossbar",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": false,
+      "print_mm": [
+        325.09,
+        31.0,
+        32.0
+      ],
+      "volume_cm3": 37.77,
+      "stl_watertight": true
+    },
+    {
+      "part": "06_spacer_1",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        10.0,
+        10.0,
+        6.0
+      ],
+      "volume_cm3": 0.38,
+      "stl_watertight": true
+    },
+    {
+      "part": "06_spacer_2",
+      "solid_valid": true,
+      "solids": 1,
+      "fits_configured_printer_bed": true,
+      "print_mm": [
+        10.0,
+        10.0,
+        6.0
+      ],
+      "volume_cm3": 0.38,
+      "stl_watertight": true
+    }
+  ],
+  "valid_configurations": 4,
+  "clearance_envelope": [
+    {
+      "arm_deg": 64.28571428571429,
+      "tilt_min": 0.0,
+      "tilt_max": 12.857142857142858
+    },
+    {
+      "arm_deg": 77.14285714285714,
+      "tilt_min": 0.0,
+      "tilt_max": 12.857142857142858
+    }
+  ],
+  "knob_nut_pocket": {
+    "across_flats_mm": 10.3,
+    "depth_mm": 3.4,
+    "entry": "outer face",
+    "checks": [
+      {
+        "part": "07_lower_knob_right",
+        "nut_insertion_clear": true,
+        "insertion_samples": 17,
+        "rotation_30deg_interference_mm3": 12.928213683995915
+      },
+      {
+        "part": "07_lower_knob_left",
+        "nut_insertion_clear": true,
+        "insertion_samples": 17,
+        "rotation_30deg_interference_mm3": 12.928213683995915
+      },
+      {
+        "part": "07_upper_knob_right",
+        "nut_insertion_clear": true,
+        "insertion_samples": 17,
+        "rotation_30deg_interference_mm3": 12.928213683996013
+      },
+      {
+        "part": "07_upper_knob_left",
+        "nut_insertion_clear": true,
+        "insertion_samples": 17,
+        "rotation_30deg_interference_mm3": 12.928213683996013
+      }
+    ]
+  },
+  "display_support": {
+    "side_clearance_mm": 20.0,
+    "max_depth_below_top_mm": 31.0,
+    "band_depth_behind_display_mm": 20.0,
+    "top_edge_mismatch_mm": 0.0,
+    "hinge_below_display_top_mm": 16.0,
+    "note": "Rear support band within 25 mm; circular mounting ears are 30 mm in diameter and 8 mm thick.",
+    "mounting_holes_used": "upper pair, 75 mm center spacing"
+  },
+  "excluded_configurations": [
+    {
+      "arm_deg": 64.28571428571429,
+      "tilt_deg": 25.714285714285715,
+      "reasons": [
+        "Display_nominal_envelope: cables",
+        "Display_screen_reference: cables"
+      ]
+    },
+    {
+      "arm_deg": 64.28571428571429,
+      "tilt_deg": 38.57142857142857,
+      "reasons": [
+        "Display_nominal_envelope: cables",
+        "Display_screen_reference: cables"
+      ]
+    },
+    {
+      "arm_deg": 64.28571428571429,
+      "tilt_deg": 51.42857142857143,
+      "reasons": [
+        "Display_nominal_envelope: cables",
+        "Display_screen_reference: cables"
+      ]
+    },
+    {
+      "arm_deg": 77.14285714285714,
+      "tilt_deg": 25.714285714285715,
+      "reasons": [
+        "Display_nominal_envelope: cables"
+      ]
+    },
+    {
+      "arm_deg": 77.14285714285714,
+      "tilt_deg": 38.57142857142857,
+      "reasons": [
+        "Display_nominal_envelope: cables",
+        "Display_screen_reference: cables"
+      ]
+    },
+    {
+      "arm_deg": 77.14285714285714,
+      "tilt_deg": 51.42857142857143,
+      "reasons": [
+        "Display_nominal_envelope: cables",
+        "Display_screen_reference: cables"
+      ]
+    }
+  ],
+  "teeth": {
+    "count": 28,
+    "step_deg": 12.857142857142858,
+    "aligned_overlap_mm3": 0.0,
+    "next_index_overlap_mm3": 0.0,
+    "blocked_half_index_overlap_mm3": 93.06924614941737,
+    "released_overlap_mm3": 0.0
+  },
+  "cable_corridor_mm": [
+    283.0,
+    60.0,
+    68.0
+  ],
+  "foot_zone_note": "X +/-133, Y -95..70, Z 13..223. This reference zone does not cover every shoe or foot movement.",
+  "limitations": [
+    "captain_original_foot_height: provisional 3 mm between the floor and the Captain bottom panel without the stand",
+    "Captain width is nominally 283 mm; the measured bottom depth is 90 mm",
+    "Thread size and usable depth of the four display mounting holes",
+    "Centering of the mounting-hole rectangle relative to the display",
+    "Position and envelope of the display connectors with plugs inserted",
+    "Captain side profile and possible interference with its original feet",
+    "The 95 mm dimension is interpreted along the top surface; upper and lower rear edges are assumed aligned",
+    "Footswitch access with the display in front requires testing with actual footwear."
+  ],
+  "display_reference": {
+    "asin": "B0FPR3GS11",
+    "url": "https://www.amazon.it/dp/B0FPR3GS11",
+    "design_note": "This stand was designed around the display listed on Amazon under ASIN B0FPR3GS11."
+  },
+  "front_gap": {
+    "minimum_distance_mm": 9.345424586731294,
+    "front_clearance_y_mm": 6.191684803531402
+  },
+  "motion": {
+    "path_samples": 755,
+    "step_max_deg": 2,
+    "paths": {
+      "rear_to_transport": [
+        [
+          77.14285714285714,
+          12.857142857142858
+        ],
+        [
+          77.14285714285714,
+          -40
+        ],
+        [
+          0,
+          -40
+        ],
+        [
+          0,
+          180.0
+        ],
+        [
+          -90,
+          180.0
+        ]
+      ],
+      "transport_to_front": [
+        [
+          -90,
+          180.0
+        ],
+        [
+          -77.14285714285714,
+          180.0
+        ],
+        [
+          -77.14285714285714,
+          90
+        ],
+        [
+          -90.0,
+          90
+        ]
+      ],
+      "front_to_rear_flat": [
+        [
+          -90.0,
+          90
+        ],
+        [
+          64.28571428571429,
+          90
+        ]
+      ],
+      "rear_flat_to_rear": [
+        [
+          64.28571428571429,
+          90
+        ],
+        [
+          25.714285714285715,
+          90
+        ],
+        [
+          25.714285714285715,
+          -38.57142857142857
+        ],
+        [
+          77.14285714285714,
+          -38.57142857142857
+        ],
+        [
+          77.14285714285714,
+          12.857142857142858
+        ]
+      ]
+    },
+    "minimum_moving_floor_clearance_mm": 9.619244944192694,
+    "static_poses": {
+      "rear": [
+        77.14285714285714,
+        12.857142857142858
+      ],
+      "front": [
+        -90.0,
+        90
+      ],
+      "rear_flat": [
+        64.28571428571429,
+        90
+      ],
+      "transport": [
+        -90,
+        180.0
+      ]
+    },
+    "horizontal_stops": [
+      [
+        -90.0,
+        90
+      ],
+      [
+        -77.14285714285714,
+        90
+      ],
+      [
+        -64.28571428571429,
+        90
+      ],
+      [
+        -51.42857142857143,
+        90
+      ],
+      [
+        -38.57142857142857,
+        90
+      ],
+      [
+        -25.714285714285715,
+        90
+      ],
+      [
+        -12.857142857142858,
+        90
+      ],
+      [
+        0.0,
+        90
+      ],
+      [
+        12.857142857142858,
+        90
+      ],
+      [
+        25.714285714285715,
+        90
+      ],
+      [
+        38.57142857142857,
+        90
+      ],
+      [
+        51.42857142857143,
+        90
+      ],
+      [
+        64.28571428571429,
+        90
+      ]
+    ],
+    "horizontal_sample_step_max_deg": 0.5,
+    "release_mm": 1.4,
+    "note": "Face gears are separated by 1.4 mm during movement."
+  },
+  "captain_profile": {
+    "slope": 0.1599005372667078,
+    "angle_deg": 9.084720287391079,
+    "top_run_mm": 93.8083151964686,
+    "front_y": -48.8083151964686,
+    "rear_y": 45.0,
+    "front_body": 22.0,
+    "rear_body": 37.0,
+    "body_at_y0": 29.80447582299815,
+    "lift_mm": 1.0
+  },
+  "envelopes_mm": {
+    "rear": [
+      348.59,
+      207.28478343813396,
+      79.30892448142174
+    ],
+    "front": [
+      348.59,
+      170.01251928286047,
+      56.0090626011285
+    ],
+    "rear_flat": [
+      348.59,
+      195.31101529412504,
+      97.99167644646147
+    ],
+    "transport": [
+      348.59,
+      138.01251928286047,
+      86.00000010000032
+    ]
+  },
+  "front_switch_height_comparison": {
+    "display_top_mm": 51.03400000000001,
+    "low_switch_top_mm": 48.014035637792794,
+    "height_difference_mm": -3.0199643622072188
+  }
+}

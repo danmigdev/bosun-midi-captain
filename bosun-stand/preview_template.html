@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bosun Stand — independent arm and display adjustment</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101a23;color:#eaf0f2;font:15px system-ui,sans-serif}canvas{width:100%;height:100%;display:block;touch-action:none}main{height:100vh;display:grid;grid-template-columns:330px 1fr}aside{padding:26px;border-right:1px solid #34414b;overflow:auto}h1{font-size:29px;line-height:1.1;margin:14px 0}h2{font-size:14px;margin:23px 0 9px}p{color:#b1c0c9;line-height:1.55}.tag{color:#f2b77f;font-size:11px;letter-spacing:1.8px;text-transform:uppercase}label{display:block;margin:12px 0;color:#cfdae1}button{background:#253744;color:#eaf0f2;border:1px solid #455865;padding:9px 11px;border-radius:6px;cursor:pointer;margin:4px 3px 4px 0}button:hover{background:#355263}button.active{background:#785134;border-color:#f2b77f}button:disabled{opacity:.45;cursor:default}.note{border-left:2px solid #df9a60;padding:10px 12px;font-size:12px;background:#192731}.legend{display:flex;gap:8px;align-items:center;font-size:13px;margin:8px 0}.dot{width:10px;height:10px;border-radius:50%}#viewport{position:relative;min-width:0}#viewport,canvas{background:#e6e8eb}.hint{position:absolute;bottom:18px;left:22px;color:#44505c;font-size:12px;pointer-events:none}.dimension{font-size:12px;color:#b9c8d0;margin:12px 0}a{color:#efb782}.error{position:absolute;top:40%;left:20px;color:#843b18}.small{font-size:12px}.status{display:inline-block;padding:6px 9px;background:#1e303d;color:#d8e2e9;font-size:12px;border-radius:4px}@media(max-width:720px){main{grid-template-columns:1fr;grid-template-rows:58vh auto;height:auto}aside{grid-row:2;padding:22px}#viewport{grid-row:1}}
+input[type=range]{width:100%;accent-color:#e7a56c}input[type=range]:disabled{opacity:.45}.angle-value{font-size:24px;color:#f2b77f;margin:8px 0}
+</style>
+<main><aside>
+<div class="tag">Bosun Stand / Mechanical CAD</div>
+<h1>Move the arms.<br>Rotate the display.</h1>
+<p>Adjust the arms and display independently. Use the presets or the optional level movement to explore the checked positions.</p>
+<p class="small">Designed around the display listed on Amazon under ASIN B0FPR3GS11. <a href="https://www.amazon.it/dp/B0FPR3GS11">Amazon display — B0FPR3GS11</a></p>
+<h2>Presets</h2>
+<button id="poseFront" data-pose="front">Front, level</button><button id="poseRearFlat" data-pose="rear_flat">Rear, level</button><button id="poseRear" data-pose="rear">Rear, tilted</button><button id="poseTransport" data-pose="transport">Transport</button>
+<p class="small" id="poseDescription"></p><div class="status" id="jointAngles"></div>
+<div class="dimension" id="frontGapReadout" hidden>Plan-view clearance from the edge: <b id="frontGapValue"></b></div>
+<h2>Arm position</h2><div class="angle-value" id="armPositionValue"></div>
+<input id="armPosition" aria-label="Arm position" type="range" step="any">
+<h2>Display rotation <span class="small">(90° = level)</span></h2><div class="angle-value" id="displayRotationValue"></div>
+<input id="displayRotation" aria-label="Display rotation, 90 degrees is level" type="range" step="any">
+<button id="snapTeeth">Snap to teeth</button>
+<p class="small" id="adjustmentStatus"></p>
+<div class="status" id="clearanceStatus"></div>
+<p class="small">Free-angle checks use approximate envelopes against fixed parts, reserved cable space and the floor. Contacts between moving parts and mating gear surfaces are not checked. Preset animations follow the checked CAD paths.</p>
+<h2>Optional level movement</h2>
+<button id="horizontalToggle">Move to rear, keeping level</button>
+<p class="small" id="horizontalDescription"></p>
+<p class="small">To keep the display level, support it and adjust both joints as you move the arms. The animation shows this manual adjustment.</p>
+<p class="small" id="basesDescription" hidden></p>
+<div class="note">The front preset's plan-view clearance is <span id="frontGapNote"></span>. Check access to the lower switch row with your footwear, switch travel and connected cables.</div>
+<h2>View</h2><button data-view="iso">Perspective</button><button data-view="rear">Rear</button><button data-view="side">Side</button><button data-view="top">Top</button>
+<p class="small">Drag in the 3D view to rotate through 360° horizontally or vertically, including underneath the stand. The view buttons reset the orientation.</p>
+<label><input type="checkbox" id="refs" checked> Show Captain and display</label><label><input type="checkbox" id="explode"> Exploded assembly</label>
+<div class="legend"><span class="dot" style="background:#de9255"></span>Single-piece crossbar and round mounts</div>
+<div class="legend"><span class="dot" style="background:#60798c"></span>Frame and side mounts</div>
+<div class="dimension" id="dimensions"></div>
+<p class="small" id="structureDimensions"></p>
+<p class="small">To adjust the joints, support the display, loosen the knobs and separate the teeth. The animation shows the movement path; do not force engaged teeth.</p>
+<div class="note"><b>VERIFY WITH PRINTED PARTS</b><br>Nominal geometry. The preview does not establish stiffness, strength, stability or clearance from actual footwear and connectors.</div>
+<p class="small">Self-contained local file with no network dependencies. Model generated from the CAD solids.</p><a href="stand_front_with_references.step">Front STEP</a> · <a href="stand_rear_flat_with_references.step">Level rear STEP</a> · <a href="stand_rear_with_references.step">Tilted rear STEP</a> · <a href="stand_transport_with_references.step">Transport STEP</a>
+</aside><div id="viewport"><canvas id="canvas"></canvas><div class="hint">Drag to rotate 360° in any direction · scroll to zoom</div></div></main>
+<script>
+'use strict';
+const scene=__SCENE__;
+__RENDER_CORE__
+__CLEARANCE_CORE__
+const p=scene.parameters,items=scene.parts.map(prepare),poses=scene.poses,paths=scene.motion_paths,horizontal=scene.horizontal_motion;
+const manual={arm_min_deg:-180,arm_max_deg:180,display_min_deg:-180,display_max_deg:180,...scene.manual_motion},toothStep=360/p.joint_teeth,clearanceChecker=createClearanceChecker(scene);
+let az=-.95,elev=.60,span=445,angle=poses.front[1],armAngle=poses.front[0],mode='front',showRefs=true,exploded=false,folding=false,release=0,manualAdjusting=false,actionMessage='Selected preset.',clearance=null;
+const descriptions={rear:'Display behind the Captain, tilted towards the player.',rear_flat:'Display behind the Captain, parallel to the floor.',front:'Display in front of the lower switch row, parallel to the floor and facing up.',custom:'Custom arm and display angles.',transport:'Display upright in front of the Captain, with the screen facing the Captain. Transport position.'};
+function frontGap(){return scene.front_gap||null;}
+function dimension(value,decimals=1){return Number(value).toFixed(decimals);}
+document.getElementById('frontGapNote').textContent=dimension(scene.front_gap.front_clearance_y_mm,2)+' mm';
+function globalMatrix(){return identity();}
+function isHorizontal(){return Math.abs(angle-horizontal.display_deg)<.00001;}
+function isOnHorizontalArc(){return isHorizontal()&&armAngle>=horizontal.arm_min_deg-.00001&&armAngle<=horizontal.arm_max_deg+.00001;}
+function clampArm(value){return Math.max(manual.arm_min_deg,Math.min(manual.arm_max_deg,Number(value)));}
+function clampDisplay(value){return Math.max(manual.display_min_deg,Math.min(manual.display_max_deg,Number(value)));}
+function snappedArm(value){return clampArm(Math.round(clampArm(value)/toothStep)*toothStep);}
+function teethAligned(){return Math.abs(armAngle/toothStep-Math.round(armAngle/toothStep))<.000001&&Math.abs((angle-armAngle)/toothStep-Math.round((angle-armAngle)/toothStep))<.000001;}
+function pivotPosition(){const radians=armAngle*Math.PI/180;return [0,p.base_pivot_y+p.arm_length*Math.sin(radians),p.base_pivot_z+p.arm_length*Math.cos(radians)];}
+function modelMatrix(item){
+    let m=identity();const aa=armAngle*Math.PI/180,ty=p.base_pivot_y+p.arm_length*Math.sin(aa),tz=p.base_pivot_z+p.arm_length*Math.cos(aa);
+    if(item.group==='arm')m=mul(translation(0,p.base_pivot_y,p.base_pivot_z),mul(rotationX(-aa),translation(0,-p.base_pivot_y,-p.base_pivot_z)));
+    if(item.group.endsWith('moving'))m=mul(translation(0,ty,tz),mul(rotationX(-angle*Math.PI/180),translation(0,-p.pivot_y,-p.pivot_z)));
+    if(item.group==='arm'&&release)m=mul(translation(item.name.endsWith('_right')?release:-release,0,0),m);
+    if(exploded){let dx=0,dy=0,dz=0;
+        if(item.name.includes('_base_'))dx=item.name.endsWith('_right')?22:-22;
+        if(item.name.includes('_arm_'))dx=item.name.endsWith('_right')?52:-52;
+        if(item.name.includes('_knob_'))dx=item.name.endsWith('_right')?75:-75;
+        if(item.name.includes('_clamp_plate_')){dx=item.name.endsWith('_right')?22:-22;dz=35;}
+        if(item.group.endsWith('moving'))dz=65;
+        if(item.group==='reference_moving')dy=-32;
+        m=mul(translation(dx,dy,dz),m);
+    }
+    return m;
+}
+function visibleItems(){return items.filter(i=>showRefs||!i.group.startsWith('reference'));}
+function cameraPose(){
+    const armRadians=armAngle*Math.PI/180,trackingArm=Math.asin(Math.sin(armRadians))*180/Math.PI;
+    const q=Math.max(0,Math.min(1,(trackingArm+90)/160)),target=[0,-38+80*q,48+45*q+Math.min(0,p.arm_length*Math.cos(armRadians))/2],eye=[600*Math.cos(elev)*Math.cos(az),target[1]+600*Math.cos(elev)*Math.sin(az),target[2]+600*Math.sin(elev)];
+    // Carry the camera's up direction through both poles without a flip.
+    const up=[-Math.sin(elev)*Math.cos(az),-Math.sin(elev)*Math.sin(az),Math.cos(elev)];
+    return {eye,target,up};
+}
+function wrapViewAngle(value){const turn=2*Math.PI;return ((value+Math.PI)%turn+turn)%turn-Math.PI;}
+function rotateView(dx,dy){az=wrapViewAngle(az-dx*.008);elev=wrapViewAngle(elev+dy*.008);draw();}
+function draw(){
+    const dpr=Math.min(devicePixelRatio||1,2),w=canvas.clientWidth,h=canvas.clientHeight;
+    if(!w||!h)return;canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(230/255,232/255,235/255,1);gl.enable(gl.DEPTH_TEST);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    const {eye,target,up}=cameraPose();
+    gl.uniformMatrix4fv(uv,false,new Float32Array(mul(ortho(span,span*h/w,1,1500),lookAt(eye,target,up))));
+    for(const item of visibleItems()){
+        gl.uniformMatrix4fv(um,false,new Float32Array(modelMatrix(item)));gl.uniform3fv(uc,item.rgb);gl.bindBuffer(gl.ARRAY_BUFFER,item.buffer);gl.enableVertexAttribArray(ap);gl.enableVertexAttribArray(an);gl.vertexAttribPointer(ap,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(an,3,gl.FLOAT,false,24,12);gl.drawArrays(gl.TRIANGLES,0,item.count);
+    }
+}
+function labels(){
+    document.getElementById('jointAngles').textContent=`Arms ${dimension(armAngle,2)}° · display ${dimension(angle,2)}°`;
+    document.getElementById('poseDescription').textContent=folding?'Moving between positions…':descriptions[mode];
+    for(const b of document.querySelectorAll('[data-pose]')){b.disabled=folding;b.classList.toggle('active',b.dataset.pose===mode&&!folding);}
+    document.getElementById('explode').disabled=folding||manualAdjusting;
+    document.getElementById('armPosition').disabled=folding;
+    document.getElementById('armPosition').value=clampArm(armAngle);
+    document.getElementById('armPositionValue').textContent=dimension(armAngle,2)+'°';
+    document.getElementById('displayRotation').disabled=folding;
+    document.getElementById('displayRotation').value=clampDisplay(angle);
+    document.getElementById('displayRotationValue').textContent=dimension(angle,2)+'°';
+    document.getElementById('snapTeeth').disabled=folding;
+    document.getElementById('adjustmentStatus').textContent=folding?'Following a checked preset path with the joints released.':mode==='custom'?(release>0?'Free adjustment: joints released. Check clearances; the verified preset paths do not cover every angle combination.':`Snapped to the ${dimension(toothStep,2)}° tooth spacing. Check clearances at this custom position.`):actionMessage;
+    document.getElementById('horizontalToggle').disabled=folding;
+    document.getElementById('horizontalToggle').textContent=isOnHorizontalArc()?(armAngle>(horizontal.arm_min_deg+horizontal.arm_max_deg)/2?'Move to front, keeping level':'Move to rear, keeping level'):'Select front-level preset';
+    document.getElementById('horizontalDescription').textContent='This separate shortcut moves the display along the checked front-to-rear path while keeping it level. The two sliders remain independent.';
+    clearance=clearanceChecker.check(armAngle,angle,release);
+    const clearanceLabel=document.getElementById('clearanceStatus');
+    clearanceLabel.textContent=clearance.status==='possible_contact'?'Possible contact: '+clearance.contacts.slice(0,3).map(contact=>contact.label).join('; '):'No contact detected with fixed parts, cable space or floor.';
+    clearanceLabel.style.color=clearance.status==='possible_contact'?'#ffd099':'#a9dec0';
+    const gap=frontGap(),showGap=mode==='front'&&!folding&&!manualAdjusting&&gap;
+    document.getElementById('frontGapReadout').hidden=!showGap;
+    if(showGap)document.getElementById('frontGapValue').textContent=dimension(gap.front_clearance_y_mm,2)+' mm';
+}
+function startManual(){
+    mode='custom';manualAdjusting=true;release=scene.folding?.release_mm||1.4;exploded=false;document.getElementById('explode').checked=false;actionMessage='';
+}
+function dragArm(value){
+    if(folding||!Number.isFinite(Number(value)))return;startManual();armAngle=clampArm(value);labels();draw();
+}
+function dragDisplay(value){
+    if(folding||!Number.isFinite(Number(value)))return;startManual();angle=clampDisplay(value);labels();draw();
+}
+function commitManual(){
+    if(folding||mode!=='custom')return;manualAdjusting=false;labels();draw();
+}
+function snapToTeeth(){
+    if(folding)return;armAngle=snappedArm(armAngle);angle=clampDisplay(Math.round(angle/toothStep)*toothStep);manualAdjusting=false;release=teethAligned()?0:(scene.folding?.release_mm||1.4);labels();draw();
+}
+function motionGraph(){
+    const graph=Object.fromEntries(Object.keys(poses).map(name=>[name,[]]));
+    for(const [key,points] of Object.entries(paths)){
+        const [from,to]=key.split('_to_');if(!graph[from]||!graph[to])continue;
+        const copied=points.map(point=>[...point]);copied[0]=[...poses[from]];copied[copied.length-1]=[...poses[to]];
+        graph[from].push({to,points:copied});graph[to].push({to:from,points:[...copied].reverse()});
+    }
+    return graph;
+}
+function pathCost(points){return points.slice(1).reduce((sum,v,i)=>sum+Math.abs(v[0]-points[i][0])+Math.abs(v[1]-points[i][1]),0);}
+function pathBetween(from,to){
+    if(from===to&&poses[from])return [[...poses[from]],[...poses[to]]];
+    const graph=motionGraph(),queue=[],best={};
+    if(!poses[from]||!poses[to])throw Error('Preset paths are only defined between named presets.');
+    queue.push({name:from,cost:0,points:[[...poses[from]]]});
+    while(queue.length){
+        queue.sort((a,b)=>a.cost-b.cost);const next=queue.shift();
+        if(best[next.name]!==undefined&&next.cost>best[next.name])continue;
+        if(next.name===to)return next.points.length>1?next.points:[...next.points,[...poses[to]]];
+        best[next.name]=next.cost;
+        for(const edge of graph[next.name]){
+            if(from!=='transport'&&to!=='transport'&&edge.to==='transport')continue;
+            const cost=next.cost+pathCost(edge.points);if(best[edge.to]===undefined||cost<best[edge.to])queue.push({name:edge.to,cost,points:[...next.points,...edge.points.slice(1)]});
+        }
+    }
+    throw Error(`No movement path available: ${from} → ${to}`);
+}
+function setPoseImmediate(name,message='Selected preset.'){
+    if(folding)return;mode=name;[armAngle,angle]=poses[name];release=0;manualAdjusting=false;actionMessage=message;labels();draw();
+}
+function animatePath(points,name){
+    const duration=points.length>3?4200:1700,start=performance.now(),initialRelease=release;
+    folding=true;manualAdjusting=false;exploded=false;document.getElementById('explode').checked=false;labels();
+    function frame(now){const t=Math.min(1,(now-start)/duration),r=scene.folding?.release_mm||1.4;
+        release=t<.08?initialRelease+(r-initialRelease)*t/.08:t>.92?r*(1-t)/.08:r;
+        const q=Math.max(0,Math.min(1,(t-.08)/.84))*(points.length-1),i=Math.min(points.length-2,Math.floor(q)),u=q-i;
+        armAngle=points[i][0]+(points[i+1][0]-points[i][0])*u;angle=points[i][1]+(points[i+1][1]-points[i][1])*u;labels();draw();
+        if(t<1)requestAnimationFrame(frame);else{folding=false;mode=name;[armAngle,angle]=poses[name];release=0;actionMessage='Selected preset.';labels();draw();}
+    }requestAnimationFrame(frame);
+}
+function animatePose(name){
+    if(folding)return;
+    if(mode==='custom'){setPoseImmediate(name,'Selected preset. No movement path simulated from the custom position.');return;}
+    if(name===mode)return;animatePath(pathBetween(mode,name),name);
+}
+function animateHorizontal(){
+    if(folding)return;
+    if(!isOnHorizontalArc()){setPoseImmediate('front','Selected front-level preset. Use the level movement button to move behind the Captain.');return;}
+    const target=armAngle>(horizontal.arm_min_deg+horizontal.arm_max_deg)/2?'front':'rear_flat';
+    animatePath([[armAngle,horizontal.display_deg],[...poses[target]]],target);
+}
+for(const b of document.querySelectorAll('[data-pose]'))b.onclick=()=>animatePose(b.dataset.pose);
+for(const [id,min,max,readValue,drag] of [
+    ['armPosition',manual.arm_min_deg,manual.arm_max_deg,()=>armAngle,dragArm],
+    ['displayRotation',manual.display_min_deg,manual.display_max_deg,()=>angle,dragDisplay]
+]){
+    const slider=document.getElementById(id);slider.min=min;slider.max=max;
+    slider.addEventListener('input',event=>drag(event.target.value));
+    slider.addEventListener('change',commitManual);slider.addEventListener('pointerup',commitManual);slider.addEventListener('pointercancel',commitManual);
+    slider.addEventListener('keydown',event=>{
+        if(slider.disabled)return;const steps={ArrowRight:1,ArrowUp:1,ArrowLeft:-1,ArrowDown:-1,PageUp:10,PageDown:-10};
+        if(!(event.key in steps)&&!['Home','End'].includes(event.key))return;event.preventDefault();
+        const target=event.key==='Home'?min:event.key==='End'?max:readValue()+steps[event.key]*(event.shiftKey ? 0.1 : 1);
+        drag(target);commitManual();
+    });
+}
+document.getElementById('snapTeeth').onclick=snapToTeeth;
+document.getElementById('horizontalToggle').onclick=animateHorizontal;
+let last=null;
+canvas.addEventListener('pointerdown',e=>{if(last||e.button!==0)return;last={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);});
+for(const eventName of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(eventName,e=>{if(last?.id===e.pointerId)last=null;});
+canvas.addEventListener('pointermove',e=>{if(last?.id!==e.pointerId)return;const dx=e.clientX-last.x,dy=e.clientY-last.y;last.x=e.clientX;last.y=e.clientY;rotateView(dx,dy);});
+canvas.addEventListener('wheel',e=>{e.preventDefault();span=Math.max(240,Math.min(850,span*Math.exp(e.deltaY*.001)));draw();},{passive:false});
+document.getElementById('refs').addEventListener('change',e=>{showRefs=e.target.checked;draw();});document.getElementById('explode').addEventListener('change',e=>{exploded=e.target.checked;span=exploded?540:445;draw();});
+for(const btn of document.querySelectorAll('[data-view]'))btn.onclick=()=>{[az,elev]=btn.dataset.view==='side'?[0,.03]:btn.dataset.view==='rear'?[Math.PI/2,.35]:btn.dataset.view==='top'?[-Math.PI/2,1.56]:[-.95,.6];draw();};
+document.getElementById('dimensions').textContent=`Display ${dimension(p.display_width,2)} × ${dimension(p.display_height)} mm · hole spacing ${dimension(p.display_hole_pitch_x)} × ${dimension(p.display_hole_pitch_z)} mm · ${visibleItems().filter(i=>!i.group.startsWith('reference')).length} printed components`;
+document.getElementById('structureDimensions').textContent=`Arms: ${dimension(p.arm_length)} mm between pivots, ${dimension(p.arm_web_thickness)} mm thick webs and ${dimension(p.arm_disc_thickness)} mm thick discs. Crossbar thickness: ${dimension(p.display_band_thickness)} mm, with ${dimension(p.display_boss_thickness)} mm mounting bosses. Four M6 joints, each with ${p.joint_teeth} teeth and ${dimension(360/p.joint_teeth,2)}° increments.`;
+if(Number.isFinite(p.base_wall_front_height)&&Number.isFinite(p.base_wall_rear_height)){
+    document.getElementById('basesDescription').hidden=false;
+    document.getElementById('basesDescription').textContent=`The bases are ${dimension(p.base_wall_front_height,0)} mm high at the front and ${dimension(p.base_wall_rear_height,0)} mm at the rear, measured from the top of the support lip beneath the Captain. Through holes for the screws retain the internal hexagonal nut pockets.`;
+}
+if(location.hash==='#rear')mode='rear';else if(location.hash==='#rear-flat')mode='rear_flat';else if(location.hash==='#transport'||location.hash==='#closed')mode='transport';[armAngle,angle]=poses[mode];labels();new ResizeObserver(draw).observe(canvas);draw();
+window.bosunPreview={getState:()=>({mode,armAngle,angle,folding,manualAdjusting,release,teethAligned:teethAligned(),locked:release===0&&teethAligned(),horizontal:isHorizontal(),pivot:pivotPosition(),clearance,frontGap:frontGap(),printed:visibleItems().filter(i=>!i.group.startsWith('reference')).length}),getCameraState:()=>({azimuth:az,elevation:elev,span,...cameraPose()}),rotateView,setPoseImmediate,animatePose,animateHorizontal,dragArm,dragDisplay,commitManual,snapToTeeth,snappedArm,modelMatrix,globalMatrix,pathBetween};
+</script></html>

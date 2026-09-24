@@ -1,0 +1,13 @@
+const canvas=document.getElementById('canvas'), gl=canvas.getContext('webgl',{antialias:true,alpha:false});
+if(!gl){document.getElementById('viewport').innerHTML='<p class="error">WebGL is unavailable. View the PNG images or open a STEP file in your CAD application.</p>';throw Error('WebGL is unavailable');}
+const shader=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};
+const prog=gl.createProgram();gl.attachShader(prog,shader(gl.VERTEX_SHADER,`attribute vec3 p;attribute vec3 n;uniform mat4 view;uniform mat4 model;varying vec3 normal;varying vec3 world;void main(){vec4 w=model*vec4(p,1.0);world=w.xyz;normal=mat3(model)*n;gl_Position=view*w;}`));gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,`precision mediump float;uniform vec3 color;varying vec3 normal;varying vec3 world;void main(){vec3 N=normalize(normal);if(!gl_FrontFacing)N=-N;float key=max(dot(N,normalize(vec3(-.4,-.6,1.0))),0.0);float fill=max(dot(N,normalize(vec3(.8,.6,.2))),0.0);float light=.48+.42*key+.15*fill;gl_FragColor=vec4(color*light,1.0);}`));gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(prog));gl.useProgram(prog);
+const ap=gl.getAttribLocation(prog,'p'),an=gl.getAttribLocation(prog,'n'),uv=gl.getUniformLocation(prog,'view'),um=gl.getUniformLocation(prog,'model'),uc=gl.getUniformLocation(prog,'color');
+const norm=a=>{let d=Math.hypot(...a)||1;return a.map(v=>v/d)},cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],sub=(a,b)=>a.map((v,i)=>v-b[i]),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const identity=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+function mul(a,b){let o=Array(16).fill(0);for(let c=0;c<4;c++)for(let r=0;r<4;r++)for(let k=0;k<4;k++)o[c*4+r]+=a[k*4+r]*b[c*4+k];return o;}
+function translation(x,y,z){let m=identity();m[12]=x;m[13]=y;m[14]=z;return m;}
+function rotationX(a){let c=Math.cos(a),s=Math.sin(a);return [1,0,0,0,0,c,s,0,0,-s,c,0,0,0,0,1];}
+function lookAt(eye,target,up=[0,0,1]){let z=norm(sub(eye,target)),x=norm(cross(up,z)),y=cross(z,x);return [x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1];}
+function ortho(w,h,n,f){return [2/w,0,0,0,0,2/h,0,0,0,0,-2/(f-n),0,0,0,-(f+n)/(f-n),1];}
+function prepare(part){let a=[];for(const f of part.faces){const v=f.map(i=>part.vertices[i]),n=norm(cross(sub(v[1],v[0]),sub(v[2],v[0])));for(const p of v)a.push(...p,...n);}let buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(a),gl.STATIC_DRAW);return {...part,buffer,count:a.length/6,rgb:[1,3,5].map(i=>parseInt(part.color.slice(i,i+2),16)/255)};}
