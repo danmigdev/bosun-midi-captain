@@ -1,81 +1,63 @@
-# F-Droid build metadata for the pinned release below.
-# Reproducibility maintenance: android-reproducible-builds.md.
 Categories:
   - Multimedia
 License: GPL-3.0-or-later
+AuthorName: Danilo Migliarino
 SourceCode: https://github.com/danmigdev/bosun-midi-captain
 IssueTracker: https://github.com/danmigdev/bosun-midi-captain/issues
 
 AutoName: Bosun
-Description: |
-    Bosun is an editor and live "Stage" companion for the PaintAudio MIDI
-    Captain foot controller running Bosun firmware. Configure switches,
-    bindings and screen layout, and mirror the pedal's live state on a
-    phone or tablet at a gig - connects directly over USB-OTG, no computer
-    needed. Plugin system supports Kemper Player, Hotone Ampero II Stage,
-    Line 6 Helix, and generic MIDI devices.
 
 RepoType: git
 Repo: https://github.com/danmigdev/bosun-midi-captain
-
 Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v%v/bosun.apk
 
-AllowedAPKSigningKeys: 53fd21db1e975195c7f6faf45f9c3f3a3fdcb310738762a61397be175e136e93
-
 Builds:
-  - versionName: 0.6.0
-    versionCode: 29
-    commit: v0.6.0
+  - versionName: 0.7.2
+    versionCode: 40
+    commit: v0.7.2
     subdir: editor/src-tauri/gen/android
     sudo:
       - apt-get update
-      - apt-get install -y build-essential
-      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant sh -s -- -y
-      - curl -fL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz && mkdir -p /home/vagrant/node-v22.23.2-linux-x64 && tar -xJf /tmp/node.tar.xz -C /home/vagrant/node-v22.23.2-linux-x64 --strip-components=1 && rm /tmp/node.tar.xz
+      - apt-get install -y build-essential gcc-13 g++-13 xz-utils
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant
+        sh -s -- -y --profile minimal --default-toolchain 1.97.1
+      - curl -fL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz
+        && mkdir -p /home/vagrant/node-v22.23.2-linux-x64 && tar -xJf /tmp/node.tar.xz
+        -C /home/vagrant/node-v22.23.2-linux-x64 --strip-components=1 && rm /tmp/node.tar.xz
       - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup /home/vagrant/node-v22.23.2-linux-x64
-      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-    init:
-      - export PATH="/home/vagrant/node-v22.23.2-linux-x64/bin:$HOME/.cargo/bin:$PATH"
-      - export RUSTFLAGS="--remap-path-prefix=$HOME=/build"
-      - export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang
-      - export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi29-clang
-      - export CARGO_TARGET_I686_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android29-clang
-      - export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$$NDK$$/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android29-clang
-      - export TAURI_ANDROID_PROJECT_PATH="$(pwd)"
-      - export TAURI_ANDROID_PACKAGE_UNESCAPED="com.bosun.app"
-      - mkdir -p app/src/main/java/com/bosun/app/generated
-      - export WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$(pwd)/app/src/main/java/com/bosun/app/generated"
-      - export WRY_ANDROID_PACKAGE="com.bosun.app"
-      - export WRY_ANDROID_LIBRARY="bosun_editor_lib"
-      - cd ../../../.. && rm -rf editor/src-tauri/resources/firmware editor/src-tauri/resources/lib && mkdir -p editor/src-tauri/resources/lib && curl -fL -o editor/src-tauri/resources/circuitpython.uf2 https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2 && python3 tools/provision_adafruit_bundle.py --destination editor/src-tauri/resources/lib && python3 tools/sync_firmware_resources.py --repo-root .
-      - cd editor && npm ci && npm run build
-      - cd src-tauri && cargo build --release --target aarch64-linux-android --target armv7-linux-androideabi --target i686-linux-android --target x86_64-linux-android && cd ..
-      - mkdir -p src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a src-tauri/gen/android/app/src/main/jniLibs/x86 src-tauri/gen/android/app/src/main/jniLibs/x86_64
-      - cp src-tauri/target/aarch64-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/
-      - cp src-tauri/target/armv7-linux-androideabi/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a/
-      - cp src-tauri/target/i686-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/x86/
-      - cp src-tauri/target/x86_64-linux-android/release/libbosun_editor_lib.so src-tauri/gen/android/app/src/main/jniLibs/x86_64/
-      - mkdir -p src-tauri/gen/android/app/src/main/assets
-      - printf '%s' '{"$schema":"https://schema.tauri.app/config/2","productName":"Bosun","version":"0.6.0","identifier":"com.bosun.app","app":{"windows":[{"label":"main","create":true,"url":"index.html","dragDropEnabled":true,"center":false,"width":1100.0,"height":720.0,"minWidth":800.0,"minHeight":600.0,"resizable":true,"maximizable":true,"minimizable":true,"closable":true,"title":"Bosun","fullscreen":false,"focus":true,"focusable":true,"transparent":false,"maximized":false,"visible":true,"decorations":true,"alwaysOnBottom":false,"alwaysOnTop":false,"visibleOnAllWorkspaces":false,"contentProtected":false,"skipTaskbar":false,"titleBarStyle":"Visible","hiddenTitle":false,"acceptFirstMouse":false,"shadow":true,"incognito":false,"zoomHotkeysEnabled":false,"browserExtensionsEnabled":false,"useHttpsScheme":false,"javascriptDisabled":false,"allowLinkPreview":true,"disableInputAccessoryView":false,"scrollBarStyle":"default","generalAutofillEnabled":true}],"security":{"freezePrototype":false,"dangerousDisableAssetCspModification":false,"assetProtocol":{"scope":[],"enable":false},"pattern":{"use":"brownfield"},"capabilities":[]},"macOSPrivateApi":false,"withGlobalTauri":false,"enableGTKAppId":false},"build":{"devUrl":"http://localhost:1420/","frontendDist":"../dist","beforeDevCommand":"npm run dev","beforeBuildCommand":"npm run build","removeUnusedCommands":false,"additionalWatchFolders":[]},"bundle":{"active":true,"targets":[],"createUpdaterArtifacts":false,"icon":["icons/32x32.png","icons/128x128.png","icons/icon.icns","icons/icon.ico"],"resources":{"resources/firmware":"firmware","resources/lib":"lib","resources/circuitpython.uf2":"circuitpython.uf2"},"shortDescription":"Editor for PaintAudio MIDI Captain controllers running Bosun firmware.","longDescription":"Desktop editor for PaintAudio MIDI Captain controllers running Bosun firmware, with a plugin system for any MIDI target device (Kemper Player, Hotone Ampero II Stage, Line 6 Helix, generic MIDI, and more).","useLocalToolsDir":false,"windows":{"digestAlgorithm":null,"certificateThumbprint":null,"timestampUrl":null,"tsp":false,"webviewInstallMode":{"type":"downloadBootstrapper","silent":true},"allowDowngrades":true,"minimumWebview2Version":null,"wix":null,"nsis":null,"signCommand":null},"linux":{"appimage":{"bundleMediaFramework":false,"files":{}},"deb":{"files":{}},"rpm":{"release":"1","epoch":0,"files":{}}},"macOS":{"files":{},"minimumSystemVersion":"10.13","hardenedRuntime":true,"dmg":{"windowSize":{"width":660,"height":400},"appPosition":{"x":180,"y":170},"applicationFolderPosition":{"x":480,"y":170}}},"iOS":{"minimumSystemVersion":"14.0"},"android":{"minSdkVersion":29,"versionCode":29,"autoIncrementVersionCode":false}},"plugins":{}}' > src-tauri/gen/android/app/src/main/assets/tauri.conf.json
-      - cp src-tauri/resources/circuitpython.uf2 src-tauri/gen/android/app/src/main/assets/circuitpython.uf2
-      - cp -r src-tauri/resources/firmware src-tauri/gen/android/app/src/main/assets/firmware
-      - cp -r src-tauri/resources/lib src-tauri/gen/android/app/src/main/assets/lib
-      - printf '// THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\ntauri.android.versionName=0.6.0\ntauri.android.versionCode=%s\n' "$(cat src-tauri/android-version-code.txt)" > src-tauri/gen/android/app/tauri.properties
-      - printf '\ntasks.matching { it.name.startsWith("rustBuild") }.configureEach { enabled = false }\n' >> src-tauri/gen/android/app/build.gradle.kts
-    gradle:
-      - yes
+      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android
+        armv7-linux-androideabi i686-linux-android x86_64-linux-android
     output: app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
-    scanignore:
-      - editor/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/libbosun_editor_lib.so
-      - editor/src-tauri/gen/android/app/src/main/jniLibs/armeabi-v7a/libbosun_editor_lib.so
-      - editor/src-tauri/gen/android/app/src/main/jniLibs/x86/libbosun_editor_lib.so
-      - editor/src-tauri/gen/android/app/src/main/jniLibs/x86_64/libbosun_editor_lib.so
+    prebuild:
+      - cd ../../../..
+      - mkdir -p editor/src-tauri/resources/lib
+      - curl -fL -o editor/src-tauri/resources/circuitpython.uf2 
+        https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2
+      - python3 tools/provision_adafruit_bundle.py --destination editor/src-tauri/resources/lib
+      - python3 tools/sync_firmware_resources.py --repo-root .
+      - sed -i -e 's/"versionCode":[[:space:]]*[0-9]*/"versionCode":$$VERCODE$$/' editor/src-tauri/tauri.conf.json
     scandelete:
-      - editor/src-tauri/target
-      - editor/node_modules
-    ndk: "29.0.14206865"
+      - bosun-stand
+      - editor/src-tauri/vendor/picotool/flash_id.bin
+    build:
+      - export PATH="/home/vagrant/node-v22.23.2-linux-x64/bin:$HOME/.cargo/bin:$PATH"
+      - export CC=gcc-13 CXX=g++-13 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc-13
+      - export RUSTFLAGS="--remap-path-prefix=$HOME=/build"
+      - export NDK_HOME=$$NDK$$
+      - printf '#!/bin/sh\nexec gradlew-fdroid "$@"\n' > gradlew
+      - chmod +x gradlew
+      - cd ../../../..
+      - cd editor
+      - npm ci --no-audit --no-fund
+      - npx tauri android init --ci
+      - npx tauri android build --apk --ci -- --locked
+    ndk: 29.0.14206865
 
-AutoUpdateMode: None
-UpdateCheckMode: Static
-CurrentVersion: 0.6.0
-CurrentVersionCode: 29
+AllowedAPKSigningKeys: 53fd21db1e975195c7f6faf45f9c3f3a3fdcb310738762a61397be175e136e93
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+UpdateCheckData: 
+  editor/src-tauri/android-version-code.txt|(\d+)|editor/src-tauri/tauri.conf.json|"version":\s*"([^"]+)"
+CurrentVersion: 0.7.2
+CurrentVersionCode: 40

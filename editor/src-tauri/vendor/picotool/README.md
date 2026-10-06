@@ -1,6 +1,6 @@
 # RP2040 flash identity helper
 
-`flash_id.bin` and its corresponding `flash_id.c` are from Raspberry Pi
+`flash_id.bin`, `flash_id.c` and `CMakeLists.txt` are from Raspberry Pi
 picotool commit `2041936441b48a3cc53ae3da9e805229fe8f4e18`, directory
 [`picoboot_flash_id`](https://github.com/raspberrypi/picotool/tree/2041936441b48a3cc53ae3da9e805229fe8f4e18/picoboot_flash_id).
 The upstream BSD 3-Clause license is included in `LICENSE.TXT`.
@@ -12,3 +12,8 @@ The helper sends read-only SPI opcodes 0x4b and 0x9f. It is compiled into Bosun;
 no downloaded executable is accepted from an update package.
 
 SHA-256: `0c598d8a4dc02ede332a65f96aff27a410fd65d8aaa9fa6dc971539c720725b8`.
+
+`tools/build-flash-id.sh --fetch-sdk` rebuilds it from `flash_id.c` with Pico
+SDK 2.3.0 and `arm-none-eabi-gcc`, then requires this SHA-256. The release
+workflow runs it. Android builds do not compile the helper, so the F-Droid
+build deletes the prebuilt file.

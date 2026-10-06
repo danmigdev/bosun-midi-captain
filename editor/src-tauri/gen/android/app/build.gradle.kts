@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.util.Properties
 
 plugins {
@@ -56,6 +58,25 @@ android {
 rust {
     rootDirRel = "../../../"
 }
+
+// The Tauri CLI serializes assets/tauri.conf.json from HashMaps (for example
+// bundle.resources), so its key order changes between builds. Sort every
+// object's keys so the GitHub release and F-Droid builds of one commit package
+// identical bytes. At runtime Tauri reads only `plugins` from this file.
+val sortTauriConfigKeys by tasks.registering {
+    val config = file("src/main/assets/tauri.conf.json")
+    doLast {
+        if (!config.exists()) return@doLast
+        fun sorted(value: Any?): Any? = when (value) {
+            is Map<*, *> -> value.entries.sortedBy { it.key.toString() }
+                .associate { it.key.toString() to sorted(it.value) }
+            is List<*> -> value.map { sorted(it) }
+            else -> value
+        }
+        config.writeText(JsonOutput.toJson(sorted(JsonSlurper().parseText(config.readText()))))
+    }
+}
+tasks.named("preBuild") { dependsOn(sortTauriConfigKeys) }
 
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")

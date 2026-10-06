@@ -101,6 +101,9 @@ jobs:
           gcc g++ python3
       - name: Build and test native core with pinned SDK and TinyUSB
         run: bash tools/native-build.sh all --fetch-sdk
+      # Prove the vendored desktop helper matches its source.
+      - name: Rebuild the embedded RP2040 flash ID helper from source
+        run: bash tools/build-flash-id.sh
       - name: Create and verify this release's native package
         env:
           BOSUN_RELEASE: ${{ needs.verify.outputs.release }}

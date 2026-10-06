@@ -230,20 +230,18 @@ class BuildScriptWiringTests(unittest.TestCase):
         first_sync = build_jobs.index("python tools/sync_firmware_resources.py --repo-root .")
         self.assertLess(vendor_copy, first_sync)
 
-    def test_fdroid_recipe_uses_shared_sync_and_stages_both_trees(self):
+    def test_fdroid_recipe_uses_shared_sync_and_the_release_tauri_build(self):
         recipe = SCRIPT.parent.parent / "docs" / "fdroid-com.bosun.app.yml"
         text = recipe.read_text(encoding="utf-8")
         self.assertNotIn("cp -r firmware editor/src-tauri/resources/firmware", text)
         self.assertIn("python3 tools/sync_firmware_resources.py --repo-root .", text)
         self.assertIn("python3 tools/provision_adafruit_bundle.py", text)
-        self.assertIn(
-            "cp -r src-tauri/resources/firmware src-tauri/gen/android/app/src/main/assets/firmware",
-            text,
-        )
-        self.assertIn(
-            "cp -r src-tauri/resources/lib src-tauri/gen/android/app/src/main/assets/lib",
-            text,
-        )
+        # The Tauri CLI stages resources and the APK configuration exactly as
+        # release.yml does, so the recipe holds no per-release copies.
+        self.assertIn("npx tauri android build --apk --ci -- --locked", text)
+        self.assertNotIn("src/main/assets", text)
+        self.assertIn("- editor/src-tauri/vendor/picotool/flash_id.bin", text)
+        self.assertIn("AutoUpdateMode: Version", text)
 
 
 @unittest.skipUnless(shutil.which("powershell.exe") or shutil.which("pwsh"), "PowerShell is unavailable")
