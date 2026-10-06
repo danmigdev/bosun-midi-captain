@@ -14,7 +14,7 @@ Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v%v/
 Builds:
   - versionName: 0.7.2
     versionCode: 40
-    commit: v0.7.2
+    commit: 8d60f159f25162960a9696b49beda77aad389d33
     subdir: editor/src-tauri/gen/android
     sudo:
       - apt-get update
@@ -35,7 +35,8 @@ Builds:
         https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2
       - python3 tools/provision_adafruit_bundle.py --destination editor/src-tauri/resources/lib
       - python3 tools/sync_firmware_resources.py --repo-root .
-      - sed -i -e 's/"versionCode":[[:space:]]*[0-9]*/"versionCode":$$VERCODE$$/' editor/src-tauri/tauri.conf.json
+      - sed -i -e 's/"versionCode":[[:space:]]*[0-9]*/"versionCode":$$VERCODE$$/'
+        editor/src-tauri/tauri.conf.json
     scandelete:
       - bosun-stand
       - editor/src-tauri/vendor/picotool/flash_id.bin
