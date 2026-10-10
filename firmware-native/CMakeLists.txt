@@ -102,6 +102,15 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_host_emulator.py"
         --emulator "$<TARGET_FILE:bosun_emulator>")
     set_tests_properties(host_emulator PROPERTIES TIMEOUT 120)
+    find_program(BOSUN_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+    add_test(NAME pyswitch_framing COMMAND "${BOSUN_NODE_EXECUTABLE}" --test
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/pyswitch/framing.test.mjs")
+    add_test(NAME pyswitch_integration COMMAND "${CMAKE_COMMAND}" -E env
+        "BOSUN_EMULATOR=$<TARGET_FILE:bosun_emulator>"
+        "${BOSUN_NODE_EXECUTABLE}" --test
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/pyswitch/integration.test.mjs")
+    set_tests_properties(pyswitch_framing PROPERTIES TIMEOUT 30)
+    set_tests_properties(pyswitch_integration PROPERTIES TIMEOUT 120)
     function(bosun_add_test suite)
         add_executable(test_${suite} ${ARGN})
         target_link_libraries(test_${suite} PRIVATE bosun_checks)

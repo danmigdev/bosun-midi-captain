@@ -17,6 +17,8 @@
  * same non-symlink-following POSIX backend used by native host tests. */
 static bosun_application_t application;
 static int listener = -1, client = -1;
+static int midi_listener = -1, midi_client = -1;
+static bool midi_disconnect_pending;
 static size_t io_chunk = BOSUN_APPLICATION_IO_BYTES;
 static volatile sig_atomic_t stopping;
 static struct timespec started;
@@ -43,6 +45,17 @@ static void disconnect(void) {
 
 bool bosun_board_init(const bosun_board_config_t *config) { (void)config; return true; }
 void bosun_board_task(void) {
+    if (midi_disconnect_pending) {
+        /* Let the application observe the disconnected port and reset its
+         * MIDI parser/queue before accepting a replacement byte stream. */
+        midi_disconnect_pending = false;
+    } else if (midi_listener >= 0) {
+        int peer = accept(midi_listener, NULL, NULL);
+        if (peer >= 0) {
+            if (midi_client >= 0 || !nonblocking(peer)) close(peer);
+            else midi_client = peer;
+        }
+    }
     int incoming = accept(listener, NULL, NULL);
     if (incoming < 0) return;
     if (client >= 0 || !nonblocking(incoming)) { close(incoming); return; }
@@ -64,6 +77,7 @@ bool bosun_board_usb_rx_diagnostics(bosun_board_usb_rx_diagnostics_t *result) {
     (void)result; return false; /* TCP has no DCD/CDC FIFO stages. */
 }
 bool bosun_board_midi_connected(bosun_midi_port_t port) {
+    if (midi_listener >= 0) return port == BOSUN_MIDI_USB && midi_client >= 0;
     return port == BOSUN_MIDI_USB || port == BOSUN_MIDI_DIN;
 }
 size_t bosun_board_data_read(uint8_t *data, size_t capacity) {
@@ -92,11 +106,31 @@ size_t bosun_board_console_write(const uint8_t *data, size_t length) {
     return fwrite(data, 1, length, stderr);
 }
 size_t bosun_board_midi_read(bosun_midi_port_t port, uint8_t *data, size_t capacity) {
-    (void)port; (void)data; (void)capacity; return 0;
+    if (port != BOSUN_MIDI_USB || midi_client < 0) return 0;
+    if (capacity > io_chunk) capacity = io_chunk;
+    ssize_t count = recv(midi_client, data, capacity, 0);
+    if (count > 0) return (size_t)count;
+    if (count == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+        close(midi_client); midi_client = -1;
+        midi_disconnect_pending = true;
+    }
+    return 0;
 }
 size_t bosun_board_midi_write(bosun_midi_port_t port, const uint8_t *data, size_t length) {
     if (port != BOSUN_MIDI_USB && port != BOSUN_MIDI_DIN) return 0;
     if (length > io_chunk) length = io_chunk;
+    if (midi_listener >= 0) {
+        if (port != BOSUN_MIDI_USB || midi_client < 0) return 0;
+        ssize_t count = send(midi_client, data, length, 0);
+        if (count < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                close(midi_client); midi_client = -1;
+                midi_disconnect_pending = true;
+            }
+            return 0;
+        }
+        length = (size_t)count;
+    }
     midi_bytes[port] += length;
     if (midi_log) {
         fprintf(midi_log, "%s", port == BOSUN_MIDI_USB ? "USB" : "DIN");
@@ -141,13 +175,14 @@ static bool number(const char *text, unsigned maximum, unsigned *output) {
     *output = (unsigned)value; return true;
 }
 static void usage(const char *program) {
-    fprintf(stderr, "Usage: %s --root EXISTING_DIRECTORY [--port 9877] [--io-chunk 256] [--midi-log FILE]\n"
+    fprintf(stderr, "Usage: %s --root EXISTING_DIRECTORY [--port 9877] [--io-chunk 256] [--midi-log FILE] [--midi-port PORT]\n"
         "Loopback-only experimental emulator. No serial/MIDI hardware. Never formats storage.\n", program);
 }
 
 int main(int argc, char **argv) {
     const char *root = NULL, *log_path = NULL;
-    unsigned port = 9877;
+    unsigned port = 9877, midi_port = 0;
+    bool midi_enabled = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--help")) { usage(argv[0]); return 0; }
         if (i + 1 >= argc) { usage(argv[0]); return 2; }
@@ -155,6 +190,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--midi-log")) log_path = argv[++i];
         else if (!strcmp(argv[i], "--port")) {
             if (!number(argv[++i], 65535, &port)) { usage(argv[0]); return 2; }
+        } else if (!strcmp(argv[i], "--midi-port")) {
+            if (!number(argv[++i], 65535, &midi_port)) { usage(argv[0]); return 2; }
+            midi_enabled = true;
         } else if (!strcmp(argv[i], "--io-chunk")) {
             unsigned chunk;
             if (!number(argv[++i], BOSUN_APPLICATION_IO_BYTES, &chunk) || !chunk) { usage(argv[0]); return 2; }
@@ -188,11 +226,27 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Emulator initialization failed\n");
         close(listener); if (midi_log) fclose(midi_log); return 1;
     }
+    if (midi_enabled) {
+        midi_listener = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in midi_address = address;
+        midi_address.sin_port = htons((uint16_t)midi_port);
+        if (midi_listener < 0 || bind(midi_listener, (struct sockaddr *)&midi_address, sizeof midi_address) ||
+            listen(midi_listener, 4) || !nonblocking(midi_listener) ||
+            getsockname(midi_listener, (struct sockaddr *)&midi_address, &address_length)) {
+            perror("listen MIDI loopback");
+            if (midi_listener >= 0) close(midi_listener);
+            close(listener); if (midi_log) fclose(midi_log); return 1;
+        }
+        midi_port = ntohs(midi_address.sin_port);
+    }
     printf("READY tcp://127.0.0.1:%u storage=%s\n", ntohs(address.sin_port),
            bosun_store_ready() ? "ready" : "unavailable"); fflush(stdout);
+    if (midi_enabled) { printf("MIDI tcp://127.0.0.1:%u port=USB\n", midi_port); fflush(stdout); }
     const struct timespec pause = {0, 1000000};
     while (!stopping) { bosun_application_tick(&application); (void)nanosleep(&pause, NULL); }
     disconnect(); close(listener);
+    if (midi_client >= 0) close(midi_client);
+    if (midi_listener >= 0) close(midi_listener);
     if (midi_log) fclose(midi_log);
     fprintf(stderr, "STOP ticks=%lu display_rows=%lu led_frames=%lu midi_usb=%llu midi_din=%llu\n",
         (unsigned long)application.ticks, (unsigned long)display_rows, (unsigned long)led_frames,

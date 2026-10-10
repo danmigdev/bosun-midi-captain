@@ -6,5 +6,7 @@ tools/rpi-hub/systemd/bosun-hotspot.service text eol=lf
 
 # Native build inputs must also work from a Windows checkout through WSL.
 /firmware-native/** text eol=lf
+# Preserve the exact upstream bytes verified by the PySwitch manifest hashes.
+/firmware-native/tests/pyswitch/upstream/** -text
 /tools/native-build.sh text eol=lf
 /.github/workflows/native.yml text eol=lf

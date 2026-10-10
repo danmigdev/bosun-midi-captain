@@ -1,0 +1,81 @@
+{
+  "repository": "https://github.com/Tunetown/PySwitch",
+  "commit": "30e923f17d31714038ec21f6245337a71711bc6f",
+  "files": [
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperClient.js",
+      "file": "VirtualKemperClient.js",
+      "sha256": "323d29eb4dbc727d556f159279d2ea6b535a07c1bc4cc4058482cd1b9441969a"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperClientSetup.js",
+      "file": "VirtualKemperClientSetup.js",
+      "sha256": "2808335759df75c47c9a4e3bc892e33744be2afa01af7e03f94ffd837a7d237d"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperMorph.js",
+      "file": "VirtualKemperMorph.js",
+      "sha256": "1c1a93447bebb5003c4abdf9c657b48ef10e5ed27270270c5e6e887361fc3e44"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperParameter.js",
+      "file": "VirtualKemperParameter.js",
+      "sha256": "f9190192cbe285376d6819fed872af3b16d47f67ec3f061b8f522c2e48d69458"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperParameterDefault.js",
+      "file": "VirtualKemperParameterDefault.js",
+      "sha256": "e519cf8064bdc44230ff3255a061b5eb9c59418d8605ac5baa0594eb42652957"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperParameterKeys.js",
+      "file": "VirtualKemperParameterKeys.js",
+      "sha256": "2a277120bb1e7f71f01496c13469e54a74c2e88d00eef7a25a74be66d8b21048"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperParameters.js",
+      "file": "VirtualKemperParameters.js",
+      "sha256": "369fad998feee72581719a95543ce4981d2527b8be78e108cd4b32c5c84dda32"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperProtocol.js",
+      "file": "VirtualKemperProtocol.js",
+      "sha256": "fb386855dc516621f36d76fd6ed4af606a4b3eb6d0b08804c5831e734a63d08e"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperStats.js",
+      "file": "VirtualKemperStats.js",
+      "sha256": "0fef81a545aeabb7815209848c93286f10c32f9dc49d171a6309682d098302af"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperTempo.js",
+      "file": "VirtualKemperTempo.js",
+      "sha256": "b39ece051fb676aab518ea2ae5d8e8fe48b39dbf6a518fe92016eadf284787d9"
+    },
+    {
+      "path": "web/htdocs/clients/kemper/virtual/VirtualKemperTuner.js",
+      "file": "VirtualKemperTuner.js",
+      "sha256": "84e962e0cd9297e0a7c8b32feaf70dfec8fdfd7edb7993c79294174609969bb9"
+    },
+    {
+      "path": "web/htdocs/js/model/VirtualClient.js",
+      "file": "VirtualClient.js",
+      "sha256": "a665dc9b97fef8170bdf6192644220bdf2656f20a86cfd60907570b04eb00cf4"
+    },
+    {
+      "path": "web/htdocs/js/misc/PeriodCounter.js",
+      "file": "PeriodCounter.js",
+      "sha256": "1ba313db3f0e2a1319822845bbb7e8bfc3337f9b896641f1c20af375101c9a27"
+    },
+    {
+      "path": "web/htdocs/js/misc/Tools.js",
+      "file": "Tools.js",
+      "sha256": "d48e49c08d1e292bd3b3cf792799f65e82909d1702adc1bac7c32c3a0eb9e8c7"
+    },
+    {
+      "path": "LICENSE.md",
+      "file": "LICENSE.md",
+      "sha256": "52253e662179b89ad6c118d6e6c61023cbf1c5051c1b23dfdbf84c70fcdaff91"
+    }
+  ]
+}

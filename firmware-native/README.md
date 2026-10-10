@@ -53,6 +53,10 @@ sudo apt-get install -y git cmake ninja-build gcc g++ python3 \
   gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
 ```
 
+Host tests also require Node.js 22 in the same Linux/WSL environment. It runs
+the pinned [PySwitch virtual Kemper integration tests](../docs/kemper-emulator-tests.md);
+no npm install is needed for those tests.
+
 The build helper fetches and verifies the pinned Pico SDK 2.3.0 and TinyUSB when
 `--fetch-sdk` is supplied. Keep the full repository checkout: the native build
 still consumes shared schemas retained under `firmware/`.

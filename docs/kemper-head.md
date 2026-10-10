@@ -126,6 +126,10 @@ refers to the Bosun patch and `kemper_rig` is the one-based program identity.
 
 ## Validation still needed on hardware
 
+The [PySwitch integration suite](kemper-emulator-tests.md) connects the compiled
+native application to a pinned virtual Kemper for automated MIDI round trips.
+Its coverage and simulation limits are listed separately from hardware validation.
+
 Software tests cover model isolation, MK1/MK2 command gates, MIDI packet
 encodings, Performance bank boundaries through slot 625, Browse program 127,
 mode changes, three-digit bank save/reload, editor menus, and hub/Stage transport.
