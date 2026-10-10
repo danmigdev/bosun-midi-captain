@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 import {
   cmd, disconnect, onFirmwareMessage, sendAndAwait,
-  isInternallyRetriedFirmwareError, FirmwareCommandTimeoutError,
+  FirmwareCommandTimeoutError,
   type FirmwareMessage,
 } from "../src/lib/protocol";
 
@@ -26,9 +26,6 @@ function toast(event: Event) { toasts.push((event as CustomEvent).detail); }
 function reply(message: Record<string, unknown>) {
   inbox.push(JSON.stringify(message));
   events.get("firmware-data-ready")?.();
-}
-function busy(message: Record<string, any>) {
-  reply({ type: "ERROR", id: message.id, error: "background_busy", of: "LIST_PATCHES" });
 }
 function listed(message: Record<string, any>, name = "Fresh") {
   reply({ type: "PATCH_LIST", id: message.id, patches: [{ bank: 1, slot: 1, name }] });
@@ -48,7 +45,7 @@ beforeEach(async () => {
   unsubscribe = await onFirmwareMessage(message => {
     received.push(message);
     // This is App's error-to-toast boundary; raw messages remain observable.
-    if (message.type === "ERROR" && !isInternallyRetriedFirmwareError(message)) visibleErrors.push(message);
+    if (message.type === "ERROR") visibleErrors.push(message);
   });
   window.addEventListener("bosun-toast", toast);
 });
@@ -83,25 +80,6 @@ describe("patch list refresh after save", () => {
     expect(settled).toBe(true);
   });
 
-  it("retries only the rejected read after a successful save, without a false error toast", async () => {
-    let attempts = 0;
-    respond = message => {
-      if (message.type === "SAVE_NOW") reply({ type: "SAVED", id: message.id, patches: [{ bank: 1, slot: 1 }] });
-      if (message.type === "LIST_PATCHES") attempts++ === 0 ? busy(message) : listed(message);
-    };
-    await cmd.saveNow(1, 1);
-    const refresh = cmd.listPatches();
-    await vi.advanceTimersByTimeAsync(249);
-    expect(commands.map(message => message.type)).toEqual(["SAVE_NOW", "LIST_PATCHES"]);
-    expect(visibleErrors).toEqual([]);
-    expect(received.some(message => message.type === "ERROR")).toBe(true);
-    await vi.advanceTimersByTimeAsync(1);
-    await refresh;
-    expect(commands.map(message => message.type)).toEqual(["SAVE_NOW", "LIST_PATCHES", "LIST_PATCHES"]);
-    expect(commands[1].id).not.toBe(commands[2].id);
-    expect(toasts).toEqual([]);
-  });
-
   it("coalesces concurrent refreshes but reads again after an in-flight snapshot predating a save", async () => {
     const first = cmd.listPatches();
     await vi.advanceTimersByTimeAsync(0);
@@ -119,31 +97,7 @@ describe("patch list refresh after save", () => {
     expect(received.at(-1)).toMatchObject({ type: "PATCH_LIST", patches: [{ name: "After save" }] });
   });
 
-  it("waits with bounded backoff while another client's stream is busy for five seconds", async () => {
-    const start = Date.now();
-    respond = message => Date.now() - start < 5000 ? busy(message) : listed(message);
-    const refresh = cmd.listPatches();
-    await vi.advanceTimersByTimeAsync(6000);
-    await refresh;
-    expect(commands.length).toBeGreaterThan(2);
-    expect(commands.length).toBeLessThan(10);
-    expect(visibleErrors).toEqual([]);
-  });
-
-  it("keeps the final busy failure visible and stops before the twenty-second deadline", async () => {
-    respond = busy;
-    const outcome = cmd.listPatches().catch(error => error);
-    await vi.advanceTimersByTimeAsync(20000);
-    expect(await outcome).toMatchObject({ message: "error: background_busy" });
-    expect(visibleErrors).toHaveLength(1);
-    expect(visibleErrors[0]).toMatchObject({ type: "ERROR", error: "background_busy" });
-    const count = commands.length;
-    await vi.advanceTimersByTimeAsync(60000);
-    expect(commands).toHaveLength(count);
-    expect(toasts).toEqual([]); // App displays the final ERROR once.
-  });
-
-  it.each(["not_found", "request_timeout", "rx_oom", "disconnected"])(
+  it.each(["not_found", "request_timeout", "rx_oom", "disconnected", "background_busy"])(
     "does not suppress or retry the different failure %s", async error => {
       respond = message => reply({ type: "ERROR", id: message.id, of: "LIST_PATCHES", error });
       await expect(cmd.listPatches()).rejects.toThrow(error);
@@ -152,36 +106,6 @@ describe("patch list refresh after save", () => {
       expect(visibleErrors).toHaveLength(1);
     },
   );
-
-  it("does not suppress another request's identical busy error", async () => {
-    respond = message => {
-      if (message.type === "LIST_PATCHES") busy(message);
-      else reply({ type: "ERROR", id: message.id, of: message.type, error: "background_busy" });
-    };
-    const refresh = cmd.listPatches().catch(error => error);
-    await vi.advanceTimersByTimeAsync(0);
-    await expect(sendAndAwait({ type: "GET_GLOBAL" })).rejects.toThrow("background_busy");
-    reply({ type: "ERROR", id: "unowned", of: "LIST_PATCHES", error: "background_busy" });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(visibleErrors.map(message => (message as { of: string }).of)).toEqual(["GET_GLOBAL", "LIST_PATCHES"]);
-    await disconnect();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(await refresh).toMatchObject({ message: "error: disconnected" });
-  });
-
-  it("stops stale retries across disconnect and lets a new connection request a fresh list", async () => {
-    respond = busy;
-    const previous = cmd.listPatches().catch(error => error);
-    await vi.advanceTimersByTimeAsync(0);
-    await disconnect();
-    respond = message => listed(message, "New profile");
-    const current = cmd.listPatches();
-    await current;
-    await vi.advanceTimersByTimeAsync(20000);
-    expect(await previous).toMatchObject({ message: "error: disconnected" });
-    expect(commands).toHaveLength(2);
-    expect(toasts).toEqual([]);
-  });
 
   it("does not send if disconnected while awaiting the protocol listener", async () => {
     const refresh = cmd.listPatches().catch(error => error);

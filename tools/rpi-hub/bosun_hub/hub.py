@@ -45,20 +45,6 @@ CONTEXT_SINGLE_FLIGHT_TIMEOUT_S = 12.0
 CONTEXT_WAITERS_MAX = 512
 CONTEXT_WAITERS_PER_SUB_MAX = 64
 PATCH_SINGLE_FLIGHT_TIMEOUT_S = 12.0
-# The Captain answers one request at a time; later requests wait in its USB
-# receive path while a large reply drains.  Bound the expensive reads the hub
-# keeps outstanding so diagnostics cannot queue far ahead of interactive
-# commands.  The class limits add up to the global bound and reserve enough
-# capacity for Stage's DEVICE_INFO + PATCH_LIST + CONTEXT and current/
-# post-switch PATCH snapshots even while editor diagnostics are busy.
-BACKGROUND_INFLIGHT_MAX = 8
-BACKGROUND_BULK_MAX = 3
-BACKGROUND_PATCH_MAX = 2
-BACKGROUND_CONTEXT_MAX = 1
-BACKGROUND_DEVICE_INFO_MAX = 1
-BACKGROUND_PATCH_LIST_MAX = 1
-
-PATCH_FLIGHTS_MAX = BACKGROUND_PATCH_MAX
 PATCH_WAITERS_MAX = 512
 PATCH_WAITERS_PER_SUB_MAX = 64
 REQUEST_TIMEOUT_S = 30.0
@@ -68,25 +54,13 @@ REQUEST_TIMEOUT_S = 30.0
 REQUESTS_MAX = 64
 REQUESTS_PER_SUB_MAX = 32
 
-_BACKGROUND_CLASS_BY_TYPE = {
-    "GET_MANIFEST": "bulk",
-    "GET_GLOBAL": "bulk",
-    "STATS": "bulk",
-    "LED_DUMP": "bulk",
-    "LIST_PROFILES": "bulk",
-    "GET_PATCH": "patch",
-    "GET_CONTEXT": "context",
-    "GET_DEVICE_INFO": "device_info",
-    "LIST_PATCHES": "patch_list",
-}
-_BACKGROUND_CLASS_LIMITS = {
-    "bulk": BACKGROUND_BULK_MAX,
-    "patch": BACKGROUND_PATCH_MAX,
-    "context": BACKGROUND_CONTEXT_MAX,
-    "device_info": BACKGROUND_DEVICE_INFO_MAX,
-    "patch_list": BACKGROUND_PATCH_LIST_MAX,
-}
-assert sum(_BACKGROUND_CLASS_LIMITS.values()) == BACKGROUND_INFLIGHT_MAX
+# Reads the hub follows from the moment they are sent until the Captain
+# answers or the session ends, even after the client gave up on them: a
+# firmware update waits for these to drain before it takes the serial port.
+_TRACKED_READS = frozenset({
+    "GET_MANIFEST", "GET_GLOBAL", "STATS", "LED_DUMP", "LIST_PROFILES",
+    "GET_PATCH", "GET_CONTEXT", "GET_DEVICE_INFO", "LIST_PATCHES",
+})
 
 # Deliberately does not begin with link._HUB_ID_PREFIX (``__hub_``): the
 # UpstreamLink consumes ids in that namespace as its own keepalive replies.
@@ -266,12 +240,12 @@ class Hub:
         self._request_seq = 0
         self._request_id_prefix = _REQUEST_ID_STEM + secrets.token_hex(8) + "_"
         self._request_timeout_s = request_timeout_s
-        # Requests in this table have reached (or may already have reached)
-        # the Captain and still wait for their reply there.  This is
-        # intentionally independent of downstream waiter state: closing a
-        # browser or timing out its promise does not withdraw a request which
-        # is already queued on the Captain.
-        self._background_tokens: dict[str, str] = {}
+        # Reads in this set have reached (or may already have reached) the
+        # Captain and still wait for their reply there.  This is intentionally
+        # independent of downstream waiter state: closing a browser or timing
+        # out its promise does not withdraw a request which is already queued
+        # on the Captain.
+        self._upstream_reads: set[str] = set()
 
     # -- lifecycle -------------------------------------------------------
 
@@ -284,7 +258,7 @@ class Hub:
         self._clear_all_context_waiters()
         self._clear_all_patch_waiters()
         self._clear_all_requests()
-        self._background_tokens.clear()
+        self._upstream_reads.clear()
         self.link.stop()
         for sub in list(self._subs):
             sub.close()
@@ -346,55 +320,20 @@ class Hub:
         log.info("upstream link %s (%s)", "up" if up else "down", detail)
         self._post(self._dispatch_status, self._status_line(up))
 
-    # -- Captain background admission ----------------------------------
+    # -- reads still queued on the Captain -----------------------------
 
-    def _reserve_background(
-        self, private_id: str, kind: str
-    ) -> bool:
-        """Reserve one background admission token for an upstream request.
+    def _track_read(self, private_id: str, kind: str) -> None:
+        """Follow a read until the Captain answers it or the session ends.
 
-        A token lives until its private-id reply is observed or the upstream
-        session ends.  In particular, a client timeout/disconnect cannot free
-        it: neither event withdraws the request already queued on the Captain.
+        A client timeout or disconnect does not withdraw a request already
+        queued on the Captain, so neither event ends the tracking.
         """
+        if kind in _TRACKED_READS:
+            self._upstream_reads.add(private_id)
 
-        request_class = _BACKGROUND_CLASS_BY_TYPE.get(kind)
-        if request_class is None:
-            return True
-        if len(self._background_tokens) >= BACKGROUND_INFLIGHT_MAX:
-            return False
-        class_limit = _BACKGROUND_CLASS_LIMITS[request_class]
-        class_count = sum(
-            existing == request_class
-            for existing in self._background_tokens.values()
-        )
-        if class_count >= class_limit:
-            return False
-        self._background_tokens[private_id] = request_class
-        return True
-
-    def _release_background(self, private_id: Optional[str]) -> None:
+    def _read_done(self, private_id: Optional[str]) -> None:
         if private_id is not None:
-            self._background_tokens.pop(private_id, None)
-
-    def _orphan_background(self, private_id: Optional[str]) -> None:
-        """Keep counting a queued request without consuming a live class quota.
-
-        This lets a retry use (for example) the one live CONTEXT reservation
-        after its predecessor timed out, while the orphan still counts toward
-        the global BACKGROUND_INFLIGHT_MAX ceiling until its late reply/down.
-        """
-
-        if private_id in self._background_tokens:
-            self._background_tokens[private_id] = "orphan"
-
-    @staticmethod
-    def _background_busy_error(kind: str) -> str:
-        if kind == "GET_CONTEXT":
-            return "context_busy"
-        if kind == "GET_PATCH":
-            return "patch_busy"
-        return "background_busy"
+            self._upstream_reads.discard(private_id)
 
     @staticmethod
     def _patch_key(msg: dict) -> Optional[tuple[str, int, int]]:
@@ -463,9 +402,8 @@ class Hub:
         self._prepare_patch_mutation(kind, msg)
 
         # A non-canonical GET_CONTEXT/GET_PATCH must not be coalesced under
-        # selectors we do not understand, but it still needs a private id and
-        # a background-admission token.  Otherwise adding one future field (or
-        # simply omitting id) bypasses the very bound which protects Captain.
+        # selectors we do not understand, but it still gets a private id so
+        # the hub can follow it until the Captain answers.
         if self._queue_request(sub, msg):
             return
 
@@ -484,16 +422,15 @@ class Hub:
         """Privatise an ordinary request id before sharing the upstream.
 
         Ordinary requests without an id retain the historical transparent
-        broadcast semantics. Background requests are the exception: they get
-        a private upstream id even when the caller omitted one, so admission
-        remains response-coupled; their reply is broadcast again with that
-        private id removed. Canonical GET_CONTEXT/GET_PATCH requests have
+        broadcast semantics. Tracked reads are the exception: they get a
+        private upstream id even when the caller omitted one, so the hub can
+        follow them until the Captain answers; their reply is broadcast again
+        with that private id removed. Canonical GET_CONTEXT/GET_PATCH requests have
         already returned through their specialised paths before this method.
         """
         kind = msg["type"]
         has_id = "id" in msg
-        is_background = kind in _BACKGROUND_CLASS_BY_TYPE
-        if not has_id and not is_background:
+        if not has_id and kind not in _TRACKED_READS:
             return False
         if sub not in self._subs:
             return True  # late send from a socket which has already closed
@@ -518,13 +455,7 @@ class Hub:
 
         self._request_seq += 1
         private_id = f"{self._request_id_prefix}{self._request_seq}"
-        if not self._reserve_background(private_id, kind):
-            self._offer_correlated(
-                sub, has_id, request_id,
-                {"type": "ERROR",
-                 "error": self._background_busy_error(kind), "of": kind},
-            )
-            return True
+        self._track_read(private_id, kind)
 
         pending = _RequestPending(
             sub, has_id, request_id, kind, broadcast=not has_id,
@@ -551,7 +482,7 @@ class Hub:
         accepted = self.link.send(json.dumps(upstream, separators=(",", ":")))
         if accepted is False:
             self._take_request(private_id)
-            self._release_background(private_id)
+            self._read_done(private_id)
             self._offer_correlated(
                 sub, has_id, request_id,
                 {"type": "ERROR",
@@ -587,7 +518,6 @@ class Hub:
             )
 
     def _request_timed_out(self, private_id: str) -> None:
-        self._orphan_background(private_id)
         pending = self._take_request(private_id)
         if pending is None:
             return
@@ -605,11 +535,10 @@ class Hub:
             if pending is not None and pending.broadcast:
                 # An accepted idless request belongs to the broadcast stream,
                 # not to the socket which happened to issue it. Detach its
-                # fairness owner but retain correlation/token state so a late
+                # fairness owner but retain correlation and tracking so a late
                 # physical reply still reaches the remaining subscribers.
                 pending.sub = None
             else:
-                self._orphan_background(private_id)
                 self._take_request(private_id)
 
     def _clear_all_requests(self) -> list[_RequestPending]:
@@ -638,7 +567,7 @@ class Hub:
         # Release even if the downstream waiter timed out/closed and its
         # correlation record is already gone.  The late reply is the first
         # proof that the Captain has finished this request.
-        self._release_background(response_id)
+        self._read_done(response_id)
         pending = self._take_request(response_id)
         if pending is None:
             # Never leak a late reply containing a hub-private id to clients.
@@ -709,13 +638,6 @@ class Hub:
             else:
                 flight.waiters.append(waiter)
             return True
-        if len(self._patch_flights) >= PATCH_FLIGHTS_MAX:
-            self._offer_correlated(
-                sub, has_id, request_id,
-                {"type": "ERROR", "error": "patch_busy", "of": "GET_PATCH"},
-            )
-            return True
-
         flight = _PatchFlight(key)
         flight.waiters.append(waiter)
         self._patch_flights[key] = flight
@@ -729,9 +651,7 @@ class Hub:
         flight_id = f"{self._patch_id_prefix}{self._patch_flight_seq}"
         flight.flight_id = flight_id
         flight.sealed = False
-        if not self._reserve_background(flight_id, "GET_PATCH"):
-            self._fail_patch_flight(flight, "patch_busy")
-            return
+        self._track_read(flight_id, "GET_PATCH")
         self._patch_flight_ids[flight_id] = flight
         loop = self._loop
         if loop is None:
@@ -769,14 +689,13 @@ class Hub:
             flight_id, key, len(flight.waiters),
         )
         # The client deadline cannot withdraw the request already queued on
-        # the Captain. Keep its admission token until late reply/link-down.
-        self._orphan_background(flight_id)
+        # the Captain. Keep tracking it until late reply/link-down.
         self._fail_patch_flight(
-            flight, "patch_timeout", release_background=False,
+            flight, "patch_timeout", stop_tracking=False,
         )
 
     def _take_patch_generation(
-        self, flight: _PatchFlight, *, release_background: bool = True
+        self, flight: _PatchFlight, *, stop_tracking: bool = True
     ) -> list[tuple[Subscription, bool, object]]:
         handle = flight.timeout_handle
         flight.timeout_handle = None
@@ -785,8 +704,8 @@ class Hub:
         flight_id = flight.flight_id
         if flight_id is not None:
             self._patch_flight_ids.pop(flight_id, None)
-            if release_background:
-                self._release_background(flight_id)
+            if stop_tracking:
+                self._read_done(flight_id)
         waiters = flight.waiters
         flight.waiters = []
         flight.flight_id = None
@@ -798,10 +717,10 @@ class Hub:
         flight: _PatchFlight,
         response: dict,
         *,
-        release_background: bool = True,
+        stop_tracking: bool = True,
     ) -> None:
         waiters = self._take_patch_generation(
-            flight, release_background=release_background,
+            flight, stop_tracking=stop_tracking,
         )
         for sub, has_id, request_id in waiters:
             if sub in self._subs:
@@ -818,12 +737,12 @@ class Hub:
         flight: _PatchFlight,
         error: str,
         *,
-        release_background: bool = True,
+        stop_tracking: bool = True,
     ) -> None:
         self._finish_patch_flight(
             flight,
             {"type": "ERROR", "error": error, "of": "GET_PATCH"},
-            release_background=release_background,
+            stop_tracking=stop_tracking,
         )
 
     def _clear_all_patch_waiters(
@@ -894,7 +813,7 @@ class Hub:
             return False
         # A timed-out generation no longer has a _PatchFlight entry, but its
         # eventual private reply still proves that the Captain has finished it.
-        self._release_background(response_id)
+        self._read_done(response_id)
         flight = self._patch_flight_ids.get(response_id)
         if flight is None:
             log.debug("dropping stale GET_PATCH reply %s", response_id)
@@ -984,9 +903,7 @@ class Hub:
         flight_id = f"{self._context_id_prefix}{self._context_flight_seq}"
         self._context_flight_id = flight_id
         self._context_flight_sealed = False
-        if not self._reserve_background(flight_id, "GET_CONTEXT"):
-            self._fail_context_flight("context_busy")
-            return
+        self._track_read(flight_id, "GET_CONTEXT")
 
         # The only coalesced request shape is canonical, so no request-owned
         # fields can be lost here.
@@ -1025,16 +942,15 @@ class Hub:
             len(self._context_waiters),
         )
         # A downstream snapshot timeout does not withdraw the request queued on
-        # the Captain. Its token remains until late reply/down.
-        self._orphan_background(flight_id)
+        # the Captain. Tracking continues until late reply/down.
         self._fail_context_flight(
-            "context_timeout", release_background=False,
+            "context_timeout", stop_tracking=False,
         )
 
     def _take_context_flight(
         self,
         *,
-        release_background: bool = True,
+        stop_tracking: bool = True,
     ) -> list[tuple[Subscription, bool, object]]:
         handle = self._context_timeout_handle
         self._context_timeout_handle = None
@@ -1042,8 +958,8 @@ class Hub:
             handle.cancel()
         waiters = self._context_waiters
         self._context_waiters = []
-        if release_background:
-            self._release_background(self._context_flight_id)
+        if stop_tracking:
+            self._read_done(self._context_flight_id)
         self._context_flight_id = None
         self._context_flight_sealed = False
         return waiters
@@ -1075,10 +991,10 @@ class Hub:
         self,
         response: dict,
         *,
-        release_background: bool = True,
+        stop_tracking: bool = True,
     ) -> None:
         waiters = self._take_context_flight(
-            release_background=release_background,
+            stop_tracking=stop_tracking,
         )
         for sub, has_id, request_id in waiters:
             if sub in self._subs:  # subscriber may have closed mid-stream
@@ -1089,13 +1005,13 @@ class Hub:
             self._start_context_flight()
 
     def _fail_context_flight(
-        self, error: str, *, release_background: bool = True
+        self, error: str, *, stop_tracking: bool = True
     ) -> None:
         if self._context_flight_id is None:
             return
         self._finish_context_flight(
             {"type": "ERROR", "error": error, "of": "GET_CONTEXT"},
-            release_background=release_background,
+            stop_tracking=stop_tracking,
         )
 
     def _fail_all_context_waiters(self, error: str) -> None:
@@ -1124,7 +1040,7 @@ class Hub:
 
         # Also releases a timed-out/stale generation no longer represented by
         # _context_flight_id; private ids never belong to downstream clients.
-        self._release_background(response_id)
+        self._read_done(response_id)
         if response_id != self._context_flight_id:
             log.debug("dropping stale GET_CONTEXT reply %s", response_id)
             return True
@@ -1188,7 +1104,7 @@ class Hub:
                 self._fail_all_requests("link_down")
                 # Session teardown is the only cancellation barrier which
                 # proves the Captain has discarded every queued request.
-                self._background_tokens.clear()
+                self._upstream_reads.clear()
         except (AttributeError, TypeError, ValueError):
             pass
         for sub in self._subs:

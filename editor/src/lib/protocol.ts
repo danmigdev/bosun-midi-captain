@@ -553,13 +553,6 @@ function nextId(): string { return String(_nextId++); }
 type PendingResolver = (msg: FirmwareMessage) => void;
 const _pending = new Map<string, PendingResolver>();
 let _connectionGeneration = 0;
-const _internallyRetriedErrors = new WeakSet<object>();
-
-/** Only the exact correlated response whose read is being retried is quiet.
- * It still reaches every subscriber and the raw log for diagnostics. */
-export function isInternallyRetriedFirmwareError(message: FirmwareMessage): boolean {
-  return _internallyRetriedErrors.has(message);
-}
 
 /** A request reached the transport but no correlated response arrived before
  * its deadline.  For a write this is materially different from an explicit
@@ -651,7 +644,7 @@ export async function sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
 ): Promise<T> {
   if (message.type === "LIST_PATCHES" && message.limit === undefined) {
     const generation = _connectionGeneration;
-    const result = await collectPatchCatalog(page => _sendAndAwait(page, timeoutMs, undefined, generation), message);
+    const result = await collectPatchCatalog(page => _sendAndAwait(page, timeoutMs, generation), message);
     if (generation !== _connectionGeneration) throw new Error("error: disconnected");
     if (result.paginated) publishPatchCatalog(result.message);
     return result.message as T;
@@ -674,7 +667,6 @@ class FirmwareCommandResponseError extends Error {
 async function _sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
   message: { type: string; id?: string; [k: string]: unknown },
   timeoutMs: number,
-  retryError?: (message: Extract<FirmwareMessage, { type: "ERROR" }>) => boolean,
   expectedGeneration?: number,
 ): Promise<T> {
   await _ensureAwaitListener();
@@ -691,7 +683,6 @@ async function _sendAndAwait<T extends FirmwareMessage = FirmwareMessage>(
     _pending.set(id, (msg) => {
       clearTimeout(timer);
       if (msg.type === "ERROR") {
-        if (retryError?.(msg)) _internallyRetriedErrors.add(msg);
         reject(new FirmwareCommandResponseError(msg));
       } else {
         resolve(msg as T);
@@ -813,29 +804,13 @@ function listPatches(): Promise<void> {
 async function refreshPatchList(refresh: PatchListRefresh): Promise<void> {
   const { generation } = refresh;
   const deadline = Date.now() + 20000;
-  let busyDelay = 250;
   try {
     while (true) {
       if (generation !== _connectionGeneration) throw new Error("error: disconnected");
       const revision = _patchListRevision;
-      let retryDelay = 0;
-      try {
-        const catalog = await collectPatchCatalog(page => _sendAndAwait(page, Math.max(1, Math.min(10000, deadline - Date.now())), error => {
-          // The hub rejected this read before forwarding it to Captain. Retry
-          // only this explicit admission failure, never a save or lost reply.
-          if (error.error !== "background_busy" || (error.of && error.of !== "LIST_PATCHES") ||
-              generation !== _connectionGeneration || Date.now() + busyDelay >= deadline) return false;
-          retryDelay = busyDelay;
-          return true;
-        }, generation));
-        if (generation !== _connectionGeneration) throw new Error("error: disconnected");
-        if (catalog.paginated) publishPatchCatalog(catalog.message);
-      } catch (error) {
-        if (!retryDelay) throw error;
-        await new Promise<void>(resolve => setTimeout(resolve, retryDelay));
-        busyDelay = Math.min(1000, busyDelay * 2);
-        continue;
-      }
+      const catalog = await collectPatchCatalog(page => _sendAndAwait(page, Math.max(1, Math.min(10000, deadline - Date.now())), generation));
+      if (generation !== _connectionGeneration) throw new Error("error: disconnected");
+      if (catalog.paginated) publishPatchCatalog(catalog.message);
       if (generation !== _connectionGeneration) throw new Error("error: disconnected");
       if (revision === _patchListRevision) return;
       // A save/discard/refresh arrived while this read was in flight. Its

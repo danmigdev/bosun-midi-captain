@@ -312,7 +312,7 @@ class UpdateService:
         try:
             from .firmware_install import PinnedDevice, verify_prewrite_recovery
             deadline = loop.time() + 12
-            while self.hub._request_pending or self.hub._background_tokens:
+            while self.hub._request_pending or self.hub._upstream_reads:
                 if loop.time() >= deadline:
                     raise ValueError("Captain is busy; retry after current operations finish")
                 await asyncio.sleep(0.05)
@@ -394,7 +394,7 @@ class UpdateService:
             # Admit no new device commands, then let previously accepted
             # requests drain before closing the single owned serial port.
             deadline = loop.time() + 12
-            while self.hub._request_pending or self.hub._background_tokens:
+            while self.hub._request_pending or self.hub._upstream_reads:
                 if loop.time() >= deadline:
                     raise ValueError("Captain is busy; retry after current operations finish")
                 await asyncio.sleep(0.05)

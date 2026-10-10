@@ -70,7 +70,7 @@ describe("configuration save confirmation", () => {
     respond = message => {
       if (message.type !== "GET_GLOBAL") return;
       if (mode === "different") reply({ type: "GLOBAL", id: message.id, device: { tft: { layout: [] }, bank: 1 } });
-      if (mode === "read-error") reply({ type: "ERROR", id: message.id, error: "background_busy" });
+      if (mode === "read-error") reply({ type: "ERROR", id: message.id, error: "rx_oom" });
     };
     const saved = cmd.putGlobal(device);
     const result = saved.catch(error => error);

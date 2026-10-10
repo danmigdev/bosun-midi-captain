@@ -259,8 +259,8 @@ def test_context_noncanonical_request_is_private_but_not_coalesced():
         second = hub.subscribe()
 
         # Unknown future selectors must not be merged with today's global
-        # snapshot semantics. It still gets ordinary private correlation and
-        # admission so future fields cannot bypass Captain's background cap.
+        # snapshot semantics. It still gets ordinary private correlation, and
+        # the hub tracks it until the Captain answers.
         first.send('{"type":"GET_CONTEXT","id":"future","scope":"x"}')
         upstream = json.loads(link.sent[0])
         assert upstream["type"] == "GET_CONTEXT"

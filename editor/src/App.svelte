@@ -51,7 +51,6 @@
     disconnect,
     fallbackManifest,
     isConnected,
-    isInternallyRetriedFirmwareError,
     listPorts,
     tcpConnect,
     midiBridgeStart,
@@ -1255,17 +1254,12 @@
         dirtyIds = msg.patches;
         break;
       case "ERROR": {
-        if (isInternallyRetriedFirmwareError(msg)) break;
         const err = (msg as { error?: string }).error || "unknown";
         const of  = (msg as { of?: string }).of;
         const detail = (msg as { detail?: string }).detail;
         // A profile-less (freshly-installed) pedal answers "not_found" to
         // manifest/patch queries. That's expected, not a fault - don't toast it.
         if (err === "not_found" && !deviceInfo?.profile) { break; }
-        if (err === "background_busy" && of === "LIST_PATCHES") {
-          flashFirmwareError("The Raspberry Pi is busy: the patch list could not be refreshed. Try Refresh list.");
-          break;
-        }
         flashFirmwareError(
           `firmware: ${err}${of ? ` (handling ${of})` : ""}${detail ? ` - ${detail}` : ""}`,
         );

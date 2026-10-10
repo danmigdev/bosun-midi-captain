@@ -9,8 +9,8 @@ Captain had not rebooted.
 
 This diagnostic is deliberately read-only.  Every request carries a unique
 id and every id must receive exactly one valid, correlated response on the
-same TCP connection.  A busy response is valid for excess background jobs;
-timeouts, duplicate replies and link errors are not.
+same TCP connection.  Timeouts, error replies, duplicate replies and link
+errors all fail the run.
 """
 
 from __future__ import annotations
@@ -386,23 +386,17 @@ def _one_request(
     )[message["id"]]
 
 
-def _validate_round(replies: dict[str, dict], prefix: str, led_count: int) -> int:
+def _validate_round(replies: dict[str, dict], prefix: str, led_count: int) -> None:
     manifest_id = f"{prefix}-manifest"
     manifest = replies[manifest_id]
     if manifest.get("type") != "MANIFEST":
         raise RuntimeError(f"manifest failed: {manifest!r}")
 
-    busy = 0
     for index in range(led_count):
         request_id = f"{prefix}-led-{index:02d}"
         reply = replies[request_id]
-        if reply.get("type") == "LED_DUMP":
-            continue
-        if reply.get("type") == "ERROR" and reply.get("error") == "background_busy":
-            busy += 1
-            continue
-        raise RuntimeError(f"invalid LED_DUMP response for {request_id}: {reply!r}")
-    return busy
+        if reply.get("type") != "LED_DUMP":
+            raise RuntimeError(f"invalid LED_DUMP response for {request_id}: {reply!r}")
 
 
 def _open_stream(args: argparse.Namespace) -> ByteStream:
@@ -413,7 +407,6 @@ def _open_stream(args: argparse.Namespace) -> ByteStream:
 
 def _run(args: argparse.Namespace, diagnostics: StressDiagnostics) -> None:
     timings: list[float] = []
-    busy_total = 0
     buffer = bytearray()
     with _open_stream(args) as stream:
         for round_index in range(args.rounds):
@@ -434,9 +427,8 @@ def _run(args: argparse.Namespace, diagnostics: StressDiagnostics) -> None:
                 phase=f"round-{round_index + 1}-burst",
             )
             elapsed = time.monotonic() - started
-            busy = _validate_round(replies, prefix, args.led_count)
+            _validate_round(replies, prefix, args.led_count)
             timings.append(elapsed)
-            busy_total += busy
 
             ping = _one_request(
                 stream,
@@ -450,7 +442,7 @@ def _run(args: argparse.Namespace, diagnostics: StressDiagnostics) -> None:
                 raise RuntimeError(f"post-burst PING failed: {ping!r}")
             print(
                 f"round {round_index + 1}/{args.rounds}: "
-                f"{elapsed:.3f}s, LED_DUMP busy={busy}, recovery=ACK",
+                f"{elapsed:.3f}s, recovery=ACK",
                 flush=True,
             )
 
@@ -475,7 +467,6 @@ def _run(args: argparse.Namespace, diagnostics: StressDiagnostics) -> None:
                 "target": diagnostics.target,
                 "rounds": args.rounds,
                 "requests_per_round": args.led_count + 1,
-                "background_busy": busy_total,
                 "seconds_min": round(min(timings), 3),
                 "seconds_median": round(statistics.median(timings), 3),
                 "seconds_p95": round(ordered[p95_index], 3),

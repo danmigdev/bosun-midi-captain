@@ -56,7 +56,7 @@ def test_receive_correlates_and_classifies_every_expected_reply():
                 {
                     "type": "ERROR",
                     "id": "b",
-                    "error": "background_busy",
+                    "error": "rx_oom",
                     "of": "LED_DUMP",
                 },
                 {

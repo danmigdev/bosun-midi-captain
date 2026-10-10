@@ -23,10 +23,8 @@ deadline and --recovery-attempts. Expected reboot disconnects are recorded
 separately from test errors. --output must be a new file; reserve it before
 opening any hardware. JSON artifacts include private configuration data.
 
-Read-only requests may retry an explicit, correlated hub background_busy
-rejection within their original request deadline and --recovery-attempts.
-Every rejection/retry is recorded; the session stays open. No writes, USB
-timeouts, malformed replies or other protocol errors use this retry path.
+Every request is sent once and recorded with its reply or error. Only
+acquisition and reboot recovery retry, as described above.
 """
 import argparse
 import copy
@@ -43,18 +41,6 @@ import live_hardware_benchmark as benchmark
 
 class AcceptanceError(RuntimeError):
     pass
-
-
-BUSY_READ_COMMANDS = frozenset({"GET_DEVICE_INFO", "GET_GLOBAL", "GET_PATCH", "GET_CONTEXT", "STATS"})
-
-
-def retryable_read_busy(kind, exc):
-    return (kind in BUSY_READ_COMMANDS
-            and isinstance(exc, benchmark.ProtocolReplyError)
-            and exc.command == kind
-            and exc.reply.get("type") == "ERROR"
-            and exc.reply.get("error") == "background_busy"
-            and exc.reply.get("of") == kind)
 
 
 def require_native(info):
@@ -148,35 +134,21 @@ class Acceptance:
             "expected_reboots": [], "restoration": {"needed": False}, "checks": {}}
 
     def request(self, kind, timeout=None, **fields):
-        deadline = time.monotonic() + (self.args.timeout if timeout is None else timeout)
-        for attempt in range(1, self.args.recovery_attempts + 1):
-            started = time.monotonic()
-            remaining = deadline - started
-            if remaining <= 0:
-                raise AcceptanceError(kind + " background_busy exhausted the original request deadline")
-            record = {"phase": self.phase, "request": dict(type=kind, **fields),
-                      "since_start_s": started - self.started, "attempt": attempt,
-                      "timeout_s": remaining}
-            self.result["records"].append(record)
-            try:
-                reply, elapsed, size = self.client.request(kind, remaining, **fields)
-                record.update(response=reply, elapsed_ms=elapsed, reply_bytes=size)
-                return reply
-            except (Exception, KeyboardInterrupt) as exc:
-                record.update(error={"type": type(exc).__name__, "message": str(exc)},
-                              elapsed_ms=(time.monotonic() - started) * 1000)
-                if isinstance(exc, benchmark.ProtocolReplyError):
-                    record["response"] = exc.reply
-                if not retryable_read_busy(kind, exc):
-                    raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or attempt == self.args.recovery_attempts:
-                    record["retry_exhausted"] = True
-                    raise AcceptanceError(kind + " background_busy exhausted the bounded read retry budget") from exc
-                delay = min(self.args.retry_interval, remaining)
-                record["retry"] = {"reason": "background_busy", "delay_s": delay,
-                                   "remaining_s": remaining}
-                time.sleep(delay)
+        started = time.monotonic()
+        timeout_s = self.args.timeout if timeout is None else timeout
+        record = {"phase": self.phase, "request": dict(type=kind, **fields),
+                  "since_start_s": started - self.started, "timeout_s": timeout_s}
+        self.result["records"].append(record)
+        try:
+            reply, elapsed, size = self.client.request(kind, timeout_s, **fields)
+            record.update(response=reply, elapsed_ms=elapsed, reply_bytes=size)
+            return reply
+        except (Exception, KeyboardInterrupt) as exc:
+            record.update(error={"type": type(exc).__name__, "message": str(exc)},
+                          elapsed_ms=(time.monotonic() - started) * 1000)
+            if isinstance(exc, benchmark.ProtocolReplyError):
+                record["response"] = exc.reply
+            raise
 
     def close(self):
         if self.client is not None:

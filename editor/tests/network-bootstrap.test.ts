@@ -55,7 +55,6 @@ describe("network bootstrap", () => {
   });
 
   it.each([
-    ["background_busy", () => new Error("error: background_busy")],
     ["request_timeout", () => new Error("error: request_timeout")],
     ["local timeout", () => new FirmwareCommandTimeoutError("LIST_PROFILES", "timed-out")],
   ])("retries an initial %s after 250 ms without treating it as a missing profile", async (_name, failure) => {
@@ -78,48 +77,6 @@ describe("network bootstrap", () => {
     ]);
   });
 
-  it("waits for another client's five-second stream to drain before bootstrapping", async () => {
-    vi.useFakeTimers();
-    const started = Date.now();
-    send.mockImplementation(async ({ type }) => {
-      if (type === "LIST_PROFILES" && Date.now() - started < 5000) {
-        throw new Error("error: background_busy");
-      }
-      return response(type);
-    });
-    const bootstrap = readNetworkBootstrap();
-    await vi.advanceTimersByTimeAsync(4999);
-    expect(send.mock.calls.some(([message]) => message.type === "GET_MANIFEST")).toBe(false);
-    await vi.advanceTimersByTimeAsync(1001);
-    await expect(bootstrap).resolves.toEqual({ profiles, active: "live" });
-    expect(send.mock.calls.filter(([message]) => message.type === "LIST_PROFILES").length).toBeGreaterThan(2);
-    expect(send.mock.calls.some(([message]) => message.type === "GET_GLOBAL")).toBe(true);
-  });
-
-  it("bounds endless busy responses and each attempt by the original two-read budget", async () => {
-    vi.useFakeTimers();
-    const started = Date.now();
-    const attempts: Array<{ elapsed: number; timeout: number }> = [];
-    const failure = new Error("error: background_busy");
-    send.mockImplementation(async (_message, timeout) => {
-      attempts.push({ elapsed: Date.now() - started, timeout });
-      throw failure;
-    });
-    const outcome = expect(readNetworkBootstrap()).rejects.toBe(failure);
-    await vi.advanceTimersByTimeAsync(16000);
-    await outcome;
-    expect(attempts.length).toBeGreaterThan(2);
-    for (const attempt of attempts) {
-      expect(attempt.timeout).toBeGreaterThan(0);
-      expect(attempt.timeout).toBeLessThanOrEqual(8000);
-      expect(attempt.elapsed + attempt.timeout).toBeLessThanOrEqual(16000);
-    }
-    const count = send.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(60000);
-    expect(send).toHaveBeenCalledTimes(count);
-    expect(send.mock.calls.every(([message]) => message.type === "GET_DEVICE_INFO")).toBe(true);
-  });
-
   it.each([
     ["request_timeout", () => new Error("error: request_timeout")],
     ["local timeout", () => new FirmwareCommandTimeoutError("LIST_PROFILES", "timed-out")],
@@ -138,19 +95,7 @@ describe("network bootstrap", () => {
     ]);
   });
 
-  it("does not reset the one-time timeout retry when busy responses intervene", async () => {
-    vi.useFakeTimers();
-    const failure = new FirmwareCommandTimeoutError("GET_DEVICE_INFO", "timed-out");
-    send.mockRejectedValueOnce(failure)
-      .mockRejectedValueOnce(new Error("error: background_busy"))
-      .mockRejectedValueOnce(failure);
-    const outcome = expect(readNetworkBootstrap()).rejects.toBe(failure);
-    await vi.runAllTimersAsync();
-    await outcome;
-    expect(send).toHaveBeenCalledTimes(3);
-  });
-
-  it.each(["error: not_found", "error: disconnected", "permission denied", "unexpected background_busy detail"])(
+  it.each(["error: not_found", "error: disconnected", "permission denied", "error: background_busy"])(
     "does not retry the permanent failure %s", async message => {
       const failure = new Error(message);
       send.mockRejectedValue(failure);

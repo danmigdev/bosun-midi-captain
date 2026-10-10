@@ -145,11 +145,7 @@ def test_patch_different_keys_and_profiles_have_independent_flights():
         second.send('{"type":"GET_PATCH","id":"two","bank":1,"slot":2}')
         third.send('{"type":"GET_PATCH","id":"named","bank":1,"slot":1,"profile":"clean"}')
         requests = _patch_requests(link.sent)
-        assert len(requests) == 2
-        assert await _message(third) == {
-            "type": "ERROR", "id": "named", "error": "patch_busy",
-            "of": "GET_PATCH",
-        }
+        assert len(requests) == 3
         by_key = {
             (msg.get("profile", ""), msg["bank"], msg["slot"]): msg
             for msg in requests
@@ -158,10 +154,7 @@ def test_patch_different_keys_and_profiles_have_independent_flights():
         hub._dispatch(json.dumps(_patch_response(by_key[("", 1, 2)], "Two")))
         assert (await _message(second))["id"] == "two"
         assert first._queue.empty() and third._queue.empty()
-        # The released slot admits a retry for the independent profile key.
-        third.send('{"type":"GET_PATCH","id":"named-retry","bank":1,"slot":1,"profile":"clean"}')
-        named_request = _patch_requests(link.sent)[-1]
-        hub._dispatch(json.dumps(_patch_response(named_request, "Named")))
+        hub._dispatch(json.dumps(_patch_response(by_key[("clean", 1, 1)], "Named")))
         assert (await _message(third))["patch"]["name"] == "Named"
         assert first._queue.empty()
         hub._dispatch(json.dumps(_patch_response(by_key[("", 1, 1)], "One")))
@@ -174,7 +167,7 @@ def test_patch_different_keys_and_profiles_have_independent_flights():
     _run(body())
 
 
-def test_patch_noncanonical_requests_are_private_and_admission_limited():
+def test_patch_noncanonical_requests_are_private_and_correlated():
     async def body():
         hub = Hub(None, patch_timeout_s=1.0)
         link = RecordingLink()
@@ -191,7 +184,7 @@ def test_patch_noncanonical_requests_are_private_and_admission_limited():
         for request in originals:
             first.send(json.dumps(request))
         forwarded = [json.loads(line) for line in link.sent]
-        assert len(forwarded) == 2
+        assert len(forwarded) == 3
         for original, upstream in zip(originals, forwarded):
             assert upstream["type"] == original["type"]
             assert upstream["id"].startswith("__bosun_req_")
@@ -199,10 +192,7 @@ def test_patch_noncanonical_requests_are_private_and_admission_limited():
             assert {k: v for k, v in upstream.items() if k != "id"} == {
                 k: v for k, v in original.items() if k != "id"
             }
-        assert await _message(first) == {
-            "type": "ERROR", "id": "bad-profile", "error": "patch_busy",
-            "of": "GET_PATCH",
-        }
+        assert first._queue.empty()
         assert not hub._patch_flights
 
         # A future-selector reply remains private and restores the exact
@@ -557,7 +547,7 @@ def test_patch_malformed_unexpected_and_upstream_error_are_recorrelated():
     _run(body())
 
 
-def test_patch_waiter_and_distinct_flight_caps_are_local_errors():
+def test_patch_waiter_caps_are_local_errors():
     async def body():
         hub = Hub(None, patch_timeout_s=1.0)
         link = RecordingLink()
@@ -579,24 +569,9 @@ def test_patch_waiter_and_distinct_flight_caps_are_local_errors():
         assert (await _message(healthy))["id"] == "healthy"
         hub.stop()
 
-        hub = Hub(None, patch_timeout_s=1.0)
-        link = RecordingLink()
-        hub.link = link
-        sub = hub.subscribe()
-        for slot in range(1, 3):
-            sub.send(json.dumps({
-                "type": "GET_PATCH", "id": f"slot-{slot}",
-                "bank": 1, "slot": slot,
-            }))
-        sub.send('{"type":"GET_PATCH","id":"third","bank":2,"slot":1}')
-        busy = await _message(sub)
-        assert busy["id"] == "third" and busy["error"] == "patch_busy"
-        assert len(_patch_requests(link.sent)) == 2
-        hub.stop()
-
         # Eight subscribers x 64 requests across the same two coalesced keys
-        # reaches the global 512-waiter bound without exceeding the two
-        # physical upstream flights or 64-per-subscriber bound.
+        # reaches the global 512-waiter bound with only two upstream
+        # flights and without exceeding the 64-per-subscriber bound.
         hub = Hub(None, patch_timeout_s=1.0)
         link = RecordingLink()
         hub.link = link
