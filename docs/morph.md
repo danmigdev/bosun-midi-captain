@@ -64,7 +64,8 @@ the editor converts the percentage without changing the configuration format.
 ## Expression pedal and Captain screen
 
 In **Settings → Expression pedals**, enable and calibrate the chosen jack, then
-choose **Set Morph Position**. Heel is Base and toe is Morph; inversion and curves
+choose **Set Morph Position**. (The [Mini 6](mini6.md) has no expression jacks:
+use Morph footswitches there.) Heel is Base and toe is Morph; inversion and curves
 remain available. Move the pedal to activate it. Patch-specific expression
 overrides also support this message. Stage follows the positions sent by Captain.
 

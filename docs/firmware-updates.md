@@ -2,7 +2,8 @@
 
 Bosun Desktop updates existing native firmware directly over USB or through a
 Raspberry Pi. The Pi updater also migrates supported CircuitPython configurations. It
-supports the RP2040 MIDI Captain with **8 MiB flash**, using Kemper Player,
+supports the RP2040 MIDI Captain with **8 MiB flash** (the 10-switch model and,
+experimentally, the [Mini 6](mini6.md)), using Kemper Player,
 Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper family
 support is experimental; see [model setup and validation](kemper-head.md).
 CircuitPython is no longer maintained separately.
@@ -38,7 +39,8 @@ up and restoring the previous system is the user's responsibility.
 
 Open **Setup guide** in Desktop and select your configuration, then **Install
 native firmware**. This installs the native version bundled with the current
-Desktop release directly on the supported 10-switch, 8 MiB RP2040 Captain.
+Desktop release directly on a supported 8 MiB RP2040 Captain: choose the
+10-switch model or the [Mini 6](mini6.md) in the installer.
 No older Bosun release, CircuitPython bootstrap or Pi is needed. Follow the
 [illustrated first-installation guide](first-setup.md#2-install-native-firmware-on-the-captain).
 
@@ -60,6 +62,17 @@ Use Desktop **0.6.8 or later**, which includes the stock USB detection fix;
 
 Already-native Captains use the USB update below, which preserves native
 configuration. Existing Bosun CircuitPython installations use Pi migration.
+
+## Pedal model
+
+The native firmware stores the pedal model (10-switch or Mini 6) in its
+configuration storage, outside every profile. Updates through Desktop or the Pi
+keep it, and both check that the pedal reports the same model after the update.
+To change it, open **Maintenance → Pedal model**; the pedal restarts and keeps
+its profiles. A pedal without a stored model runs as the 10-switch Captain,
+which is the state of every installation made before 0.8. CircuitPython
+migration always produces a 10-switch installation. See the
+[Mini 6 notes](mini6.md).
 
 ## Direct Desktop USB
 

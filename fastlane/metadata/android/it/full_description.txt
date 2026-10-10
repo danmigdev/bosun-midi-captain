@@ -1,4 +1,4 @@
-Bosun è l'app Android per il PaintAudio MIDI Captain a 10 switch con il firmware open source Bosun. Configura il pedale dal telefono e usa Stage dal vivo.
+Bosun è l'app Android per il PaintAudio MIDI Captain a 10 switch (e, in via sperimentale, per il Mini 6 a 6 switch) con il firmware open source Bosun. Configura il pedale dal telefono e usa Stage dal vivo.
 
 Funzionalità:
 - Configura footswitch, banchi, rig, LED e pedali di espressione, poi salvali sul pedale

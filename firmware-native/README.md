@@ -28,6 +28,20 @@ seconds. Bosun Desktop also offers **Maintenance → Enter bootloader** over a
 direct USB connection. See [bootloader entry](../docs/firmware-updates.md#enter-the-bootloader-from-bosun)
 for the full procedure and stock firmware recovery.
 
+## Captain models
+
+One firmware image serves the 10-switch MIDI Captain and the experimental
+[MIDI Captain Mini 6](../docs/mini6.md). The Mini 6 wires a subset of the same
+switch pins, so `bosun_board_switches()` keeps the 10-switch bit order and
+`include/bosun/hardware.h` maps each model's logical switches (NeoPixel chain
+order) onto it. The model is read at boot from `/config/hardware.json`
+(`{"version":1,"model":"mini6"}`); a missing or invalid record selects the
+10-switch model. `SET_HARDWARE` stores a model and restarts when it differs,
+and `DEVICE_INFO.hardware` reports the active layout. Models without expression
+jacks never sample or drive GP27/GP28. The boot recovery chord only scans the
+switches every model wires. To run the emulator as a Mini 6, write that record
+under its `--root` directory before starting it.
+
 ## Build requirements
 
 Build on Linux, or on Windows through WSL with an Ubuntu distribution. On

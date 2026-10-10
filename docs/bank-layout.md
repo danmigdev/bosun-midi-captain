@@ -34,7 +34,8 @@ These settings describe the layout in Bosun; they do not change the target
 device's MIDI protocol or rewrite saved Program Changes. In a Generic MIDI
 profile, configure the target preset's Program Change (and Bank Select where
 needed) in each patch's **On enter** action. Use **Preset navigation row** in
-Settings to assign switches to rig slots within the current bank. Player and PROFILER Performance
+Settings to assign switches to rig slots within the current bank (on a
+[Mini 6](mini6.md) the row offers switches 1, 2, 3, A, B and C). Player and PROFILER Performance
 MIDI addressing retain their five-rig structure. PROFILER Browse uses assigned
 MIDI programs instead; see [PROFILER modes](kemper-head.md#choosing-rigs). Explicit patch selections, saved
 MIDI actions, setlist sequences and following rig changes from the Kemper remain

@@ -9,7 +9,7 @@ Connect the MIDI Captain and Kemper to a Raspberry Pi to use Bosun over the loca
 - A full copy of this repository. Keep the Pi software and desktop app on matching releases.
 - For remote administration, enable SSH using your own account and connection settings.
 
-Native firmware updates require the supported RP2040 Captain with 8 MiB flash. The automatic USB-MIDI connection matches Captain and Kemper/PROFILER device names. Use the USB connection supported by your model and installed Kemper OS.
+Native firmware updates require a supported RP2040 Captain with 8 MiB flash (10-switch, or the experimental [Mini 6](../../docs/mini6.md)); updates keep the pedal model and Stage on HDMI follows its switch layout. The automatic USB-MIDI connection matches Captain and Kemper/PROFILER device names. Use the USB connection supported by your model and installed Kemper OS.
 
 For Head/Rack/Stage connected by MIDI DIN, connect Captain OUT to Kemper IN
 and Kemper OUT to Captain IN. Connect only the Captain to the Pi by USB and

@@ -22,7 +22,9 @@ empty volume using the same littlefs implementation as the firmware.
 
 Frames are little-endian: magic `BSU1`, sequence, command, offset (reply: status),
 length, payload CRC32, header CRC32 (first 24 bytes), then payload. INFO reports
-the physical flash UID, capacity and protocol version. READ is bounded to 4 KiB.
+the physical flash UID, capacity and protocol version. Capacity is non-zero only
+for the supported 8 MiB chip; for any other chip (the Mini 6's flash is
+unverified) the host stops before reading or writing anything. READ is bounded to 4 KiB.
 ARM must match the flash UID before WRITE can erase/program an aligned sector.
 The helper checks each written sector; the host verifies the full 8 MiB image.
 Incomplete/invalid commands and a disconnected CDC session disarm the helper.

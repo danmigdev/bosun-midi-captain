@@ -1,8 +1,10 @@
 # Bosun: MIDI Captain firmware for Kemper
 
 Bosun is open-source alternative firmware for the **10-switch PaintAudio MIDI
-Captain with RP2040 and 8 MiB flash**. Configure footswitches, banks, rigs, LEDs
-and expression pedals with Bosun Desktop or Android. The maintained native
+Captain with RP2040 and 8 MiB flash**, with experimental support for the
+6-switch [MIDI Captain Mini 6](docs/mini6.md) (untested on hardware). Configure
+footswitches, banks, rigs, LEDs and expression pedals with Bosun Desktop or
+Android. The maintained native
 firmware supports **Kemper Player, Head, Rack and Stage**, plus **Generic MIDI**.
 Kemper support across the family is experimental: Player has previous hardware
 validation; Head/Rack/Stage validation is pending. Choose the Player profile or
@@ -62,8 +64,9 @@ discovery is unavailable. Stage opens in a browser at
 ### First installation from factory firmware
 
 Connect the Captain directly to the computer and open **Setup guide → Prepare
-the Captain → Install native firmware**. Desktop installs the bundled native
-release and saves a verified full factory backup first. Create and save a
+the Captain → Install native firmware**, then choose your model (10-switch or
+[Mini 6](docs/mini6.md)). Desktop installs the bundled native release and saves
+a verified full factory backup first. Create and save a
 profile for your Kemper model or a Generic MIDI profile after installation.
 
 Follow the [installation steps](docs/first-setup.md#2-install-native-firmware-on-the-captain)
@@ -87,7 +90,10 @@ follow [Update firmware](#update-firmware).
   see [bank layout](docs/bank-layout.md).
 - **Quick setup** applies the available recipe for the selected profile.
 - **Screen layout** configures the Captain's display fields and colours.
-- **Settings** also contains expression pedals and preset navigation.
+- **Settings** also contains expression pedals (10-switch Captain only) and
+  preset navigation.
+- **Maintenance → Pedal model** selects 10-switch or Mini 6 without
+  reinstalling; every layout follows the connected pedal.
 - **Maintenance → Export config… / Import config…** backs up and restores
   profiles, settings, patches and MIDI Learn data.
 
@@ -115,7 +121,7 @@ viewing the actual Pi display through VNC.
 ## Bosun Stand
 
 [Bosun Stand](bosun-stand/README.md) is a 3D-printable display stand for the
-10-switch MIDI Captain. Its side clamps, articulated arms and adjustable display
+10-switch MIDI Captain (it does not fit the Mini 6). Its side clamps, articulated arms and adjustable display
 mount let you position the screen in front of or behind the pedal, tilt it
 towards you, or fold it into the transport position. Arm position and display
 angle adjust independently and lock with toothed joints and hand knobs.
