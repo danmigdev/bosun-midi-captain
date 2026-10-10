@@ -594,15 +594,7 @@ class UpstreamLink:
             written = 0
             if pending:
                 try:
-                    write_some = getattr(transport, "write_some", None)
-                    if write_some is None:
-                        # Preserve the Transport protocol's historical
-                        # all-or-error duck type for third-party transports;
-                        # SerialTransport supplies exact partial progress.
-                        transport.write(pending)
-                        written = len(pending)
-                    else:
-                        written = write_some(pending)
+                    written = transport.write_some(pending)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("sentinel write failed: %s", exc)
                     return False

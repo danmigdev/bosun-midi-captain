@@ -64,7 +64,7 @@ def _http_get(port: int) -> str:
         return r.read().decode("utf-8")
 
 
-def test_server_smoke(tmp_path_factory=None):
+def test_server_smoke():
     async def body():
         tmp = tempfile.TemporaryDirectory()
         stage = Path(tmp.name)

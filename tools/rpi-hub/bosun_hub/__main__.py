@@ -21,7 +21,6 @@ import logging
 import signal
 from pathlib import Path
 
-from . import __version__
 from .server import run
 
 

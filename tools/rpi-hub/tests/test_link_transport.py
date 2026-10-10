@@ -356,7 +356,7 @@ def test_fatal_write_error_reopens_without_sticking_in_sentinel_flush(monkeypatc
     link.start()
     try:
         assert _wait(lambda: link.connected)
-        assert link.send('{"type":"GET_CONTEXT","id":"after-ota"}')
+        assert link.send('{"type":"GET_CONTEXT","id":"fatal-write"}')
         assert serial_ports[0].failed.wait(1)
         assert _wait(lambda: states.count(True) >= 2), states
         assert link.connected
@@ -611,7 +611,7 @@ def test_stop_suppresses_expected_close_race_exception(monkeypatch, caplog):
             self.write_entered = threading.Event()
             self.closed = threading.Event()
 
-        def write(self, _data):
+        def write_some(self, _data):
             self.write_entered.set()
             assert self.closed.wait(10), "close did not interrupt the write"
             raise TypeError("'NoneType' object cannot be interpreted as an integer")

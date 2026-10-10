@@ -39,12 +39,10 @@ async def main() -> None:
 
         last_blocks: dict[str, str] = {}
         last_rig = None
-        msg_count = 0
         parse_fail = 0
 
         while True:
             raw = await ws.recv()
-            msg_count += 1
             try:
                 m = json.loads(raw)
             except Exception as e:  # noqa: BLE001

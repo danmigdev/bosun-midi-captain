@@ -115,11 +115,6 @@ class FakePedal:
                 pass
             c.close()
 
-    @property
-    def client_count(self) -> int:
-        with self._lock:
-            return len(self._clients)
-
     def close(self) -> None:
         self._run = False
         self.drop_clients()

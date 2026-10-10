@@ -186,8 +186,8 @@ def test_link_stop_interrupts_a_blocked_transport(monkeypatch):
             self.entered_read = threading.Event()
             self.closed = threading.Event()
 
-        def write(self, data):
-            pass
+        def write_some(self, data):
+            return len(data)
 
         def read(self, n):
             self.entered_read.set()
