@@ -90,12 +90,14 @@
         await cmd.listPatches();
         await cmd.switchPatch(targetBank, targetSlot);
       } else if (dialog === "delete" && currentPatchEnvelope) {
-        await cmd.discard();  // drop any unsaved RAM changes for the patch first
-        await sendDelete(currentPatchEnvelope.bank, currentPatchEnvelope.slot);
+        const { bank, slot } = currentPatchEnvelope;
+        // Drop this patch's unsaved edits only: DISCARD without a bank and
+        // slot throws away pending edits on every patch.
+        await cmd.discard(bank, slot);
+        await cmd.deletePatch(bank, slot);
         await cmd.listPatches();
         // Move to first remaining patch
-        const remaining = patches.filter(p =>
-          !(p.bank === currentPatchEnvelope!.bank && p.slot === currentPatchEnvelope!.slot));
+        const remaining = patches.filter(p => !(p.bank === bank && p.slot === slot));
         if (remaining[0]) await cmd.switchPatch(remaining[0].bank, remaining[0].slot);
       }
     } catch (e) {
@@ -103,13 +105,6 @@
     } finally {
       dialog = null;
     }
-  }
-
-  async function sendDelete(bank: number, slot: number) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("send_command", {
-      line: JSON.stringify({ type: "DELETE_PATCH", id: `del-${bank}-${slot}`, bank, slot }),
-    });
   }
 
   let targetIsUsed = $derived(
@@ -168,7 +163,7 @@
         <code>{patchIdOf(currentPatchEnvelope.bank, currentPatchEnvelope.slot)}</code>
         · {currentPatchEnvelope.patch.name || "(unnamed)"}
       </p>
-      <p class="muted">This removes the file from CIRCUITPY immediately. Not undoable.</p>
+      <p class="muted">This deletes the patch from the pedal right away, including its unsaved edits. It cannot be undone.</p>
       <div class="row right">
         <button onclick={() => dialog = null}>Cancel</button>
         <button class="danger primary" onclick={confirm}>Delete</button>
