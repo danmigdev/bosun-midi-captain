@@ -11,15 +11,11 @@ when building from source.
 - Visual Studio Build Tools with **Desktop development with C++** and a Windows SDK.
 - Python 3.12, PowerShell and the Microsoft Edge WebView2 Runtime.
 
-Run the following from the repository root:
+Install the editor dependencies from the repository root:
 
 ```powershell
 npm --prefix editor install --no-audit --no-fund
-powershell -ExecutionPolicy Bypass -File tools/download-assets.ps1
 ```
-
-The asset download prepares the resources still required by the installer and
-migration tooling. It does not install firmware on a connected pedal.
 
 Prepare the pinned Pico SDK and ARM build tools using the
 [native firmware build instructions](../firmware-native/README.md), then run
@@ -69,9 +65,9 @@ blocked.
 
 Disconnect before changing the saved endpoint. **Setup guide** offers direct
 factory-to-native installation over USB. Existing native firmware can be
-updated over USB or through the Pi; existing CircuitPython configurations
-migrate through the Pi. See [firmware installation and updates](../docs/firmware-updates.md)
-for the different requirements and recovery procedures. Factory installation
+updated over USB or through the Pi. See
+[firmware installation and updates](../docs/firmware-updates.md) for the
+different requirements and recovery procedures. Factory installation
 is experimental; macOS and Linux application operation remains untested.
 
 For Android requirements and APK installation, see
@@ -82,12 +78,11 @@ For Android requirements and APK installation, see
 | Location | Purpose |
 | --- | --- |
 | `editor/` | Shared Desktop/Android UI, Stage and the setup wizard; native app code is in `src-tauri/`. |
-| `firmware-native/` | Maintained C firmware, host tests and RP2040 build tooling. |
-| `firmware/` | Frozen CircuitPython resources, shared schemas and migration/regression references. Still required by builds. |
+| `firmware-native/` | Captain firmware in C, shared schemas, host tests and RP2040 build tooling. |
 | `tools/` | Packaging, release checks, USB installer and Raspberry Pi services. |
 | `docs/` | Current user guides, hardware validation, current release notes and the pinned F-Droid reference recipe. |
 | `fastlane/` | Android store descriptions. |
-| `dist/release-0.7.1/` | Verified downloads for the current release, including SHA256SUMS.txt. |
+| `dist/release-<version>/` | Verified downloads for the current release, including SHA256SUMS.txt. |
 | `recovery/` | Private hardware backups, recovery records and archived unfinished work; see its README. |
 | `.worktrees/` | Ignored additional Git worktrees, kept inside the project folder. |
 
@@ -101,6 +96,5 @@ when no running process uses them. Keep one copy of the current release under
 `dist/`; keep recovery backups, installation journals and validation evidence
 under `recovery/`. Preserve signing keys and any uncommitted source edits.
 Previous release notes remain available in Git history and GitHub Releases.
-Generated
-installer resources under `editor/src-tauri/resources/` are required for packaging
-and must be rebuilt using the instructions above if removed.
+Generated installer resources under `editor/src-tauri/resources/` are required
+for packaging and must be rebuilt using the instructions above if removed.

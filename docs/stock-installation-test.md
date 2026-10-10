@@ -40,7 +40,7 @@ full flash readback checks remain in place.
 5. The installer saved and verified its own complete stock backup before writing,
    installed the bundled native firmware, verified full flash readback, restarted
    and confirmed the native version, healthy storage and an empty profile list.
-   No CircuitPython bootstrap or Pi was involved in this installation.
+   No intermediate firmware or Pi was involved in this installation.
 6. Compared the installer's stock backup against every UF2 payload block in the
    official PaintAudio package: all programmed bytes matched.
 7. Restored the original profile metadata, global settings, six patches and

@@ -48,7 +48,8 @@ Two details keep the two APKs identical:
   `gradle-wrapper.properties` with a verified checksum. The CLI calls
   `<project>/gradlew --project-dir <project>`, so it uses this script.
 
-The only prebuilt binary in the build tree that Bosun uses,
+The recipe downloads no firmware images or library bundles. The only
+prebuilt binary in the build tree that Bosun uses,
 `vendor/picotool/flash_id.bin`, is embedded by the desktop-only `picoboot`
 module and is not compiled for Android, so the recipe deletes it with
 `scandelete`. [`tools/build-flash-id.sh`](../tools/build-flash-id.sh)

@@ -1,16 +1,17 @@
 # Kemper PROFILER support (experimental)
 
-Bosun 0.7.1 on `main` provides experimental support for the Kemper family:
+Bosun provides experimental support for the Kemper family:
 **Player, Head, Rack and Stage**. Select **Kemper Player** for Player, or
-**Kemper PROFILER — Head / Rack / Stage (experimental)** for the other models.
+**Kemper PROFILER - Head / Rack / Stage (experimental)** for the other models.
 Head, Rack and Stage use one plugin and share the common Kemper engine with
 Player. Physical validation of Head/Rack/Stage is still pending; this is an
 experimental release, not a claim that every model/OS combination is verified.
 
 ## Setup
 
-1. Use matching native Captain firmware, editor and Pi/Stage assets from 0.7.1.
-2. Create a profile targeting **Kemper PROFILER — Head / Rack / Stage**.
+1. Use matching native Captain firmware, editor and Pi/Stage assets from the
+   same release.
+2. Create a profile targeting **Kemper PROFILER - Head / Rack / Stage**.
 3. In Settings, choose the MIDI channel used by the PROFILER.
 4. In the PROFILER target section, select **Hardware generation** (`MK1` or
    `MK2`) and **PROFILER operating mode** (`performance` or `browse`). Select
@@ -42,9 +43,9 @@ action when you want that patch to select a particular assigned program.
 **Step Rig / Performance** steps according to the mode selected on the Kemper.
 
 Bosun bank coordinates now support **1–125** throughout native storage, editor,
-Stage, hub snapshots and restore image generation. Existing two-digit paths
-are preserved; banks 100-125 use three digits. Catalogs and active navigation
-now support **625 configured patches**. Editor, Stage and update backups assemble
+Stage and hub snapshots. Existing two-digit paths are preserved; banks 100-125
+use three digits. Catalogs and active navigation now support **625 configured
+patches**. Editor, Stage and update backups assemble
 bounded pages and reject incomplete inventories. There is still a separate limit
 of 128 unsaved drafts: save in batches when creating a large setup.
 
@@ -117,8 +118,7 @@ once. No Stage-specific engine or copied configuration is needed.
 
 The internal profile ID remains `kemper_head` to preserve existing profiles and
 backups. Both plugins retain shared `kemper_*` commands, the `device.kemper`
-configuration block and the default screen layout. The frozen CircuitPython
-firmware is unchanged.
+configuration block and the default screen layout.
 
 For custom displays, context adds `kemper_mode` and `kemper_program` (0–127 in
 Browse when the identity is known, otherwise -1). In Browse, bank/slot context

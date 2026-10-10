@@ -33,7 +33,7 @@ The host pins USB topology and flash UID. It durably saves and verifies the full
 original flash before recording write intent and writing firmware plus initial
 storage. It retains the RAM helper alongside the backup so recovery does not
 depend on a subsequently installed Desktop release. Original factory settings
-are not migrated. An existing native image is rejected by this first-install
+are not converted. An existing native image is rejected by this first-install
 path to protect its profiles; use native update instead.
 
 The helper deliberately supplies its own CDC descriptors: the SDK's default

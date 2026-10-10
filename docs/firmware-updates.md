@@ -1,12 +1,10 @@
 # Update Captain firmware
 
 Bosun Desktop updates existing native firmware directly over USB or through a
-Raspberry Pi. The Pi updater also migrates supported CircuitPython configurations. It
-supports the RP2040 MIDI Captain with **8 MiB flash** (the 10-switch model and,
-experimentally, the [Mini 6](mini6.md)), using Kemper Player,
-Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper family
-support is experimental; see [model setup and validation](kemper-head.md).
-CircuitPython is no longer maintained separately.
+Raspberry Pi. It supports the RP2040 MIDI Captain with **8 MiB flash** (the
+10-switch model and, experimentally, the [Mini 6](mini6.md)), using Kemper
+Player, Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper
+family support is experimental; see [model setup and validation](kemper-head.md).
 
 When upgrading from 0.6.x, configuration storage expands from 512 KiB to 4 MiB
 on the first configuration write. Keep the verified full-flash backup:
@@ -15,9 +13,9 @@ restoring the full-flash backup. See [storage and downgrade details](kemper-head
 
 ## Enter the bootloader from Bosun
 
-The following options are included in Bosun 0.7.1; the startup shortcut requires
-0.7.1 or later firmware. Older installed firmware does not gain the
-shortcut by updating Desktop alone.
+These options were added in Bosun 0.7.1. The startup shortcut requires 0.7.1 or
+later firmware on the Captain; older installed firmware does not gain it by
+updating Desktop alone.
 
 - **Bosun Desktop:** connect the Captain directly to the computer by USB, open
   **Maintenance**, and click **Enter bootloader**. Save or discard any unsaved
@@ -41,7 +39,7 @@ Open **Setup guide** in Desktop and select your configuration, then **Install
 native firmware**. This installs the native version bundled with the current
 Desktop release directly on a supported 8 MiB RP2040 Captain: choose the
 10-switch model or the [Mini 6](mini6.md) in the installer.
-No older Bosun release, CircuitPython bootstrap or Pi is needed. Follow the
+No older Bosun release or Pi is needed. Follow the
 [illustrated first-installation guide](first-setup.md#2-install-native-firmware-on-the-captain).
 
 This experimental path loads a temporary installer into RAM through the
@@ -61,7 +59,7 @@ Use Desktop **0.6.8 or later**, which includes the stock USB detection fix;
 [hardware test and release status](stock-installation-test.md).
 
 Already-native Captains use the USB update below, which preserves native
-configuration. Existing Bosun CircuitPython installations use Pi migration.
+configuration.
 
 ## Pedal model
 
@@ -70,16 +68,15 @@ configuration storage, outside every profile. Updates through Desktop or the Pi
 keep it, and both check that the pedal reports the same model after the update.
 To change it, open **Maintenance → Pedal model**; the pedal restarts and keeps
 its profiles. A pedal without a stored model runs as the 10-switch Captain,
-which is the state of every installation made before 0.8. CircuitPython
-migration always produces a 10-switch installation. See the
+which is the state of every installation made before 0.8. See the
 [Mini 6 notes](mini6.md).
 
 ## Direct Desktop USB
 
 This path updates an existing native installation on an **8 MiB RP2040 Captain**.
 It uses the native package bundled with Bosun Desktop, including when reinstalling
-the same version. CircuitPython migration and factory installation use the paths
-described below.
+the same version. A Captain still running factory firmware uses the
+[first installation](#first-installation-from-factory-firmware) above instead.
 
 1. Save or discard pending patch edits and export a configuration backup.
 2. Connect **Captain USB-B → computer USB-A/USB-C** with a data cable. Choose
@@ -132,7 +129,7 @@ Pi, Android, internet connection, Python or a separate picotool executable.
 
 ## Raspberry Pi requirements
 
-- A Captain already running Bosun, connected by USB to the Pi.
+- A Captain already running native Bosun firmware, connected by USB to the Pi.
 - The [complete Pi installation](../tools/rpi-hub/README.md#install-on-the-pi).
 - Bosun Desktop with its matching bundled native update package.
 
@@ -148,10 +145,10 @@ perform firmware updates. For a factory pedal, follow
 4. Review the target release and choose **Update**.
 5. Keep the Pi and Captain powered until the app confirms completion.
 
-The updater checks compatibility, creates a complete recovery backup, transfers
-supported settings and verifies the installation. Unsupported configurations
-stop the update before firmware is written. Native upgrades preserve the
-existing native configuration.
+The updater checks compatibility, creates a complete recovery backup and writes
+only the firmware area, keeping the existing configuration. After the restart it
+checks the new version and compares the profiles, settings, patches, MIDI Learn
+data and pedal model with the copy read before the update.
 
 ## Reconnect or recover a Pi update
 
@@ -176,4 +173,4 @@ Follow the [desktop build guide](../editor/SETUP.md) to generate the matching
 native update archive, RAM installer and empty native storage image before
 packaging. These resources are verified together; the factory installer cannot
 use assets built for another native firmware version. Use the verified Bosun
-release package rather than an arbitrary UF2 or a legacy CircuitPython bundle.
+release package rather than an arbitrary UF2.

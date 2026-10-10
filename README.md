@@ -4,8 +4,8 @@ Bosun is open-source alternative firmware for the **10-switch PaintAudio MIDI
 Captain with RP2040 and 8 MiB flash**, with experimental support for the
 6-switch [MIDI Captain Mini 6](docs/mini6.md) (untested on hardware). Configure
 footswitches, banks, rigs, LEDs and expression pedals with Bosun Desktop or
-Android. The maintained native
-firmware supports **Kemper Player, Head, Rack and Stage**, plus **Generic MIDI**.
+Android. The firmware supports **Kemper Player, Head, Rack and Stage**, plus
+**Generic MIDI**.
 Kemper support across the family is experimental: Player has previous hardware
 validation; Head/Rack/Stage validation is pending. Choose the Player profile or
 the shared [PROFILER profile](docs/kemper-head.md) for Head/Rack/Stage.
@@ -77,8 +77,8 @@ tested PaintAudio version and limitations.
 ### A pedal already running Bosun
 
 Connect over USB or through the Pi, open the saved profile, then edit its
-patches and choose **Save**. For older firmware or CircuitPython migration,
-follow [Update firmware](#update-firmware).
+patches and choose **Save**. To update its firmware, follow
+[Update firmware](#update-firmware).
 
 <a id="configure-your-sounds"></a>
 
@@ -146,7 +146,6 @@ configuration backup and save pending edits before starting.
 | --- | --- |
 | Native Bosun connected directly to Desktop | **Update firmware (USB)**, or **Maintenance → Install firmware (USB)** for reinstallation. |
 | Native Bosun connected to a Pi | Connect Desktop to the Pi and choose **Update Bosun**. |
-| Existing Bosun CircuitPython | Migrate through the Pi using Desktop. |
 | Factory firmware | Follow [first installation](#first-installation-from-factory-firmware). |
 
 The [firmware update and recovery guide](docs/firmware-updates.md) is the
