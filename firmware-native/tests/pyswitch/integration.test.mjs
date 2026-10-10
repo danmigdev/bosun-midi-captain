@@ -12,7 +12,10 @@ import { KemperBridge } from './bridge.mjs';
 const executable = process.env.BOSUN_EMULATOR;
 assert.ok(executable, 'Set BOSUN_EMULATOR to the compiled host executable');
 
-async function until(check, message, timeout = 6000) {
+// Waits only bound how long an expected state may take. Sanitizer builds on
+// shared CI runners can be several times slower, so the default is generous;
+// a state that never arrives still fails, after the full timeout.
+async function until(check, message, timeout = 15000) {
   const deadline = Date.now() + timeout;
   let last;
   do { last = await check(); if (last) return last; await pause(20); } while (Date.now() < deadline);
