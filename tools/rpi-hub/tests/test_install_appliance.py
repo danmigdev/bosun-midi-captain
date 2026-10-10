@@ -1,6 +1,7 @@
 """Run the real appliance installers offline with isolated files and fake OS tools."""
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import pytest
 
 
 SOURCE = Path(__file__).resolve().parents[1]
+REPOSITORY = SOURCE.parents[1]
 
 
 def shell_path(path: Path) -> str:
@@ -99,7 +101,7 @@ def appliance(tmp_path):
     system = tmp_path / "system"
     for path in ("etc/systemd/system", "etc/udev/rules.d", "opt", "var/lib"):
         (system / path).mkdir(parents=True, exist_ok=True)
-    for filename in ("install.sh", "install-native-updater.sh"):
+    for filename in ("install.sh", "install-native-updater.sh", "build-storage-image.sh"):
         script = (SOURCE / filename).read_text(encoding="utf-8")
         # Execute the installer logic, but give it a simulated root identity and
         # redirect every fixed installation destination into this temporary tree.
@@ -128,7 +130,7 @@ def appliance(tmp_path):
         "third_party/littlefs/lfs.c", "third_party/littlefs/lfs_util.c",
         "third_party/littlefs/lfs.h", "third_party/littlefs/lfs_util.h",
         "include/bosun/board.h", "include/bosun/config.h",
-        "include/bosun/json.h", "include/bosun/storage.h",
+        "include/bosun/json.h", "include/bosun/storage.h", "include/bosun/plugin_kinds.h",
     ):
         target = native / filename
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +181,7 @@ def appliance(tmp_path):
 
 @pytest.mark.parametrize("missing", [
     "stage", "kiosk/bosun-hdmi-recovery.py", "platform/host/storage_image.c", "src/config.c",
-    "include/bosun/config.h", "third_party/littlefs/lfs.c",
+    "include/bosun/config.h", "include/bosun/plugin_kinds.h", "third_party/littlefs/lfs.c",
 ])
 def test_missing_build_or_checkout_fails_before_any_appliance_mutation(appliance, missing):
     if missing != "stage":
@@ -237,3 +239,34 @@ def test_inactive_service_is_reported_as_failed_install(appliance, failed_servic
     appliance.build_stage()
     result, _ = appliance.run(FAIL_SERVICE=failed_service)
     assert result.returncode != 0
+
+
+def test_converter_compiles_from_the_shipped_sources_alone(tmp_path):
+    """The Pi builds the converter with plain cc: no CMake, Python or generated headers.
+
+    The installer tests above fake cc, so this is the check that the real compile
+    works from exactly the files the setup package ships.
+    """
+    bash, compiler = shutil.which("bash"), shutil.which("cc")
+    if os.name == "nt" or not bash or not compiler:
+        pytest.skip("Compiling the converter needs bash and a C compiler")
+    spec = importlib.util.spec_from_file_location("package_pi_setup", REPOSITORY / "tools/package-pi-setup.py")
+    package = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(package)
+    shipped = [name for name in package.setup_files()
+               if name.startswith("firmware-native/") or name == "tools/rpi-hub/build-storage-image.sh"]
+    for name in shipped:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = (REPOSITORY / name).read_bytes()
+        # The package strips CR from scripts the same way.
+        target.write_bytes(data.replace(b"\r\n", b"\n") if name.endswith(".sh") else data)
+    converter = tmp_path / "bosun_storage_image"
+    build = subprocess.run([bash, str(tmp_path / "tools/rpi-hub/build-storage-image.sh"), str(converter)],
+                           text=True, capture_output=True, timeout=300)
+    assert build.returncode == 0, build.stderr
+    image = tmp_path / "empty.bin"
+    provision = subprocess.run([str(converter), "--empty", "--output", str(image)],
+                               text=True, capture_output=True, timeout=60)
+    assert provision.returncode == 0, provision.stderr
+    assert image.stat().st_size == 4 * 1024 * 1024

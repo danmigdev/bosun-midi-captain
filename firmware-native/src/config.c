@@ -1,7 +1,7 @@
 #include "bosun/config.h"
+#include "bosun/plugin_kinds.h"
 #include <stdio.h>
 #include <string.h>
-#include "bosun_plugin_kinds.h"
 
 bool bosun_config_kind_supported(const char *kind) {
     if (!kind) return false;

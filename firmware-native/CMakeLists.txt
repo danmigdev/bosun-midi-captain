@@ -31,19 +31,20 @@ target_link_libraries(bosun_core PUBLIC bosun_checks m)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(manifest_header "${CMAKE_CURRENT_BINARY_DIR}/generated/bosun_manifest.h")
 set(models_header "${CMAKE_CURRENT_BINARY_DIR}/generated/bosun_kemper_models.h")
-set(kinds_header "${CMAKE_CURRENT_BINARY_DIR}/generated/bosun_plugin_kinds.h")
-add_custom_command(OUTPUT "${manifest_header}" "${models_header}" "${kinds_header}"
+# The generator also fails the build when include/bosun/plugin_kinds.h no longer
+# matches the manifest; that list stays in the source tree for non-CMake builds.
+add_custom_command(OUTPUT "${manifest_header}" "${models_header}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_manifest.py"
         --output "${manifest_header}"
         --models-output "${models_header}"
-        --kinds-output "${kinds_header}"
-    DEPENDS cmake/build_manifest.py plugins/kemper.json src/runtime.c ../tools/build_manifest_tail.py
+    DEPENDS cmake/build_manifest.py plugins/kemper.json src/runtime.c include/bosun/plugin_kinds.h
+        ../tools/build_manifest_tail.py
         ../firmware/lib/captain/messages.py ../firmware/lib/captain/plugin.py
         ../firmware/lib/plugins/kemper.py ../firmware/lib/plugins/generic_midi.py
         ../firmware/lib/plugins/headrush_core.py ../firmware/lib/plugins/ampero.py
         ../firmware/lib/plugins/line6_helix.py
     VERBATIM)
-target_sources(bosun_core PRIVATE "${manifest_header}" "${models_header}" "${kinds_header}")
+target_sources(bosun_core PRIVATE "${manifest_header}" "${models_header}")
 target_include_directories(bosun_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # Required inventory: a missing component must fail CI, never silently build a
 # partial application. No source glob can pull host fakes into the ARM image.
@@ -77,9 +78,11 @@ else()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     # Offline provisioning uses the real RP2040 littlefs backend with host NOR
     # memory. Never link the ordinary host-directory storage implementation.
+    # The manifest header is listed only so its generator checks the kinds list
+    # before this tool compiles it.
     add_executable(bosun_storage_image platform/host/storage_image.c
-        platform/rp2040/storage.c src/storage_path.c src/config.c src/json.c "${kinds_header}")
-    target_include_directories(bosun_storage_image PRIVATE include "${CMAKE_CURRENT_BINARY_DIR}/generated")
+        platform/rp2040/storage.c src/storage_path.c src/config.c src/json.c "${manifest_header}")
+    target_include_directories(bosun_storage_image PRIVATE include)
     target_compile_definitions(bosun_storage_image PRIVATE BOSUN_PLATFORM_RP2040=1)
     target_link_libraries(bosun_storage_image PRIVATE bosun_checks bosun_littlefs)
     add_test(NAME storage_image COMMAND "${Python3_EXECUTABLE}"

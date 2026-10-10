@@ -69,7 +69,15 @@ def manifest_values(root):
         declared.update(plugin["messages"])
     if declared != supported:
         raise ValueError(f"Native manifest/runtime mismatch: {declared ^ supported}")
+    check_plugin_kinds((root / "firmware-native/include/bosun/plugin_kinds.h").read_text(encoding="utf-8"), selected)
     return core, selected, models
+
+
+def check_plugin_kinds(header, plugins):
+    """The checked-in kinds list must name exactly the native plugins, in order."""
+    listed = re.findall(r'"([a-z_]+)"', header.split("bosun_plugin_kinds[] = {", 1)[1].split("};", 1)[0])
+    if listed != list(plugins):
+        raise ValueError(f"include/bosun/plugin_kinds.h lists {listed}; the native manifest has {list(plugins)}")
 
 
 def generate(root):
@@ -96,21 +104,12 @@ def generate_models(root):
     return "\n".join(lines + ["};", ""])
 
 
-def generate_kinds(root):
-    _, plugins, _ = manifest_values(root)
-    return "/* Generated from the native manifest; do not edit. */\n" + \
-        "static const char *const bosun_plugin_kinds[] = {" + \
-        ",".join(json.dumps(kind) for kind in plugins) + "};\n"
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--models-output", type=Path, required=True)
-    parser.add_argument("--kinds-output", type=Path, required=True)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    for path, generator in ((args.output, generate), (args.models_output, generate_models),
-                            (args.kinds_output, generate_kinds)):
+    for path, generator in ((args.output, generate), (args.models_output, generate_models)):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(generator(root), encoding="ascii")

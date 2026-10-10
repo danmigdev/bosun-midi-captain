@@ -36,6 +36,14 @@ class ManifestModels(unittest.TestCase):
         head["messages"]["kemper_morph"]["params"]["value"]["max"] = 10
         self.assertEqual(player["messages"]["kemper_morph"]["params"]["value"]["max"], 127)
 
+    def test_checked_in_plugin_kinds_follow_the_manifest(self):
+        # manifest_values() already rejects a stale include/bosun/plugin_kinds.h.
+        _, plugins, _ = build.manifest_values(ROOT)
+        self.assertEqual(list(plugins), ["generic_midi", "kemper_player", "kemper_head"])
+        stale = 'static const char *const bosun_plugin_kinds[] = {"generic_midi", "kemper_player"};'
+        with self.assertRaisesRegex(ValueError, "plugin_kinds.h"):
+            build.check_plugin_kinds(stale, plugins)
+
 
 if __name__ == "__main__":
     unittest.main()

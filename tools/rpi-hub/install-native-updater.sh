@@ -11,17 +11,9 @@ command -v cc >/dev/null || { printf 'Install build-essential first.\n' >&2; exi
 command -v picotool >/dev/null || { printf 'Install picotool first.\n' >&2; exit 1; }
 id bosun >/dev/null
 getent group plugdev >/dev/null
-native="$root/firmware-native"
 build="$(mktemp -d)"
 trap 'rm -f -- "$build/bosun_storage_image"; rmdir -- "$build"' EXIT
-cc -std=c11 -O2 -DNDEBUG -DBOSUN_PLATFORM_RP2040=1 \
-    -DLFS_NO_MALLOC -DLFS_NO_DEBUG -DLFS_NO_WARN -DLFS_NO_ERROR \
-    -DLFS_NAME_MAX=63 -DLFS_FILE_MAX=262144 \
-    -I"$native/include" -I"$native/third_party/littlefs" \
-    "$native/platform/host/storage_image.c" "$native/platform/rp2040/storage.c" \
-    "$native/src/storage_path.c" "$native/src/config.c" "$native/src/json.c" \
-    "$native/third_party/littlefs/lfs.c" "$native/third_party/littlefs/lfs_util.c" \
-    -lm -o "$build/bosun_storage_image"
+bash "$root/tools/rpi-hub/build-storage-image.sh" "$build/bosun_storage_image"
 install -d -m 755 /opt/bosun-hub/bin
 install -m 755 "$build/bosun_storage_image" /opt/bosun-hub/bin/bosun_storage_image
 usermod --append --groups plugdev bosun

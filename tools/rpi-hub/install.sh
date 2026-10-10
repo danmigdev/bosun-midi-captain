@@ -34,10 +34,12 @@ for required in \
     tools/rpi-hub/kiosk/bosun-hdmi-recovery.py \
     tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
     tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
+    tools/rpi-hub/build-storage-image.sh \
     firmware-native/platform/host/storage_image.c firmware-native/platform/rp2040/storage.c \
     firmware-native/src/storage_path.c firmware-native/src/config.c firmware-native/src/json.c \
     firmware-native/include/bosun/board.h firmware-native/include/bosun/config.h \
     firmware-native/include/bosun/json.h firmware-native/include/bosun/storage.h \
+    firmware-native/include/bosun/plugin_kinds.h \
     firmware-native/third_party/littlefs/lfs.c firmware-native/third_party/littlefs/lfs_util.c \
     firmware-native/third_party/littlefs/lfs.h firmware-native/third_party/littlefs/lfs_util.h; do
     if [[ ! -f "$REPO_ROOT/$required" ]]; then
