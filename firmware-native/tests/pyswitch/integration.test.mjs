@@ -151,7 +151,10 @@ test('rapid Clean to Crunch then Delay recovers after deliberately stale effect 
   await until(async () => (await captain.context()).kemper_block_Delay === 'on', 'Delay reconciliation');
   await pause(800);
   assert.equal((await captain.context()).kemper_block_Delay, 'on');
-  assert.equal(captain.contexts.at(-1).kemper_block_Delay, 'on');
+  // Stage must receive the same state unsolicited. On a slow sanitizer runner
+  // the last push can trail the polled reply, so wait for it instead of
+  // sampling once; a push that never arrives still fails the test.
+  await until(() => captain.contexts.at(-1)?.kemper_block_Delay === 'on', 'Delay pushed to Stage');
 });
 
 test('tuner feedback and commanded Morph position pass through the actual MIDI stream', async t => {
