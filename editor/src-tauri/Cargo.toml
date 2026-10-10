@@ -10,7 +10,6 @@ tauri-build = { version = "2.7.0", default-features = false, features = [] }
 
 [dependencies]
 tauri = { version = "2.12.0", default-features = false, features = ["wry", "custom-protocol"] }
-tauri-plugin-shell = "2"
 # Persist and restore the main window size/position across launches.
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
