@@ -642,7 +642,6 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             p->reboot_requested = true;
         }
     }
-    else if (!strncmp(p->type, "PUT_FILE_", 9)) error(p, "unsupported_native_firmware_ota");
     else error(p, "unknown_type");
     if (r != BOSUN_STORE_OK) error(p, store_error(r));
 done:

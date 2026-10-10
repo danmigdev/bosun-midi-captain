@@ -91,7 +91,8 @@ bool bosun_store_mount(const char *host_root) {
     memset(&filesystem, 0, sizeof filesystem);
     if (!configure()) return false;
     /* Unknown, damaged and erased media all stay untouched. In particular,
-     * never fall back to formatting a pre-existing CircuitPython FAT volume. */
+     * never fall back to formatting a pre-existing FAT volume, such as the one
+     * the factory firmware leaves behind. */
     config.block_count = 0; /* Read the on-disk geometry; mounting is read-only. */
     mounted = lfs_mount(&filesystem, &config) == 0;
     if (mounted && filesystem.block_count != storage_size / BLOCK_SIZE &&

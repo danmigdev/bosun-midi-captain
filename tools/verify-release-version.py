@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Check maintained release identities and an optional native update archive.
-
-The archived CircuitPython version is deliberately independent of new releases.
-"""
+"""Check release identities and an optional native update archive."""
 import argparse
 import json
 from pathlib import Path

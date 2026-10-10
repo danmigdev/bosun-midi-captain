@@ -14,7 +14,7 @@ dist/
 # tools/build-android.ps1 from editor/dist/ on every build)
 editor/src-tauri/gen/android/app/src/main/assets/public/
 
-# Downloaded / generated installer assets (recreate with tools/download-assets.ps1)
+# Generated native release assets (update package, first-install assets, Pi package)
 editor/src-tauri/resources/
 
 # Logs

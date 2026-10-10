@@ -38,11 +38,7 @@ add_custom_command(OUTPUT "${manifest_header}" "${models_header}"
         --output "${manifest_header}"
         --models-output "${models_header}"
     DEPENDS cmake/build_manifest.py plugins/kemper.json src/runtime.c include/bosun/plugin_kinds.h
-        ../tools/build_manifest_tail.py
-        ../firmware/lib/captain/messages.py ../firmware/lib/captain/plugin.py
-        ../firmware/lib/plugins/kemper.py ../firmware/lib/plugins/generic_midi.py
-        ../firmware/lib/plugins/headrush_core.py ../firmware/lib/plugins/ampero.py
-        ../firmware/lib/plugins/line6_helix.py
+        schemas/core.json schemas/generic_midi.json schemas/kemper_player.json
     VERBATIM)
 target_sources(bosun_core PRIVATE "${manifest_header}" "${models_header}")
 target_include_directories(bosun_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -158,14 +154,5 @@ else()
         target_include_directories(test_storage_lfs PRIVATE include)
         target_compile_definitions(test_storage_lfs PRIVATE BOSUN_PLATFORM_RP2040=1)
         target_link_libraries(test_storage_lfs PRIVATE bosun_littlefs)
-    endif()
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_differential.c")
-        add_executable(native_differential tests/native_differential.c)
-        target_link_libraries(native_differential PRIVATE bosun_core)
-        target_compile_options(native_differential PRIVATE -UNDEBUG)
-        add_test(NAME differential COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_differential.py"
-            --driver "$<TARGET_FILE:native_differential>")
-        set_tests_properties(differential PROPERTIES TIMEOUT 120)
     endif()
 endif()

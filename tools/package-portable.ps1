@@ -3,15 +3,15 @@
   Build the Bosun editor as a portable (no-install) ZIP.
 
 .DESCRIPTION
-  Produces a self-contained folder - Bosun.exe plus the installer assets the
-  Pedal Setup wizard needs (circuitpython.uf2, firmware\, lib\) - and zips it.
+  Produces a self-contained folder - Bosun.exe plus the native resources it
+  uses (update\, installer\, pi\) and the offline setup guide - and zips it.
   The recipient extracts the ZIP anywhere and double-clicks Bosun.exe. No
   installer, no admin rights, no registry writes.
 
   Tauri resolves BaseDirectory::Resource to the directory holding the
-  executable, so the three asset entries must sit next to Bosun.exe. That is
-  the same layout cargo already lays out under target\<config>\, which is how
-  the wizard works during development.
+  executable, so the resource folders must sit next to Bosun.exe. That is the
+  same layout cargo already lays out under target\<config>\, which is how the
+  app finds them during development.
 
   WebView2 ships with Windows 11. On older Windows the free Microsoft WebView2
   runtime must be installed (the window stays blank otherwise).
@@ -60,13 +60,7 @@ $repoRoot  = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $editor    = Join-Path $repoRoot "editor"
 $tauriDir  = Join-Path $editor "src-tauri"
 $resources = Join-Path $tauriDir "resources"
-$resourceSyncScript = Join-Path $repoRoot "tools\sync_firmware_resources.py"
 $resourceVerifyScript = Join-Path $repoRoot "tools\verify_firmware_package.py"
-$vendorVerifyScript = Join-Path $repoRoot "tools\provision_adafruit_bundle.py"
-$resourceDigestDir = Join-Path $tauriDir "target\bosun-resource-sync"
-$resourceDigestBefore = Join-Path $resourceDigestDir "portable-before.sha256"
-$resourceDigestAfter  = Join-Path $resourceDigestDir "portable-after.sha256"
-$resourceDigestFinal  = Join-Path $resourceDigestDir "portable-final.sha256"
 $cargoExe  = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $pythonExe = (Get-Command python -ErrorAction Stop).Source
 if (-not (Test-Path $cargoExe)) {
@@ -75,14 +69,6 @@ if (-not (Test-Path $cargoExe)) {
 # npx/tauri launches `cargo` by name, so make the per-user rustup bin visible
 # even in shells where the installer has not updated PATH yet.
 $env:PATH = "$(Split-Path $cargoExe);$env:PATH"
-
-function Sync-FirmwareResources {
-    param([string]$DigestFile, [switch]$Check)
-    $syncArgs = @($resourceSyncScript, "--repo-root", $repoRoot, "--digest-file", $DigestFile)
-    if ($Check) { $syncArgs += "--check" }
-    Invoke-NativeTool { & $pythonExe @syncArgs }
-    if ($LASTEXITCODE -ne 0) { throw "Firmware resource sync failed" }
-}
 
 function Invoke-FirmwarePackageVerification {
     param([string]$Directory, [string]$Archive, [string]$Prefix)
@@ -95,24 +81,16 @@ function Invoke-FirmwarePackageVerification {
         throw "Firmware package verification requires a directory or archive"
     }
     Invoke-NativeTool { & $pythonExe @verifyArgs }
-    if ($LASTEXITCODE -ne 0) { throw "Packaged firmware verification failed" }
+    if ($LASTEXITCODE -ne 0) { throw "Packaged resource verification failed" }
 }
 
-# Always derive distributable resources from the canonical firmware tree,
-# including -SkipBuild packages. The verified digest detects an edit racing
-# the build so a mixed/stale archive can never be emitted.
-New-Item -ItemType Directory -Force -Path $resourceDigestDir | Out-Null
-Write-Host "[resources] Syncing canonical firmware resources ..."
+Write-Host "[resources] Building Stage, the setup guide and the Pi package ..."
 Invoke-NativeTool { npm.cmd --prefix $editor run build:stage }
 if ($LASTEXITCODE -ne 0) { throw 'Stage build failed' }
 Invoke-NativeTool { npm.cmd --prefix $editor run build:guide }
 if ($LASTEXITCODE -ne 0) { throw 'Setup guide build failed' }
 Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-pi-setup.py') }
 if ($LASTEXITCODE -ne 0) { throw 'Pi setup packaging failed' }
-Sync-FirmwareResources -DigestFile $resourceDigestBefore
-Invoke-NativeTool { & $pythonExe $vendorVerifyScript --destination (Join-Path $resources "lib") --check }
-if ($LASTEXITCODE -ne 0) { throw "Pinned Adafruit vendor verification failed" }
-$resourceDigest = (Get-Content -LiteralPath $resourceDigestBefore -Raw).Trim()
 $nativePackage = Join-Path $resources 'update/bosun-update.zip'
 Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-factory-installer.py') --verify --package $nativePackage --output (Join-Path $resources 'installer') }
 if ($LASTEXITCODE -ne 0) { throw 'Build current native installer assets first: bash tools/build-factory-installer.sh' }
@@ -151,12 +129,6 @@ if (-not $SkipBuild) {
     } finally {
         Pop-Location
     }
-}
-
-Sync-FirmwareResources -DigestFile $resourceDigestAfter -Check
-$resourceDigestAfterBuild = (Get-Content -LiteralPath $resourceDigestAfter -Raw).Trim()
-if ($resourceDigestAfterBuild -ne $resourceDigest) {
-    throw "Firmware resources changed during packaging; refusing to emit a stale/mixed portable archive. Re-run the build."
 }
 
 $exeSrc = Join-Path $tauriDir "target\$Configuration\$exeName"
@@ -212,18 +184,11 @@ Copy-Item $exeSrc (Join-Path $stageDir "$product.exe")
 Write-Host "[ok  ] $product.exe"
 Copy-Item -LiteralPath (Join-Path $repoRoot 'dist/setup-guide/setup-guide.html') -Destination (Join-Path $stageDir 'Setup-guide.html')
 
-# Installer assets, side by side with the exe.
-$uf2 = Join-Path $resources "circuitpython.uf2"
-if (-not (Test-Path $uf2)) {
-    throw "Missing circuitpython.uf2 at $uf2. Run tools\download-assets.ps1 first."
-}
-Copy-Item $uf2 $stageDir
-Write-Host "[ok  ] circuitpython.uf2"
-
-foreach ($tree in @("firmware", "lib", "update", "installer", "pi")) {
+# Native resources, side by side with the exe.
+foreach ($tree in @("update", "installer", "pi")) {
     $src = Join-Path $resources $tree
     if (-not (Test-Path $src)) {
-        throw "Missing resource '$tree' at $src. Run tools\download-assets.ps1 first."
+        throw "Missing resource '$tree' at $src. Build the native release assets first: bash tools/build-factory-installer.sh"
     }
     Copy-Item -Recurse $src (Join-Path $stageDir $tree)
     Write-Host "[ok  ] $tree\"
@@ -233,12 +198,6 @@ foreach ($tree in @("firmware", "lib", "update", "installer", "pi")) {
 $licenseDir = Join-Path $stageDir "licenses"
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $tauriDir "vendor/picotool/LICENSE.TXT") -Destination (Join-Path $licenseDir "picotool.txt")
-
-# Drop python caches the device installer skips anyway - keeps the ZIP clean.
-Get-ChildItem -Path $stageDir -Recurse -Directory -Filter "__pycache__" |
-    Remove-Item -Recurse -Force
-Get-ChildItem -Path $stageDir -Recurse -File -Filter "*.pyc" |
-    Remove-Item -Force
 
 # A short note so the recipient knows it is extract-and-run.
 $readme = @"
@@ -264,14 +223,12 @@ or through a configured Raspberry Pi. Direct USB requires the Captain's
 PICOBOOT interface to use WinUSB for native-to-native updates. Bosun keeps its recovery backup in the
 application data directory and shows its location in the update window.
 
-The new factory-to-native flow still requires an end-to-end hardware test.
 macOS and Linux applications have not been tested.
 "@
 Set-Content -Path (Join-Path $stageDir "README.txt") -Value $readme -Encoding utf8
 
-# Verify every staged firmware/lib/UF2 byte and reject stale compiled siblings
-# before spending time compressing. Bosun.exe and README.txt are intentionally
-# outside this resource-only inventory.
+# Verify every staged resource byte before spending time compressing.
+# Bosun.exe and README.txt are intentionally outside this resource inventory.
 Invoke-FirmwarePackageVerification -Directory $stageDir
 if ($nativeDigest -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $stageDir 'update/bosun-update.zip')).Hash -ne $nativeDigest) {
     throw 'Native update package changed while building the portable app'
@@ -303,14 +260,6 @@ try {
         if ((Get-FileHash -Algorithm SHA256 -LiteralPath $nativePackage).Hash -ne $nativeDigest) {
             throw 'Native update package changed during compression'
         }
-    }
-
-    # Do not replace a previous known-good archive if the firmware changed
-    # while this package was being staged/compressed.
-    Sync-FirmwareResources -DigestFile $resourceDigestFinal -Check
-    $resourceDigestAtPublish = (Get-Content -LiteralPath $resourceDigestFinal -Raw).Trim()
-    if ($resourceDigestAtPublish -ne $resourceDigest) {
-        throw "Firmware resources changed while compressing; refusing to publish a stale/mixed portable archive. Re-run the build."
     }
     Move-Item -Force -LiteralPath $zipTemp -Destination $zipPath
 } finally {

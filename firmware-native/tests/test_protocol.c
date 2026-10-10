@@ -527,8 +527,6 @@ int main(void) {
     request("{\"type\":\"REBOOT\",\"id\":1,\"id\":2}", "ERROR"); assert(!protocol.reboot_requested);
     request("[]", "ERROR"); request("null", "ERROR"); request("{bad", "ERROR");
     request("{\"type\":\"UNRECOGNIZED\"}", "ERROR"); is_error("unknown_type");
-    request("{\"type\":\"PUT_FILE_BEGIN\",\"path\":\"code.py\",\"size\":0}", "ERROR");
-    is_error("unsupported_native_firmware_ota");
     request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
     assert(strstr(output, "native_experimental") && strstr(output, "preset_navigation"));
     int modes = bosun_json_get(&reply, 0, "reboot_modes");

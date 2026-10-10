@@ -3,17 +3,13 @@
   Bump the project version everywhere it needs to match, in one call.
 
 .DESCRIPTION
-  Bosun keeps native C firmware and editor on the same semver. CircuitPython
-  firmware is retired: its source version and bundled recovery copies remain
-  frozen independently of the new release. Existing packaging still needs the
-  legacy resource trees, so the verified resource sync is retained.
+  Bosun keeps the native C firmware and the editor on the same semver.
 
   This script:
     1. Aligns the editor and native firmware version fields,
        including the npm/Cargo lockfiles and RP2040 program metadata.
-    2. Runs the same verified firmware-resource sync used by every package
-       build (exact firmware mirror plus additive vendored-library tree).
-    3. Prints a diff-style summary so you can eyeball what moved.
+    2. Advances the tracked Android versionCode.
+    3. Prints each file it changed so you can eyeball what moved.
 
   Does NOT build or push anything - run package:portable / build-android.ps1
   / the firmware install flow yourself afterward, whichever platform(s)
@@ -36,13 +32,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-NativeTool {
-    param([scriptblock]$Command)
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try { & $Command } finally { $ErrorActionPreference = $previous }
-}
-
 if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version must be plain X.Y.Z (got '$Version'). No leading 'v', no -rc/-scaffold suffix."
 }
@@ -51,9 +40,6 @@ $repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $native     = Join-Path $repoRoot "firmware-native"
 $editor     = Join-Path $repoRoot "editor"
 $tauriDir   = Join-Path $editor "src-tauri"
-$resources  = Join-Path $tauriDir "resources"
-$syncScript = Join-Path $PSScriptRoot "sync_firmware_resources.py"
-$pythonExe  = (Get-Command python -ErrorAction Stop).Source
 
 # ---------- 1. Align canonical firmware/editor versions and lockfiles ----------
 
@@ -64,7 +50,7 @@ function Set-VersionLine {
     # Check the pattern actually matched BEFORE replacing - comparing
     # before/after content would false-positive as "not found" whenever the
     # new version happens to equal the old one (e.g. re-running the same
-    # version to verify the sync, as this script's own smoke test does).
+    # version, as this script's own smoke test does).
     if ($content -notmatch $Pattern) {
         throw "Version pattern not found in $Path - refusing to write (would silently no-op)."
     }
@@ -76,7 +62,7 @@ function Set-VersionLine {
     Write-Host "[ok  ] $Path" -ForegroundColor Green
 }
 
-Write-Host "[1/3] Writing version $Version into maintained native/editor version fields" -ForegroundColor Yellow
+Write-Host "Writing version $Version into the native and editor version fields" -ForegroundColor Yellow
 
 Set-VersionLine `
     -Path (Join-Path $editor "package.json") `
@@ -187,18 +173,6 @@ if (Test-Path $tauriPropsPath) {
 } else {
     Write-Host "      -> local $tauriPropsPath not found yet (Android project not generated) - fine, CI/build-android.ps1 will pick up the tracked file" -ForegroundColor DarkYellow
 }
-
-# ---------- 2. Verified resource sync ----------
-
-Write-Host "`n[2/3] Verifying frozen legacy firmware resources without changing their version" -ForegroundColor Yellow
-Invoke-NativeTool { & $pythonExe $syncScript --repo-root $repoRoot }
-if ($LASTEXITCODE -ne 0) {
-    throw "Firmware resource sync failed"
-}
-
-# ---------- 3. Completion ----------
-
-Write-Host "`n[3/3] Resource hashes verified by the shared sync helper" -ForegroundColor Yellow
 
 Write-Host "`nVersion bump complete: $Version" -ForegroundColor Green
 Write-Host "Next: run the build(s) that actually need it -" -ForegroundColor Cyan

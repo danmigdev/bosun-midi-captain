@@ -2,7 +2,7 @@
 """Stress / smoke runner for the MIDI Captain firmware.
 
 Talks to the firmware over the secondary USB CDC port (where the JSON protocol
-lives - NOT the REPL console). Pick that COM port with --port.
+lives - NOT the console port). Pick that COM port with --port.
 
 Modes
 -----

@@ -229,7 +229,7 @@ def connect(args, observations):
     if args.serial:
         import serial
         # No reset, console control characters, input-buffer purge or bootloader
-        # magic. Select the data CDC, not the CircuitPython REPL CDC.
+        # magic. Select the data CDC, not the console CDC.
         port = serial.Serial(args.serial, 115200, timeout=0.05,
                              write_timeout=args.timeout, exclusive=True)
         client = Client(port, True, observations)

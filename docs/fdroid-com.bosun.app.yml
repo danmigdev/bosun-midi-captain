@@ -30,11 +30,6 @@ Builds:
     output: app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
     prebuild:
       - cd ../../../..
-      - mkdir -p editor/src-tauri/resources/lib
-      - curl -fL -o editor/src-tauri/resources/circuitpython.uf2 
-        https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.2.7.uf2
-      - python3 tools/provision_adafruit_bundle.py --destination editor/src-tauri/resources/lib
-      - python3 tools/sync_firmware_resources.py --repo-root .
       - sed -i -e 's/"versionCode":[[:space:]]*[0-9]*/"versionCode":$$VERCODE$$/'
         editor/src-tauri/tauri.conf.json
     scandelete:

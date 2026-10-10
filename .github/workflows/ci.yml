@@ -1,7 +1,5 @@
-# Continuous integration for the maintained editor, hub and Android app.
-# Native firmware builds and differential tests run in native.yml. The retired
-# CircuitPython runtime is frozen; legacy installation/recovery assets remain
-# required by existing bundle paths and are not rebuilt as a new firmware.
+# Continuous integration for the editor, hub and Android app.
+# Native firmware builds and tests run in native.yml.
 name: CI
 
 on:
@@ -72,10 +70,8 @@ jobs:
             librsvg2-dev libasound2-dev libudev-dev pkg-config
       - name: Prepare build-script inputs
         run: |
-          mkdir -p editor/dist editor/src-tauri/resources/lib
+          mkdir -p editor/dist
           printf '<!doctype html>\n' > editor/dist/index.html
-          : > editor/src-tauri/resources/circuitpython.uf2
-          python tools/sync_firmware_resources.py --repo-root .
       - name: Run Rust backend tests
         working-directory: editor/src-tauri
         run: cargo test --locked
@@ -90,11 +86,9 @@ jobs:
           python-version: "3.12"
       - name: Require PowerShell for version-bump smoke tests
         run: command -v pwsh
-      - name: Verify release identities and retained packaging paths
+      - name: Verify release identities and packaging checks
         run: |
           python tools/verify_release_version_test.py
-          python tools/sync_firmware_resources_test.py
-          python tools/provision_adafruit_bundle_test.py
           python tools/verify_firmware_package_test.py
 
   hub:
@@ -114,9 +108,6 @@ jobs:
       - name: Hub deploy helper offline safety and health-mock test
         shell: pwsh
         run: ./tools/rpi-hub/tests/test_deploy_hub.ps1
-      - name: Captain deploy helper offline bootstrap and recovery test
-        shell: pwsh
-        run: ./tools/rpi-hub/tests/test_deploy_captain.ps1
 
   android-unit:
     name: Android native unit tests and lint
@@ -156,10 +147,8 @@ jobs:
         # generate the ignored Gradle dependency paths and Wry/Tauri Kotlin
         # sources that a clean checkout needs before Gradle can configure.
         run: |
-          mkdir -p ../dist resources/lib
+          mkdir -p ../dist
           printf '<!doctype html>\n' > ../dist/index.html
-          : > resources/circuitpython.uf2
-          python ../../tools/sync_firmware_resources.py --repo-root ../..
           export TAURI_ANDROID_PROJECT_PATH="$PWD/gen/android"
           export TAURI_ANDROID_PACKAGE_UNESCAPED=com.bosun.app
           export WRY_ANDROID_PACKAGE=com.bosun.app

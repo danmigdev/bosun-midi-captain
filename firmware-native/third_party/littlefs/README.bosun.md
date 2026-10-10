@@ -17,6 +17,6 @@ Build all consumers with the same `LFS_NO_MALLOC`, `LFS_NAME_MAX=63`, and
 `LFS_FILE_MAX=262144` definitions. Bosun supplies all buffers, including the
 per-file cache required by `lfs_file_opencfg`. Logging is disabled by
 `LFS_NO_DEBUG`, `LFS_NO_WARN`, and `LFS_NO_ERROR` so diagnostics cannot enter
-the JSON protocol stream. Disk format is littlefs 2.1, not CircuitPython FAT.
-Mount failure never invokes format. Migration must be an explicit separate
-backup/format/restore workflow; this backend does not perform migration.
+the JSON protocol stream. Disk format is littlefs 2.1, never the FAT volume the
+factory firmware uses. Mount failure never invokes format; the first install
+writes an empty littlefs volume explicitly.

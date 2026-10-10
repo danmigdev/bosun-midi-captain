@@ -1,4 +1,4 @@
-"""Build native plugins from shared schemas and small model overrides.
+"""Build the native manifest from firmware-native/schemas and the Kemper models.
 
 The same resolved model definitions generate the editor manifest and C runtime
 capabilities. Existing Player message IDs and device.kemper settings stay valid.
@@ -7,22 +7,16 @@ import argparse
 from copy import deepcopy
 import json
 import re
-import sys
 from pathlib import Path
 
 
+def load_schema(root, name):
+    return json.loads((root / "firmware-native/schemas" / f"{name}.json").read_text(encoding="utf-8"))
+
+
 def manifest_values(root):
-    sys.path.insert(0, str(root / "tools"))
-    from build_manifest_tail import load_manifest_values
-    core, plugins = load_manifest_values(root)
-    # Native-only extensions; CircuitPython remains frozen.
-    core["captain_patch"]["params"]["bank"]["max"] = 125
-    looper = plugins["kemper_player"]["messages"]["kemper_looper"]
-    looper["params"]["action"]["values"] = list(looper["params"]["action"]["values"]) + ["cancel_overdub", "erase"]
-    looper["params"]["state"] = {
-        "type": "enum", "values": ["tap", "press", "release"], "default": "tap", "label": "Button action"
-    }
-    looper["summary"] = "Looper {action} {state}"
+    core = load_schema(root, "core")
+    plugins = {name: load_schema(root, name) for name in ("generic_midi", "kemper_player")}
     runtime = (root / "firmware-native/src/runtime.c").read_text(encoding="utf-8")
     supported = set(re.findall(r'"([a-z_]+)"', runtime.split("supported[] = {", 1)[1].split("};", 1)[0]))
     selected = {"generic_midi": plugins["generic_midi"]}

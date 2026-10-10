@@ -1,0 +1,440 @@
+{
+  "label": "Kemper Player",
+  "version": "1.0",
+  "messages": {
+    "kemper_rig": {
+      "label": "Select Rig",
+      "params": {
+        "bank": {
+          "type": "int",
+          "min": 1,
+          "max": 25,
+          "default": 1,
+          "label": "Bank (1-25)"
+        },
+        "rig": {
+          "type": "int",
+          "min": 1,
+          "max": 5,
+          "default": 1,
+          "label": "Rig in bank (1-5)"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Rig {bank}-{rig}"
+    },
+    "kemper_step_rig": {
+      "label": "Step Rig",
+      "params": {
+        "direction": {
+          "type": "enum",
+          "values": [
+            "next",
+            "prev"
+          ],
+          "default": "next",
+          "label": "Direction"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Step rig {direction}"
+    },
+    "kemper_effect_toggle": {
+      "label": "Effect Slot On/Off",
+      "params": {
+        "slot": {
+          "type": "enum",
+          "values": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "X",
+            "Mod",
+            "Delay",
+            "Reverb"
+          ],
+          "default": "A",
+          "label": "Slot"
+        },
+        "value": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "on",
+          "label": "Value"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Slot {slot} {value}"
+    },
+    "kemper_fixed_toggle": {
+      "label": "Fixed Block On/Off",
+      "params": {
+        "effect": {
+          "type": "enum",
+          "values": [
+            "Compressor",
+            "Noise Gate",
+            "Pure Booster",
+            "Wah",
+            "Transpose"
+          ],
+          "default": "Compressor",
+          "label": "Fixed effect"
+        },
+        "value": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "on",
+          "label": "Value"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Fixed {effect} {value}"
+    },
+    "kemper_tuner": {
+      "label": "Tuner",
+      "params": {
+        "state": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "on",
+          "label": "State"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Tuner {state}"
+    },
+    "kemper_tap_tempo": {
+      "label": "Tap Tempo",
+      "params": {
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Tap"
+    },
+    "kemper_set_tempo": {
+      "label": "Set BPM",
+      "params": {
+        "bpm": {
+          "type": "int",
+          "min": 40,
+          "max": 250,
+          "default": 120,
+          "label": "BPM"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "BPM {bpm}"
+    },
+    "kemper_morph": {
+      "label": "Set Morph Position",
+      "params": {
+        "value": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 64,
+          "label": "Value"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Morph {value}"
+    },
+    "kemper_morph_trigger": {
+      "label": "Morph Button (press/release)",
+      "params": {
+        "state": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "on",
+          "label": "State"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Morph {state}"
+    },
+    "kemper_wah": {
+      "label": "Wah Pedal",
+      "params": {
+        "value": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 64,
+          "label": "Value"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Wah {value}"
+    },
+    "kemper_volume": {
+      "label": "Volume Pedal",
+      "params": {
+        "value": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 100,
+          "label": "Value"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Volume {value}"
+    },
+    "kemper_looper": {
+      "label": "Looper",
+      "params": {
+        "action": {
+          "type": "enum",
+          "values": [
+            "rec_play",
+            "stop_erase",
+            "trigger",
+            "reverse",
+            "half_speed",
+            "cancel_overdub",
+            "erase"
+          ],
+          "default": "rec_play",
+          "label": "Action"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        },
+        "state": {
+          "type": "enum",
+          "values": [
+            "tap",
+            "press",
+            "release"
+          ],
+          "default": "tap",
+          "label": "Button action"
+        }
+      },
+      "summary": "Looper {action} {state}"
+    },
+    "kemper_rotary": {
+      "label": "Rotary Speed",
+      "params": {
+        "value": {
+          "type": "enum",
+          "values": [
+            "slow",
+            "fast"
+          ],
+          "default": "slow",
+          "label": "Speed"
+        },
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        }
+      },
+      "summary": "Rotary {value}"
+    },
+    "kemper_query_state": {
+      "label": "Query block on/off state",
+      "params": {
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel (ignored - SYSEX is global)"
+        }
+      },
+      "summary": "Query block states"
+    }
+  },
+  "default_layout": [
+    {
+      "field": "patch_name",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 0,
+      "size": 5,
+      "color": "#ffffff",
+      "font": "system",
+      "scroll": true
+    },
+    {
+      "field": "bank",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 60,
+      "size": 5,
+      "color": "#9aa1ad",
+      "font": "system",
+      "prefix": "BANK ",
+      "suffix": ""
+    },
+    {
+      "field": "kemper_rig",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 120,
+      "size": 5,
+      "color": "#6fd99b",
+      "font": "system",
+      "prefix": "RIG ",
+      "suffix": ""
+    },
+    {
+      "field": "expression_mode",
+      "halign": "right",
+      "valign": "bottom",
+      "x": -6,
+      "y": -6,
+      "size": 2,
+      "color": "#ffffff",
+      "font": "system"
+    }
+  ],
+  "tft_fields": {
+    "kemper_morph": {
+      "label": "Morph last commanded position (native)",
+      "sample": "SET 65%"
+    },
+    "expression_mode": {
+      "label": "Expression pedal mode (VOL/WAH)",
+      "sample": "VOL"
+    },
+    "kemper_rig": {
+      "label": "Current Kemper rig (1-125)",
+      "sample": 23
+    },
+    "kemper_bank": {
+      "label": "Kemper bank (1-25)",
+      "sample": 5
+    },
+    "kemper_rig_in_bank": {
+      "label": "Rig within bank (1-5)",
+      "sample": 3
+    },
+    "kemper_rig_name": {
+      "label": "Rig name (live from Kemper)",
+      "sample": "BRITISH PLEXI"
+    },
+    "kemper_bpm": {
+      "label": "Tempo (BPM)",
+      "sample": 120
+    },
+    "kemper_tuner": {
+      "label": "Tuner state (on/off)",
+      "sample": "off"
+    },
+    "kemper_tuner_note": {
+      "label": "Tuner note (C/Db/D/.../B)",
+      "sample": "A"
+    },
+    "kemper_tuner_deviance": {
+      "label": "Tuner deviance (0..16383, 8192=in tune)",
+      "sample": 8192
+    },
+    "kemper_connected": {
+      "label": "Bidirectional link state (on/off)",
+      "sample": "on"
+    }
+  },
+  "config_schema": {
+    "key": "kemper",
+    "label": "Kemper Player target",
+    "fields": {
+      "debug": {
+        "type": "bool",
+        "default": false,
+        "hidden": true,
+        "label": "debug: trace received SYSEX to console"
+      }
+    }
+  }
+}

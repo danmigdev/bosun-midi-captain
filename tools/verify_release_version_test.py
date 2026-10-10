@@ -4,7 +4,10 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
+import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -31,9 +34,6 @@ class ReleaseVersionTests(unittest.TestCase):
             destination = self.root / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(contents, encoding="utf-8")
-        self.archived_cp = self.root / "firmware/lib/captain/__init__.py"
-        self.archived_cp.parent.mkdir(parents=True)
-        self.archived_cp.write_text('VERSION = "0.6.5"\n', encoding="utf-8")
 
     def package(self, *, release="1.2.3", firmware_version="1.2.3-native", embedded=b"1.2.3-native\0"):
         binary = bytearray()
@@ -79,15 +79,13 @@ class ReleaseVersionTests(unittest.TestCase):
                     gate.verify(self.root)
                 path.write_text(original, encoding="utf-8")
 
-    def test_editor_native_and_package_advance_without_reversioning_archived_cp(self):
-        archived = self.archived_cp.read_bytes()
+    def test_editor_native_and_package_advance_together(self):
         for relative, original in self.sources.items():
             (self.root / relative).write_text(original.replace("1.2.3", "1.2.4"), encoding="utf-8")
         package = self.package(release="1.2.4", firmware_version="1.2.4-native", embedded=b"1.2.4-native\0")
         self.assertEqual(gate.verify(self.root, tag="v1.2.4", package=package),
                          {"release": "1.2.4", "firmware_version": "1.2.4-native", "prerelease": "false"})
-        self.assertEqual(self.archived_cp.read_bytes(), archived)
-        # Retirement must not weaken validation of the firmware actually shipped.
+        # A package built for the previous release must still be rejected.
         old_package = self.package()
         with self.assertRaises(ValueError):
             gate.verify(self.root, tag="v1.2.4", package=old_package)
@@ -109,6 +107,82 @@ class ReleaseVersionTests(unittest.TestCase):
                         {"embedded": b"1.2.3-native\0and 1.2.2-native\0"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 gate.verify(self.root, package=self.package(**changes))
+
+
+@unittest.skipUnless(shutil.which("powershell.exe") or shutil.which("pwsh"), "PowerShell is unavailable")
+class BumpVersionSmokeTests(unittest.TestCase):
+    """Run the real release helper only inside a disposable fake checkout."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="bosun-version-fixture-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        fixtures = {
+            "editor/package.json": '{"name": "bosun-editor", "version": "1.2.3", "dependencies": {"keep": "4.5.6"}}\n',
+            "editor/package-lock.json": '{\n"name": "bosun-editor",\n"version": "1.2.3",\n"packages": {"": {\n"name": "bosun-editor",\n"version": "1.2.3"\n}}}\n',
+            "editor/src-tauri/tauri.conf.json": '{"version": "1.2.3"}\n',
+            "editor/src-tauri/Cargo.toml": '[package]\nname = "bosun-editor"\nversion = "1.2.3"\n[dependencies]\nkeep = { version = "4.5.6" }\n',
+            "editor/src-tauri/Cargo.lock": '[[package]]\nname = "bosun-editor"\nversion = "1.2.3"\n[[package]]\nname = "keep"\nversion = "4.5.6"\n',
+            "editor/src-tauri/android-version-code.txt": '31',
+            "firmware-native/CMakeLists.txt": 'cmake_minimum_required(VERSION 3.20)\nif(BOSUN_PLATFORM STREQUAL "rp2040")\n    project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nelse()\n    project(BosunNative VERSION 1.2.3 LANGUAGES C)\nendif()\n',
+            "firmware-native/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native-experimental"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
+            "firmware-native/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun Native MIDI Captain")\n    pico_set_program_version(${target} "1.2.3-native-experimental")\n',
+        }
+        for name, contents in fixtures.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
+        (self.root / "tools").mkdir()
+        shutil.copyfile(Path(__file__).with_name("bump-version.ps1"), self.root / "tools/bump-version.ps1")
+
+    def run_bump(self, version):
+        return subprocess.run(
+            [shutil.which("powershell.exe") or shutil.which("pwsh"), "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(self.root / "tools/bump-version.ps1"), version],
+            cwd=self.root, capture_output=True, text=True, timeout=30,
+        )
+
+    def assert_versions(self, version):
+        native = (self.root / "firmware-native/CMakeLists.txt").read_text()
+        self.assertEqual(re.findall(r"project\(BosunNative VERSION (\d+\.\d+\.\d+) LANGUAGES", native), [version, version])
+        self.assertIn("cmake_minimum_required(VERSION 3.20)", native)
+        self.assertIn(f'#define BOSUN_NATIVE_VERSION "{version}-native"',
+                      (self.root / "firmware-native/include/bosun/protocol.h").read_text())
+        self.assertIn(f'pico_set_program_version(${{target}} "{version}-native")',
+                      (self.root / "firmware-native/platform/rp2040/CMakeLists.txt").read_text())
+        for name in ("editor/package.json", "editor/src-tauri/tauri.conf.json"):
+            self.assertEqual(json.loads((self.root / name).read_text())["version"], version)
+        lock = json.loads((self.root / "editor/package-lock.json").read_text())
+        self.assertEqual(lock["version"], version)
+        self.assertEqual(lock["packages"][""]["version"], version)
+        self.assertEqual(json.loads((self.root / "editor/package.json").read_text())["dependencies"]["keep"], "4.5.6")
+        cargo = (self.root / "editor/src-tauri/Cargo.toml").read_text()
+        self.assertIn(f'version = "{version}"', cargo)
+        self.assertIn('keep = { version = "4.5.6" }', cargo)
+        cargo_lock = (self.root / "editor/src-tauri/Cargo.lock").read_text()
+        self.assertIn(f'name = "bosun-editor"\nversion = "{version}"', cargo_lock)
+        self.assertIn('name = "keep"\nversion = "4.5.6"', cargo_lock)
+
+    def test_bump_advances_native_editor_and_android_version_code(self):
+        result = self.run_bump("9.8.7")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_versions("9.8.7")
+        self.assertEqual((self.root / "editor/src-tauri/android-version-code.txt").read_text(), "32")
+
+    def test_repeating_the_same_version_remains_valid(self):
+        for _ in range(2):
+            result = self.run_bump("1.2.3")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assert_versions("1.2.3")
+
+    def test_missing_one_native_platform_version_cannot_silently_succeed(self):
+        path = self.root / "firmware-native/CMakeLists.txt"
+        contents = path.read_text().replace("    project(BosunNative VERSION 1.2.3 LANGUAGES C)\n", "")
+        path.write_text(contents)
+        result = self.run_bump("9.8.7")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Expected 2 version fields", result.stdout + result.stderr)
+        self.assertEqual(path.read_text(), contents)
 
 
 if __name__ == "__main__":

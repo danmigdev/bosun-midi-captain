@@ -23,8 +23,8 @@
 #include "tusb.h"
 #include "ws2812.pio.h"
 
-/* Verified against firmware/lib/captain/board.py. Never use Pico's on-board
- * LED helpers: GP25 is switch 2 on the Captain. */
+/* MIDI Captain pin assignments. Never use Pico's on-board LED helpers: GP25
+ * is switch 2 on the Captain. */
 enum { LED_PIN = 7, TFT_PWM = 8, TFT_DC = 12, TFT_CS = 13,
        TFT_SCK = 14, TFT_MOSI = 15, MIDI_TX = 16, MIDI_RX = 17,
        EXP1 = 27, EXP2 = 28, UART_RX_SIZE = 2048 };
@@ -112,9 +112,9 @@ static void display_command(uint8_t command, const uint8_t *data, size_t length)
 
 bool bosun_board_display_rotation(uint16_t degrees) {
     if (!display_ready || degrees > 270 || degrees % 90) return false;
-    /* ST7789 has 240x320 RAM and an 80-row crop. The MX/MY base orientation
-     * matches Adafruit's CircuitPython ST7789 (MADCTL C0, rowstart 80), then
-     * adjusts the crop when rotating the controller's addressing axes. */
+    /* ST7789 has 240x320 RAM and an 80-row crop. The base orientation is
+     * MX/MY (MADCTL C0) with the 80-row offset; the other rotations move the
+     * crop when they swap the controller's addressing axes. */
     static const uint8_t madctl[] = {0xc0, 0xa0, 0x00, 0x60};
     unsigned rotation = degrees / 90;
     display_col_offset = rotation == 1 ? 80 : 0;

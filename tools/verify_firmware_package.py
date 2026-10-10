@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Verify packaged Bosun firmware resources byte-for-byte.
+"""Verify packaged Bosun resources byte-for-byte.
 
-The canonical packaging input is ``editor/src-tauri/resources`` after
-``sync_firmware_resources.py`` has run.  Android additionally needs those
-files copied into its generated ``assets`` directory.  This checker compares
-the complete firmware/lib inventories, optional native ``update`` tree and
-``circuitpython.uf2`` against
-either that directory or a finished ZIP-compatible artifact such as an APK.
-Unrelated Android assets (the frontend and tauri.conf.json) are ignored.
+The canonical packaging input is ``editor/src-tauri/resources``: the native
+update package (``update``), the first-install assets (``installer``) and the
+Raspberry Pi setup package (``pi``). This checker compares those trees against
+either a staged directory or a finished ZIP-compatible artifact such as the
+portable ZIP. Unrelated entries (the executable, README, licences) are ignored.
 """
 
 from __future__ import annotations
@@ -25,13 +23,7 @@ class VerificationError(RuntimeError):
     """The packaged resource inventory is missing, stale, or unsafe."""
 
 
-RESOURCE_FILE = "circuitpython.uf2"
-RESOURCE_TREES = ("firmware", "lib")
-OPTIONAL_RESOURCE_TREES = ("update", "installer", "pi")
-# Git/checkouts can give adjacent tracked files slightly different mtimes.
-# Treat only a clearly newer source as evidence that its deploy-preferred
-# compiled sibling was not regenerated.
-COMPILED_STALE_TOLERANCE_NS = 5_000_000_000
+RESOURCE_TREES = ("update", "installer", "pi")
 
 
 def _sha256_stream(stream) -> str:
@@ -70,14 +62,12 @@ def _directory_inventory(root: Path) -> dict[str, str]:
         except OSError as exc:
             raise VerificationError(f"cannot read packaged resource {path}: {exc}") from exc
 
-    single = root / RESOURCE_FILE
-    add_file(single, PurePosixPath(RESOURCE_FILE))
-    for tree_name in RESOURCE_TREES + OPTIONAL_RESOURCE_TREES:
+    for tree_name in RESOURCE_TREES:
         tree = root / tree_name
-        if tree_name in OPTIONAL_RESOURCE_TREES and not tree.exists() and not _is_link(tree):
+        if not tree.exists() and not _is_link(tree):
             continue
         if not tree.is_dir() or _is_link(tree):
-            raise VerificationError(f"packaged resource tree is missing or unsafe: {tree}")
+            raise VerificationError(f"packaged resource tree is unsafe: {tree}")
         for directory, dirnames, filenames in os.walk(tree, followlinks=False):
             base = Path(directory)
             for dirname in dirnames:
@@ -149,17 +139,10 @@ def _archive_inventory(archive: Path, prefix: str) -> dict[str, str]:
                 ):
                     continue
                 relative_parts = logical.parts[len(prefix_parts):]
-                if not relative_parts:
-                    continue
-                relative = PurePosixPath(*relative_parts)
-                in_scope = (
-                    relative.as_posix() == RESOURCE_FILE
-                    or relative.parts[0] in RESOURCE_TREES + OPTIONAL_RESOURCE_TREES
-                )
-                if not in_scope:
+                if not relative_parts or relative_parts[0] not in RESOURCE_TREES:
                     continue
                 with package.open(info, "r") as stream:
-                    inventory[relative.as_posix()] = _sha256_stream(stream)
+                    inventory[PurePosixPath(*relative_parts).as_posix()] = _sha256_stream(stream)
     except (OSError, zipfile.BadZipFile) as exc:
         raise VerificationError(f"cannot read package archive {archive}: {exc}") from exc
     return inventory
@@ -181,58 +164,27 @@ def _compare(expected: dict[str, str], actual: dict[str, str]) -> None:
         details.append("unexpected: " + ", ".join(extra))
     if different:
         details.append("hash mismatch: " + ", ".join(different))
-    raise VerificationError("packaged firmware differs from resources; " + "; ".join(details))
+    raise VerificationError("packaged resources differ from the source; " + "; ".join(details))
 
 
-def _validate_compiled_siblings(resources: Path) -> None:
-    """Fail when a production source plainly postdates its preferred .mpy.
-
-    The installer intentionally omits a ``.py`` whenever the sibling ``.mpy``
-    exists.  Hash equality cannot relate source to bytecode without the pinned
-    compiler, but this catches the common local failure mode immediately and
-    leaves exact compiler verification to ``build_firmware_mpy.py --check``.
-    """
-
-    firmware_lib = resources / "firmware" / "lib"
-    for package_name in ("captain", "plugins"):
-        package = firmware_lib / package_name
-        if not package.is_dir() or _is_link(package):
-            raise VerificationError(
-                f"production firmware package is missing or unsafe: {package}"
-            )
-        for source in package.rglob("*.py"):
-            if source.name == "__init__.py":
-                continue
-            compiled = source.with_suffix(".mpy")
-            if not compiled.is_file() or _is_link(compiled):
-                raise VerificationError(
-                    f"compiled sibling is missing or unsafe: {compiled}"
-                )
-            try:
-                source_mtime = source.stat().st_mtime_ns
-                compiled_mtime = compiled.stat().st_mtime_ns
-            except OSError as exc:
-                raise VerificationError(
-                    f"cannot inspect compiled sibling freshness for {source}: {exc}"
-                ) from exc
-            if source_mtime > compiled_mtime + COMPILED_STALE_TOLERANCE_NS:
-                raise VerificationError(
-                    f"compiled sibling is visibly stale: {compiled} is older than {source}; "
-                    "rebuild with the pinned CircuitPython mpy-cross compiler"
-                )
+def _expected_inventory(resources: Path) -> dict[str, str]:
+    expected = _directory_inventory(resources)
+    if not expected:
+        raise VerificationError(
+            f"no update, installer or pi resources to verify in {resources}"
+        )
+    return expected
 
 
 def verify_directory(resources: Path, packaged_root: Path) -> int:
-    _validate_compiled_siblings(resources)
-    expected = _directory_inventory(resources)
+    expected = _expected_inventory(resources)
     actual = _directory_inventory(packaged_root)
     _compare(expected, actual)
     return len(expected)
 
 
 def verify_archive(resources: Path, archive: Path, prefix: str) -> int:
-    _validate_compiled_siblings(resources)
-    expected = _directory_inventory(resources)
+    expected = _expected_inventory(resources)
     actual = _archive_inventory(archive, prefix)
     _compare(expected, actual)
     return len(expected)
@@ -246,7 +198,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     target.add_argument("--archive", type=Path)
     parser.add_argument(
         "--prefix", default="",
-        help="archive path containing circuitpython.uf2, firmware, lib and optional update",
+        help="archive path that contains the update, installer and pi folders",
     )
     return parser.parse_args(argv)
 
@@ -261,9 +213,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             count = verify_archive(args.resources, args.archive, args.prefix)
     except (OSError, VerificationError) as exc:
-        print(f"firmware package verification failed: {exc}", file=sys.stderr)
+        print(f"resource package verification failed: {exc}", file=sys.stderr)
         return 1
-    print(f"[ok  ] packaged firmware inventory and SHA-256 verified ({count} files)")
+    print(f"[ok  ] packaged resource inventory and SHA-256 verified ({count} files)")
     return 0
 
 

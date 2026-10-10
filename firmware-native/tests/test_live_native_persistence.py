@@ -263,7 +263,7 @@ class NativePersistenceTests(unittest.TestCase):
         self.assertFalse(persistence.retryable_read_busy("GET_DEVICE_INFO", RuntimeError(
             "GET_DEVICE_INFO: {'type': 'ERROR', 'error': 'background_busy', 'of': 'GET_DEVICE_INFO'}")))
 
-    def test_circuitpython_identity_blocks_all_mutations(self):
+    def test_non_native_identity_blocks_all_mutations(self):
         device = Device(self.snapshot)
         device.native = False
         result = self.run_device(device, "--exercise-writes")

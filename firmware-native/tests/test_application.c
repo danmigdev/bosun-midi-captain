@@ -343,7 +343,7 @@ static void test_hold_label_matches_context(void) {
     assert(bosun_runtime_context(&app.runtime, &writer));
     assert(strstr(context, "\"hold_effect\":\"\""));
     /* Holding an already-on effect temporarily switches it off: the LED
-     * must stay dim while held and restore on release, as CircuitPython does. */
+     * must stay dim while held and restore on release. */
     app.runtime.switches[4].latched_on = true;
     switches = 1u << 4;
     while (now < 1200) tick();

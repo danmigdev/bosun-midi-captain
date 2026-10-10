@@ -1,0 +1,122 @@
+{
+  "label": "Generic MIDI",
+  "version": "1.0",
+  "messages": {
+    "program_change_bank": {
+      "label": "Program Change with Bank",
+      "params": {
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        },
+        "msb": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 0,
+          "label": "Bank MSB (CC0)"
+        },
+        "lsb": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 0,
+          "label": "Bank LSB (CC32)"
+        },
+        "program": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 0,
+          "label": "Program"
+        }
+      },
+      "summary": "PC {program} bank {msb}/{lsb} ch {channel}"
+    },
+    "cc_toggle": {
+      "label": "CC Toggle (latched)",
+      "params": {
+        "channel": {
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1,
+          "label": "Channel"
+        },
+        "cc": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 0,
+          "label": "CC #"
+        },
+        "on_value": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 127,
+          "label": "On value"
+        },
+        "off_value": {
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 0,
+          "label": "Off value"
+        },
+        "state": {
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "default": "on",
+          "label": "State"
+        }
+      },
+      "summary": "CC {cc} {state} ch {channel}"
+    }
+  },
+  "default_layout": [
+    {
+      "field": "patch_name",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 0,
+      "size": 5,
+      "color": "#ffffff",
+      "font": "system",
+      "scroll": true
+    },
+    {
+      "field": "bank",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 60,
+      "size": 5,
+      "color": "#9aa1ad",
+      "font": "system",
+      "prefix": "BANK ",
+      "suffix": ""
+    },
+    {
+      "field": "slot",
+      "halign": "left",
+      "valign": "top",
+      "x": 0,
+      "y": 120,
+      "size": 5,
+      "color": "#6fd99b",
+      "font": "system",
+      "prefix": "SLOT ",
+      "suffix": ""
+    }
+  ],
+  "tft_fields": {},
+  "config_schema": null
+}

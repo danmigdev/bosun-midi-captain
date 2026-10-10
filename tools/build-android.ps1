@@ -57,24 +57,14 @@ $projectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $editorDir  = Join-Path $projectRoot "editor"
 $tauriDir   = Join-Path $editorDir "src-tauri"
 $genDir     = Join-Path $tauriDir "gen\android"
-$resources  = Join-Path $tauriDir "resources"
 $soSource   = Join-Path $tauriDir "target\aarch64-linux-android\release\libbosun_editor_lib.so"
 $soDestDir  = Join-Path $genDir "app\src\main\jniLibs\arm64-v8a"
 $soDest     = Join-Path $soDestDir "libbosun_editor_lib.so"
-$resourceDigestDir = Join-Path $tauriDir "target\bosun-resource-sync"
-$resourceDigestBefore = Join-Path $resourceDigestDir "android-before.sha256"
-$resourceDigestAfter  = Join-Path $resourceDigestDir "android-after.sha256"
-$resourceDigestFinal  = Join-Path $resourceDigestDir "android-final.sha256"
-$resourceBuildStamp   = "$soSource.resources.sha256"
-$resourceSyncScript   = Join-Path $projectRoot "tools\sync_firmware_resources.py"
-$resourceVerifyScript = Join-Path $projectRoot "tools\verify_firmware_package.py"
-$vendorVerifyScript   = Join-Path $projectRoot "tools\provision_adafruit_bundle.py"
 
 $apkUnsigned = Join-Path $genDir "app\build\outputs\apk\arm64\release\app-arm64-release-unsigned.apk"
 $apkOut      = Join-Path $projectRoot "bosun-debug.apk"
 
 $cargoExe    = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
-$pythonExe   = (Get-Command python -ErrorAction Stop).Source
 $adbExe      = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
 if (-not (Test-Path $adbExe)) {
     $adbExe = "C:\development\Android\Sdk\platform-tools\adb.exe"
@@ -91,31 +81,6 @@ $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $ndkBin "aarch64-linu
 $env:PATH = "$(Split-Path $cargoExe);$env:PATH"
 
 Write-Host "=== Bosun Android Build ===" -ForegroundColor Cyan
-
-function Sync-FirmwareResources {
-    param([string]$DigestFile, [switch]$Check)
-    $syncArgs = @($resourceSyncScript, "--repo-root", $projectRoot, "--digest-file", $DigestFile)
-    if ($Check) { $syncArgs += "--check" }
-    Invoke-NativeTool { & $pythonExe @syncArgs }
-    if ($LASTEXITCODE -ne 0) { throw "Firmware resource sync failed" }
-}
-
-function Invoke-FirmwarePackageVerification {
-    param(
-        [string]$Directory,
-        [string]$Archive
-    )
-    $verifyArgs = @($resourceVerifyScript, "--resources", $resources)
-    if ($Directory) {
-        $verifyArgs += @("--directory", $Directory)
-    } elseif ($Archive) {
-        $verifyArgs += @("--archive", $Archive, "--prefix", "assets")
-    } else {
-        throw "Firmware package verification requires a directory or archive"
-    }
-    Invoke-NativeTool { & $pythonExe @verifyArgs }
-    if ($LASTEXITCODE -ne 0) { throw "Packaged firmware verification failed" }
-}
 
 function Assert-NoReparsePathComponents {
     param([string]$Root, [string]$Target)
@@ -151,11 +116,11 @@ function Assert-NoReparsePathComponents {
 }
 
 function Get-SafeAndroidAssetDestination {
-    param([ValidateSet("public", "firmware", "lib", "update", "circuitpython.uf2")][string]$Name)
+    param([ValidateSet("public")][string]$Name)
 
-    # Recursive removal is permitted only for these exact children of
-    # the generated Android assets directory.  Resolve lexically even before
-    # the destination exists, then reject junction/reparse-point escapes.
+    # Recursive removal is permitted only for this exact child of the
+    # generated Android assets directory.  Resolve lexically even before the
+    # destination exists, then reject junction/reparse-point escapes.
     $assetsFull = [IO.Path]::GetFullPath($androidAssets)
     $genFull = [IO.Path]::GetFullPath($genDir)
     $genPrefix = $genFull.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -185,22 +150,6 @@ function Get-SafeAndroidAssetDestination {
     return $destination
 }
 
-# Refresh and hash the canonical Tauri resources before any build/reuse
-# decision. Android packages them as generated APK assets (staged explicitly
-# below), not inside the Rust .so. The helper mirrors Bosun firmware, preserves
-# vendored CircuitPython libs, rejects links and verifies every copied byte.
-New-Item -ItemType Directory -Force -Path $resourceDigestDir | Out-Null
-Write-Host "[resources] Syncing canonical firmware resources ..." -ForegroundColor Yellow
-Sync-FirmwareResources -DigestFile $resourceDigestBefore
-Invoke-NativeTool { & $pythonExe $vendorVerifyScript --destination (Join-Path $resources "lib") --check }
-if ($LASTEXITCODE -ne 0) { throw "Pinned Adafruit vendor verification failed" }
-$resourceDigest = (Get-Content -LiteralPath $resourceDigestBefore -Raw).Trim()
-$nativePackage = Join-Path $resources "update\bosun-update.zip"
-if (Test-Path -LiteralPath $nativePackage -PathType Leaf) {
-    Invoke-NativeTool { & $pythonExe (Join-Path $projectRoot "tools\package-native-update.py") --verify $nativePackage }
-    if ($LASTEXITCODE -ne 0) { throw "Native update package validation failed" }
-}
-
 # ---------- 1. Frontend ----------
 if (-not $SkipFrontend) {
     Write-Host "[1/4] Building frontend (Vite) ..." -ForegroundColor Yellow
@@ -216,6 +165,8 @@ if (-not $SkipFrontend) {
 # Sync the fresh dist/ into the Android assets.  CRITICAL: wipe first -
 # stale hashed bundles survive otherwise and index.html keeps pointing
 # at them, so the WebView loads an old cached JS bundle (2026-08-13).
+# The Android app uses none of the desktop resources (update, installer, pi),
+# so the frontend is the only generated asset tree.
 $distDir = Join-Path $editorDir "dist"
 $androidAssets = Join-Path $genDir "app\src\main\assets"
 Assert-NoReparsePathComponents -Root $tauriDir -Target $androidAssets
@@ -232,40 +183,6 @@ if (Test-Path (Join-Path $distDir "index.html") -PathType Leaf) {
     throw "Missing frontend dist/index.html; refusing to package stale Android assets. Run without -SkipFrontend or build editor/dist first."
 }
 
-# Tauri resolves BaseDirectory::Resource from Android's APK assets. A direct
-# Cargo + Gradle build does not refresh these generated copies (unlike the
-# full `tauri android build` flow), so stale files can otherwise survive for
-# months even though editor/src-tauri/resources was correctly synchronized.
-Write-Host "[assets] Staging verified firmware resources ..." -ForegroundColor Yellow
-foreach ($tree in @("firmware", "lib")) {
-    $source = Join-Path $resources $tree
-    if (-not (Test-Path -LiteralPath $source -PathType Container)) {
-        throw "Missing firmware resource tree: $source"
-    }
-    $destination = Get-SafeAndroidAssetDestination -Name $tree
-    if (Test-Path -LiteralPath $destination) {
-        Remove-Item -Recurse -Force -LiteralPath $destination
-    }
-    Copy-Item -Recurse -Force -LiteralPath $source -Destination $destination
-}
-$uf2Source = Join-Path $resources "circuitpython.uf2"
-if (-not (Test-Path -LiteralPath $uf2Source -PathType Leaf)) {
-    throw "Missing CircuitPython resource: $uf2Source"
-}
-$uf2Destination = Get-SafeAndroidAssetDestination -Name "circuitpython.uf2"
-Copy-Item -Force -LiteralPath $uf2Source -Destination $uf2Destination
-# The native OTA package is optional in source builds. Always clear its old
-# generated tree too, so switching checkouts cannot retain an obsolete update.
-$nativeUpdateSource = Join-Path $resources "update"
-$nativeUpdateDestination = Get-SafeAndroidAssetDestination -Name "update"
-if (Test-Path -LiteralPath $nativeUpdateDestination) {
-    Remove-Item -Recurse -Force -LiteralPath $nativeUpdateDestination
-}
-if (Test-Path -LiteralPath $nativeUpdateSource) {
-    Copy-Item -Recurse -Force -LiteralPath $nativeUpdateSource -Destination $nativeUpdateDestination
-}
-Invoke-FirmwarePackageVerification -Directory $androidAssets
-
 # ---------- 2. Rust ----------
 if (-not $SkipRust) {
     Write-Host "[2/4] Compiling Rust (aarch64-linux-android) ..." -ForegroundColor Yellow
@@ -275,36 +192,13 @@ if (-not $SkipRust) {
         $distIndex = Join-Path $editorDir "dist\index.html"
         if (Test-Path $distIndex) { (Get-Item $distIndex).LastWriteTime = Get-Date }
 
-        # Keep the Rust build provenance tied to the resource digest too.
-        # Android reads these files from APK assets (staged and independently
-        # verified above), but a full build must not silently reuse outputs
-        # produced against a different synchronized resource generation.
-        (Get-Item (Join-Path $tauriDir "build.rs")).LastWriteTime = Get-Date
-
         Invoke-NativeTool { & $cargoExe build --release --target aarch64-linux-android }
         if ($LASTEXITCODE -ne 0) { throw "Cargo build failed" }
     } finally { Pop-Location }
-
-    # Record which synchronized resource generation accompanied this Rust
-    # build. This is only a conservative -SkipRust reuse gate; packaged-byte
-    # proof comes from the staging/APK verifier, never from the .so stamp.
-    Sync-FirmwareResources -DigestFile $resourceDigestAfter -Check
-    $resourceDigestAfterBuild = (Get-Content -LiteralPath $resourceDigestAfter -Raw).Trim()
-    if ($resourceDigestAfterBuild -ne $resourceDigest) {
-        throw "Firmware resources changed during the Rust build; refusing mixed build provenance. Re-run the build."
-    }
-    Copy-Item -Force -LiteralPath $resourceDigestAfter -Destination $resourceBuildStamp
 } else {
     Write-Host "[2/4] Skipping Rust build." -ForegroundColor DarkGray
-    if (-not (Test-Path -LiteralPath $soSource -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $resourceBuildStamp -PathType Leaf)) {
-        throw "-SkipRust requires a previously verified Android Rust build. Run once without -SkipRust."
-    }
-    Sync-FirmwareResources -DigestFile $resourceDigestAfter -Check
-    $resourceDigestAfterBuild = (Get-Content -LiteralPath $resourceDigestAfter -Raw).Trim()
-    $stampedDigest = (Get-Content -LiteralPath $resourceBuildStamp -Raw).Trim()
-    if ($resourceDigestAfterBuild -ne $resourceDigest -or $stampedDigest -ne $resourceDigest) {
-        throw "-SkipRust would reuse Rust output from a different firmware resource generation. Run without -SkipRust."
+    if (-not (Test-Path -LiteralPath $soSource -PathType Leaf)) {
+        throw "-SkipRust requires a previous Android Rust build. Run once without -SkipRust."
     }
 }
 
@@ -364,20 +258,6 @@ if (($apkBadging -join "`n") -notmatch "(?m)^package: name='$expectedPackage' ve
     throw "Packaged Android identity does not match $($tauriConfig.identifier) $androidVersionName (code $androidVersionCode)"
 }
 Write-Host "[version] Packaged Android identity verified." -ForegroundColor Green
-
-# Publish only if the canonical source still matches the exact resources
-# recorded for the Rust library. This closes the longer Gradle/signing window.
-Sync-FirmwareResources -DigestFile $resourceDigestFinal -Check
-$resourceDigestAtPublish = (Get-Content -LiteralPath $resourceDigestFinal -Raw).Trim()
-$stampedDigest = (Get-Content -LiteralPath $resourceBuildStamp -Raw).Trim()
-if ($resourceDigestAtPublish -ne $resourceDigest -or $stampedDigest -ne $resourceDigest) {
-    throw "Firmware resources changed during APK assembly; refusing to publish a stale APK. Re-run the build."
-}
-
-# Inspect the bytes Gradle actually placed in the signed APK. Source/resource
-# digests cannot prove the generated assets were refreshed or that Gradle did
-# not reuse stale inputs from its own cache.
-Invoke-FirmwarePackageVerification -Archive $apkUnsigned
 
 Copy-Item -Force $apkUnsigned $apkOut
 

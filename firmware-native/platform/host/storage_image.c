@@ -1,24 +1,18 @@
-/* Build an offline provisioning image with the exact RP2040 littlefs backend.
- * This executable never opens USB, flashes hardware, or changes its input. */
+/* Build the empty factory storage image with the exact RP2040 littlefs backend.
+ * This executable never opens USB, flashes hardware, or replaces a file. */
 #define _POSIX_C_SOURCE 200809L
 #include "bosun/board.h"
 #include "bosun/config.h"
 #include "bosun/storage_layout.h"
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 enum { IMAGE_BYTES = BOSUN_STORAGE_BYTES, IMAGE_BASE = 4 * 1024 * 1024, ERASE_BYTES = 4096 };
 static uint8_t flash[IMAGE_BYTES], original[IMAGE_BYTES];
-static char input[BOSUN_PATCH_BYTES + 1], readback[BOSUN_PATCH_BYTES + 1];
-static bosun_json_token_t tokens[BOSUN_PATCH_TOKENS];
 static bosun_config_t config;
-static size_t file_count, input_bytes;
 
 uint32_t bosun_board_storage_offset(void) { return IMAGE_BASE; }
 uint32_t bosun_board_storage_size(void) { return IMAGE_BYTES; }
@@ -70,149 +64,6 @@ static int open_directory(const char *path) {
     return current;
 }
 
-static bool coordinate(const char *name, unsigned maximum, bool file) {
-    unsigned number = 0, digits = 0;
-    while (name[digits] >= '0' && name[digits] <= '9') {
-        number = number * 10u + (unsigned)(name[digits++] - '0');
-        if (digits > 3 || number > maximum) return false;
-    }
-    if (!number || (file ? strcmp(name + digits, ".json") : name[digits] != 0)) return false;
-    char canonical[16];
-    snprintf(canonical, sizeof canonical, file ? "%02u.json" : "%02u", number);
-    return !strcmp(name, canonical);
-}
-
-typedef enum { BAD_PATH, DIRECTORY, ACTIVE, MANIFEST, DEVICE, LEARN, PATCH } path_kind_t;
-static path_kind_t path_kind(const char *path, bool directory) {
-    if (!bosun_store_safe_path(path) || strncmp(path, "/config/", 8)) return BAD_PATH;
-    char parts[BOSUN_PATH_MAX]; strcpy(parts, path + 8);
-    char *component[6], *save = NULL; size_t count = 0;
-    for (char *p = strtok_r(parts, "/", &save); p; p = strtok_r(NULL, "/", &save)) {
-        if (count == 6) return BAD_PATH;
-        component[count++] = p;
-    }
-    if (!directory && count == 1 && !strcmp(component[0], "active_profile.json")) return ACTIVE;
-    if (!count || strcmp(component[0], "profiles")) return BAD_PATH;
-    if (directory && count == 1) return DIRECTORY;
-    if (count < 2 || !bosun_config_profile_id(component[1])) return BAD_PATH;
-    if (directory && count == 2) return DIRECTORY;
-    if (!directory && count == 3) {
-        if (!strcmp(component[2], "manifest.json")) return MANIFEST;
-        if (!strcmp(component[2], "device.json")) return DEVICE;
-        if (!strcmp(component[2], "midi_learn.json")) return LEARN;
-    }
-    if (count < 3 || strcmp(component[2], "patches")) return BAD_PATH;
-    if (directory && count == 3) return DIRECTORY;
-    if (count < 4 || !coordinate(component[3], BOSUN_BANK_MAX, false)) return BAD_PATH;
-    if (directory && count == 4) return DIRECTORY;
-    return !directory && count == 5 && coordinate(component[4], 10, true) ? PATCH : BAD_PATH;
-}
-
-static bool read_source(int directory, const char *name, const char *path, size_t *length) {
-    int file = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-    if (file < 0) return fail("cannot open input without following symlinks", path);
-    struct stat metadata;
-    bool valid = fstat(file, &metadata) == 0 && S_ISREG(metadata.st_mode) &&
-        metadata.st_size > 0 && metadata.st_size <= BOSUN_PATCH_BYTES;
-    size_t used = 0;
-    while (valid && used < sizeof input) {
-        ssize_t got = read(file, input + used, sizeof input - used);
-        if (got < 0 && errno == EINTR) continue;
-        if (got < 0) { valid = false; break; }
-        if (!got) break;
-        used += (size_t)got;
-    }
-    if (close(file)) valid = false;
-    if (!valid || used != (size_t)metadata.st_size || used > BOSUN_PATCH_BYTES)
-        return fail("input must be a stable, nonempty regular file within the native size limit", path);
-    *length = used; input[used] = 0; return true;
-}
-
-static bool validate_json(path_kind_t kind, const char *path, size_t length) {
-    if ((kind == DEVICE || kind == LEARN) && length > BOSUN_DEVICE_BYTES)
-        return fail("device or MIDI learn JSON exceeds 16384 bytes", path);
-    bosun_json_doc_t document;
-    uint16_t capacity = kind == DEVICE ? BOSUN_DEVICE_TOKENS : BOSUN_PATCH_TOKENS;
-    if (bosun_json_parse(&document, input, length, tokens, capacity) != BOSUN_JSON_OK ||
-        document.tokens[0].type != BOSUN_JSON_OBJECT)
-        return fail("invalid JSON object or native token limit exceeded", path);
-    if (kind == MANIFEST) {
-        int token = bosun_json_get(&document, 0, "kind");
-        char plugin_kind[40];
-        if (token >= 0 && (!bosun_json_string(&document, token, plugin_kind, sizeof plugin_kind) ||
-                          !bosun_config_kind_supported(plugin_kind)))
-            return fail("unsupported native plugin", path);
-    }
-    return true;
-}
-
-static int compare_names(const void *a, const void *b) { return strcmp(a, b); }
-static bool walk(int directory, const char *path, bool verify) {
-    int duplicate = openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    DIR *stream = duplicate >= 0 ? fdopendir(duplicate) : NULL;
-    if (!stream) { if (duplicate >= 0) close(duplicate); return fail("cannot list directory", path); }
-    char names[BOSUN_STORE_LIST_MAX][BOSUN_NAME_MAX]; size_t count = 0;
-    bool valid = true;
-    for (;;) {
-        errno = 0; struct dirent *entry = readdir(stream);
-        if (!entry) { if (errno) valid = false; break; }
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-        if (count == BOSUN_STORE_LIST_MAX || strlen(entry->d_name) >= BOSUN_NAME_MAX) {
-            valid = false; break;
-        }
-        strcpy(names[count++], entry->d_name);
-    }
-    if (closedir(stream)) valid = false;
-    if (!valid) return fail("directory exceeds native limits or cannot be read", path);
-    qsort(names, count, sizeof names[0], compare_names);
-    for (size_t i = 0; i < count; ++i) {
-        char target[BOSUN_PATH_MAX];
-        int size = snprintf(target, sizeof target, "%s/%s", path, names[i]);
-        if (size < 0 || (size_t)size >= sizeof target) return fail("path too long", path);
-        struct stat metadata;
-        if (fstatat(directory, names[i], &metadata, AT_SYMLINK_NOFOLLOW))
-            return fail("cannot inspect input", target);
-        bool is_directory = S_ISDIR(metadata.st_mode);
-        path_kind_t kind = path_kind(target, is_directory);
-        if (kind == BAD_PATH || (!is_directory && !S_ISREG(metadata.st_mode)))
-            return fail("unsupported path, file type, or symlink", target);
-        if (is_directory) {
-            int child = openat(directory, names[i], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-            if (child < 0) return fail("cannot open directory without following symlinks", target);
-            valid = (verify || bosun_store_mkdir(target) == BOSUN_STORE_OK) && walk(child, target, verify);
-            if (close(child)) valid = false;
-            if (!valid) return fail("directory import/verification failed", target);
-        } else {
-            size_t length;
-            if (!read_source(directory, names[i], target, &length) || !validate_json(kind, target, length)) return false;
-            if (verify) {
-                size_t got = 0;
-                if (bosun_store_read(target, readback, sizeof readback, &got) != BOSUN_STORE_OK ||
-                    got != length || memcmp(input, readback, length)) return fail("readback differs from input", target);
-            } else if (bosun_store_write_atomic(target, input, length) != BOSUN_STORE_OK)
-                return fail("littlefs import failed (volume may be full)", target);
-            ++file_count; input_bytes += length;
-        }
-    }
-    return true;
-}
-
-static bool validate_profiles(void) {
-    if (bosun_config_init(&config) != BOSUN_STORE_OK || !*config.profile)
-        return fail("an existing active profile is required", "/config/active_profile.json");
-    bosun_dirent_t entries[BOSUN_STORE_LIST_MAX]; size_t count = 0;
-    if (bosun_store_list("/config/profiles", entries, BOSUN_STORE_LIST_MAX, &count) != BOSUN_STORE_OK ||
-        !count || count > BOSUN_PROFILE_MAX) return fail("invalid profile count", "/config/profiles");
-    for (size_t i = 0; i < count; ++i) {
-        if (!entries[i].directory || bosun_config_activate(&config, entries[i].name, false) != BOSUN_STORE_OK)
-            return fail("profile cannot be activated by native configuration code", entries[i].name);
-        bosun_patch_key_t keys[BOSUN_PATCH_CATALOG_MAX]; size_t patches = 0;
-        if (bosun_config_coordinates_list(&config, keys, BOSUN_PATCH_CATALOG_MAX, &patches) != BOSUN_STORE_OK)
-            return fail("patch catalog exceeds native limits", entries[i].name);
-    }
-    return bosun_config_init(&config) == BOSUN_STORE_OK;
-}
-
 static bool publish(const char *path) {
     size_t length = strlen(path);
     if (!length || length >= 4096) return fail("invalid output path", path);
@@ -242,45 +93,24 @@ static bool publish(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    /* Explicit factory provisioning: an empty, mountable native volume. Never
-     * infer this mode from a missing or invalid migration directory. */
-    if (argc == 4 && !strcmp(argv[1], "--empty") && !strcmp(argv[2], "--output")) {
-        memset(flash, 0xff, sizeof flash);
-        bool valid = bosun_store_format() == BOSUN_STORE_OK &&
-            bosun_store_mkdir("/config") == BOSUN_STORE_OK &&
-            bosun_store_mkdir("/config/profiles") == BOSUN_STORE_OK;
-        memcpy(original, flash, sizeof flash);
-        size_t count = 0;
-        bosun_dirent_t entries[1];
-        valid = valid && bosun_store_mount(NULL) &&
-            bosun_config_init(&config) == BOSUN_STORE_OK && !*config.profile &&
-            bosun_store_list("/config/profiles", entries, 1, &count) == BOSUN_STORE_OK &&
-            count == 0 && !memcmp(original, flash, sizeof flash);
-        if (!valid || !publish(argv[3])) return 1;
-        puts("{\"empty\":true,\"storage_bytes\":4194304,\"verified\":true}");
-        return 0;
-    }
-    if (argc != 5 || strcmp(argv[1], "--config-root") || strcmp(argv[3], "--output")) {
-        fprintf(stderr, "Usage: %s --config-root EXISTING_CONFIG_DIRECTORY --output NEW_IMAGE.bin\n", argv[0]);
+    if (argc != 4 || strcmp(argv[1], "--empty") || strcmp(argv[2], "--output")) {
+        fprintf(stderr, "Usage: %s --empty --output NEW_IMAGE.bin\n", argv[0]);
         return 2;
     }
-    int root = open_directory(argv[2]);
-    if (root < 0) { fail("config root must be an existing directory without symlinks or traversal", argv[2]); return 1; }
+    /* Factory provisioning: an empty, mountable native volume that the native
+     * configuration code accepts without writing anything on first mount. */
     memset(flash, 0xff, sizeof flash);
-    bool valid = bosun_store_format() == BOSUN_STORE_OK && bosun_store_mkdir("/config") == BOSUN_STORE_OK &&
-        walk(root, "/config", false);
-    size_t expected_files = file_count, expected_bytes = input_bytes;
-    if (valid) {
-        memcpy(original, flash, sizeof flash);
-        valid = bosun_store_mount(NULL) && validate_profiles();
-        file_count = input_bytes = 0;
-        valid = valid && walk(root, "/config", true) && file_count == expected_files &&
-            input_bytes == expected_bytes && !memcmp(original, flash, sizeof flash);
-    }
-    close(root);
-    if (!valid) { fail("validation failed; no output created", argv[2]); return 1; }
-    if (!publish(argv[4])) return 1;
-    printf("{\"storage_bytes\":%u,\"block_bytes\":%u,\"files\":%zu,\"input_bytes\":%zu,\"verified\":true}\n",
-           IMAGE_BYTES, ERASE_BYTES, expected_files, expected_bytes);
+    bool valid = bosun_store_format() == BOSUN_STORE_OK &&
+        bosun_store_mkdir("/config") == BOSUN_STORE_OK &&
+        bosun_store_mkdir("/config/profiles") == BOSUN_STORE_OK;
+    memcpy(original, flash, sizeof flash);
+    size_t count = 0;
+    bosun_dirent_t entries[1];
+    valid = valid && bosun_store_mount(NULL) &&
+        bosun_config_init(&config) == BOSUN_STORE_OK && !*config.profile &&
+        bosun_store_list("/config/profiles", entries, 1, &count) == BOSUN_STORE_OK &&
+        count == 0 && !memcmp(original, flash, sizeof flash);
+    if (!valid || !publish(argv[3])) return 1;
+    puts("{\"empty\":true,\"storage_bytes\":4194304,\"verified\":true}");
     return 0;
 }

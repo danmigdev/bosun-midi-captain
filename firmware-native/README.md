@@ -1,10 +1,8 @@
 # Native firmware: build and installation
 
-Bosun's maintained MIDI Captain firmware runs in C. Supported native profile
-kinds are Kemper Player, Kemper PROFILER (Head/Rack/Stage), and Generic MIDI.
-Kemper family support is experimental. Existing CircuitPython installations
-can migrate through **Update Bosun**; CircuitPython is no longer maintained as a
-parallel firmware target.
+Bosun's MIDI Captain firmware is written in C. Supported profile kinds are
+Kemper Player, Kemper PROFILER (Head/Rack/Stage), and Generic MIDI. Kemper
+family support is experimental.
 
 The shared [experimental Kemper PROFILER plugin](../docs/kemper-head.md)
 for Head, Rack and Stage shares the Player engine and schemas. It adds MK1/MK2
@@ -12,15 +10,17 @@ capabilities, Performance/Browse selection and banks 1–125. Hardware validatio
 
 ## Install or update
 
-For existing native firmware, connect the Captain directly by USB to Bosun Desktop,
-save pending changes and select **Update firmware (USB)**. For CircuitPython
-migration or a Captain hosted by a Pi, connect Bosun Desktop to the Pi and select
+A Captain still running the factory firmware is installed from the Bosun Desktop
+setup guide. To update an installed Captain, connect it directly by USB to Bosun
+Desktop, save pending changes and select **Update firmware (USB)**. For a Captain
+hosted by a Raspberry Pi, connect Bosun Desktop to the Pi and select
 **Update Bosun**. Follow the [firmware update instructions](../docs/firmware-updates.md)
 for USB driver requirements, Pi prerequisites and backup/recovery. The update package supports the
 RP2040 MIDI Captain with **8 MiB flash**.
 
-A raw UF2 does not migrate configuration or create a recovery backup. Use the
-complete update procedure when replacing an existing installation.
+A raw UF2 copied to RPI-RP2 replaces the firmware without a backup or any
+verification. Use the complete update procedure when replacing an existing
+installation.
 
 From Bosun 0.7.1, enter **RPI-RP2** by holding
 **switch 1 (top-left)** alone while powering on and keeping it held for three
@@ -60,8 +60,11 @@ otherwise CMake uses a Linux build unpacked under `firmware-native/.deps`
 (for example `firmware-native/.deps/node-v22.23.2-linux-x64`).
 
 The build helper fetches and verifies the pinned Pico SDK 2.3.0 and TinyUSB when
-`--fetch-sdk` is supplied. Keep the full repository checkout: the native build
-still consumes shared schemas retained under `firmware/`.
+`--fetch-sdk` is supplied. The message schemas the editor's forms are built from
+live in `firmware-native/schemas/`; `plugins/kemper.json` holds the differences
+between the Kemper models. `cmake/build_manifest.py` turns both into the
+manifest the firmware serves and checks them against the runtime's supported
+messages.
 
 ## Build the update package
 

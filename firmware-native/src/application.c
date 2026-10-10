@@ -200,8 +200,8 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
             if (binding->patch_token >= 0) {
                 int led = bosun_json_get(patch, binding->patch_token, "led");
                 rgb = color(patch, bosun_json_get(patch, led, "on"), 0);
-                /* Match CircuitPython: only latched bindings dim when off;
-                 * momentary/tap bindings keep their configured on colour. */
+                /* Only latched bindings dim when off; momentary/tap
+                 * bindings keep their configured on colour. */
                 bool active = runtime->switches[sw].latched_on;
                 if (binding->mode == BOSUN_SWITCH_LATCHED && !active) {
                     uint32_t off = color(patch, bosun_json_get(patch, led, "off"), 0);

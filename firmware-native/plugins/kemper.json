@@ -5,7 +5,7 @@
   },
   "kemper_head": {
     "extends": "kemper_player",
-    "label": "Kemper PROFILER — Head / Rack / Stage (experimental)",
+    "label": "Kemper PROFILER - Head / Rack / Stage (experimental)",
     "profiler": true,
     "product_id": 0,
     "max_banks": 125,

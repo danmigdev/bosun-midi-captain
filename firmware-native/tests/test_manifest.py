@@ -1,4 +1,4 @@
-"""Model overrides share schemas; native corrections preserve existing IDs."""
+"""Native schemas: PROFILER models share the Player schema except their own overrides."""
 import importlib.util
 from pathlib import Path
 import unittest
@@ -10,16 +10,17 @@ spec.loader.exec_module(build)
 
 
 class ManifestModels(unittest.TestCase):
-    def test_shared_schemas_and_player_compatibility(self):
+    def test_native_ranges_and_looper_actions(self):
+        core, plugins, _ = build.manifest_values(ROOT)
+        self.assertEqual(core["captain_patch"]["params"]["bank"]["max"], 125)
+        looper = plugins["kemper_player"]["messages"]["kemper_looper"]["params"]
+        self.assertIn("cancel_overdub", looper["action"]["values"])
+        self.assertIn("erase", looper["action"]["values"])
+        self.assertEqual(looper["state"]["default"], "tap")
+
+    def test_profiler_shares_the_player_schema(self):
         _, plugins, models = build.manifest_values(ROOT)
-        from build_manifest_tail import load_manifest_values
-        _, legacy = load_manifest_values(ROOT)
         player, head = plugins["kemper_player"], plugins["kemper_head"]
-        self.assertEqual(set(player["messages"]), set(legacy["kemper_player"]["messages"]))
-        for name, schema in player["messages"].items():
-            if name != "kemper_looper":
-                self.assertEqual(schema, legacy["kemper_player"]["messages"][name])
-        self.assertEqual(player["messages"]["kemper_looper"]["params"]["state"]["default"], "tap")
         self.assertEqual(player["config_schema"]["key"], head["config_schema"]["key"])
         for name, schema in player["config_schema"]["fields"].items():
             self.assertEqual(schema, head["config_schema"]["fields"][name])

@@ -6,7 +6,6 @@ on:
     paths:
       - firmware-native/**
       - tools/native-build.*
-      - tools/build_manifest_tail.py
       - tools/package-native-update.py
       - tools/verify-release-version.py
       - tools/verify_release_version_test.py
@@ -18,13 +17,10 @@ on:
       - .github/workflows/native.yml
       - .github/workflows/release.yml
       - .gitattributes
-      - firmware/lib/captain/**
-      - firmware/lib/plugins/**
   pull_request:
     paths:
       - firmware-native/**
       - tools/native-build.*
-      - tools/build_manifest_tail.py
       - tools/package-native-update.py
       - tools/verify-release-version.py
       - tools/verify_release_version_test.py
@@ -36,8 +32,6 @@ on:
       - .github/workflows/native.yml
       - .github/workflows/release.yml
       - .gitattributes
-      - firmware/lib/captain/**
-      - firmware/lib/plugins/**
   workflow_dispatch:
 
 permissions:
@@ -91,7 +85,7 @@ jobs:
           g++ python3
       - name: Build firmware without accessing hardware
         run: bash tools/native-build.sh rp2040 --fetch-sdk
-      - name: Exercise update archive and migration validation
+      - name: Exercise update archive validation
         run: |
           python -m pip install pytest
           cd tools/rpi-hub
