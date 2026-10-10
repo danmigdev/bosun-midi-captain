@@ -93,12 +93,13 @@ running entry actions; unmapped programs leave the Bosun patch unchanged.
   Trigger, Reverse, Half Speed, Cancel Overdub and Erase. **Tap** is the default
   and sends press then release. Use **Press** and **Release** in matching
   footswitch actions when the Kemper function needs a held button.
-- **Rotary Speed** uses CC33 (0 slow, 1 fast).
+- **Rotary speed** has no dedicated action: send CC 33 with a **CC** action
+  (value 0 slow, 1 fast).
 - **Set BPM** uses NRPN page 4, parameter 0, with Bosun's existing BPM scaling.
   Enable rig tempo on the Kemper when using tempo-synchronised effects.
 - **Tap Tempo** sends a single CC30 value 0 event, avoiding a held tap button.
 
-Looper, Rotary, Set BPM and Tap use the common firmware engine, including the
+Looper, Set BPM and Tap use the common firmware engine, including the
 Player command IDs. A command being offered does not add a
 feature absent from the connected Kemper or its OS. Morph displays the last
 commanded position, not measured progress of the Kemper's Morph ramp.
@@ -153,7 +154,7 @@ Before marking a specific Head, Rack or Stage/OS combination supported, verify:
 2. Performance boundaries 128/129, 256/257, 512/513 and final slot 625.
 3. Browse program assignments at both ends of the range and changes on the unit.
 4. Rapid Clean → Crunch → Delay, including Captain LEDs and Bosun Stage state.
-5. Looper press/release/hold, Rotary, Set BPM, Tap Tempo and Morph.
+5. Looper press/release/hold, Set BPM, Tap Tempo and Morph.
 6. MK1 slot-wah detection, and MK2 Fixed FX on compatible OS.
 
 No connected device is flashed by the build or automated tests.

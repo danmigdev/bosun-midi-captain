@@ -719,12 +719,8 @@ static void corrected_command_packets_and_browse(void) {
     assert(bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, 1, 0));
     assert(w.count == 8 && w.packets[7][2] == 0);
     assert(!bosun_kemper_command(&k, BOSUN_KEMPER_LOOPER, 7, 2));
-    assert(bosun_kemper_command(&k, BOSUN_KEMPER_ROTARY, 0, 1));
-    assert(w.packets[8][1] == 33 && w.packets[8][2] == 1);
-    assert(bosun_kemper_command(&k, BOSUN_KEMPER_ROTARY, 0, 0));
-    assert(w.packets[9][1] == 33 && w.packets[9][2] == 0);
     assert(bosun_kemper_command(&k, BOSUN_KEMPER_TAP, 0, 0));
-    assert(w.packets[10][1] == 30 && w.packets[10][2] == 0);
+    assert(w.packets[8][1] == 30 && w.packets[8][2] == 0);
     const unsigned bpms[] = {40, 120, 250};
     for (unsigned i = 0; i < 3; ++i) {
         w.count = 0;

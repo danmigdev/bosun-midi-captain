@@ -727,7 +727,6 @@ static bool command_channel(bosun_kemper *k, uint8_t channel, bosun_kemper_comma
         if (value == 2) return nrpn(k, channel, 125, (uint8_t)(88 + index), 0) && sent;
         return sent;
     }
-    case BOSUN_KEMPER_ROTARY: return voice_channel(k, channel, 0xb0, 33, value ? 1 : 0);
     case BOSUN_KEMPER_STEP: return voice_channel(k, channel, 0xb0, value < 0 ? 49 : 48, 0);
     }
     return false;

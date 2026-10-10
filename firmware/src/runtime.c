@@ -15,7 +15,7 @@ static const char *const supported[] = {
     "captain_preview_cancel","captain_setlist_step","kemper_rig","kemper_step_rig",
     "kemper_effect_toggle","kemper_fixed_toggle","kemper_tuner","kemper_tap_tempo",
     "kemper_set_tempo","kemper_morph","kemper_morph_trigger","kemper_wah","kemper_volume",
-    "kemper_looper","kemper_rotary","kemper_query_state","kemper_browse_rig"
+    "kemper_looper","kemper_browse_rig"
 };
 
 static bool due(uint32_t now, uint32_t deadline) { return (int32_t)(now - deadline) >= 0; }
@@ -111,7 +111,6 @@ static bool decode(bosun_runtime_t *rt, const bosun_json_doc_t *d, int token,
         c->flags = (uint8_t)scope;
     } else if (!strcmp(type, "captain_preview_commit")) c->type = BOSUN_COMMAND_PREVIEW_COMMIT;
     else if (!strcmp(type, "captain_preview_cancel")) c->type = BOSUN_COMMAND_PREVIEW_CANCEL;
-    else if (!strcmp(type, "kemper_query_state")) c->type = BOSUN_COMMAND_KEMPER_QUERY;
     else {
         c->type = BOSUN_COMMAND_KEMPER;
         if (!strcmp(type, "kemper_effect_toggle")) {
@@ -145,11 +144,6 @@ static bool decode(bosun_runtime_t *rt, const bosun_json_doc_t *d, int token,
         } else if (!strcmp(type, "kemper_tuner") || !strcmp(type, "kemper_morph_trigger")) {
             c->index = !strcmp(type, "kemper_tuner") ? BOSUN_KEMPER_TUNER : BOSUN_KEMPER_MORPH_TRIGGER;
             value = on_off(d, token, "state", 1);
-            if (value < 0) goto invalid;
-        } else if (!strcmp(type, "kemper_rotary")) {
-            static const char *const speeds[] = {"slow","fast"};
-            c->index = BOSUN_KEMPER_ROTARY;
-            value = enumeration(d, token, "value", speeds, 2, 0);
             if (value < 0) goto invalid;
         } else {
             c->index = !strcmp(type, "kemper_wah") ? BOSUN_KEMPER_WAH :
@@ -579,11 +573,6 @@ static bool execute(bosun_runtime_t *rt, const bosun_runtime_command_t *c) {
         }
         return bosun_kemper_command_channel(&rt->kemper, c->channel,
             (bosun_kemper_command_type)c->index, (uint8_t)c->first, c->value);
-    case BOSUN_COMMAND_KEMPER_QUERY: {
-        if (!rt->kemper_enabled) { ++rt->unsupported_messages; return false; }
-        bool ok = bosun_kemper_request_rig_name(&rt->kemper, rt->now_ms);
-        return bosun_kemper_query_blocks(&rt->kemper, rt->kemper.bound_blocks) && ok;
-    }
     case BOSUN_COMMAND_PATCH: return bosun_runtime_switch_patch(rt, c->first, c->second, true) == BOSUN_STORE_OK;
     case BOSUN_COMMAND_BANK_STEP: case BOSUN_COMMAND_PREVIEW_STEP: case BOSUN_COMMAND_SETLIST_STEP: return navigate(rt, c);
     case BOSUN_COMMAND_PREVIEW_COMMIT:
@@ -649,7 +638,7 @@ static bool immediate_input_command(const bosun_runtime_command_t *command) {
     switch ((bosun_command_type_t)command->type) {
     case BOSUN_COMMAND_CC: case BOSUN_COMMAND_PC: case BOSUN_COMMAND_NOTE_ON:
     case BOSUN_COMMAND_NOTE_OFF: case BOSUN_COMMAND_BANK_PC: case BOSUN_COMMAND_KEMPER:
-    case BOSUN_COMMAND_KEMPER_QUERY: return true;
+        return true;
     default: return false;
     }
 }
