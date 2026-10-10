@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { KNOWN_HARDWARE, hardwareLabel, knownHardware } from "../lib/hardware";
   type Candidate = { id: string; label: string; port: string };
   type Discovery = { devices: Candidate[]; version: string | null; problem: string | null };
-  let { onClose, onStart }: { onClose: () => void; onStart: (candidate: string, version: string) => void } = $props();
+  let { onClose, onStart }: { onClose: () => void; onStart: (candidate: string, version: string, model: string) => void } = $props();
   let discovery = $state<Discovery | null>(null), error = $state("");
   let selected = $state(""), confirmed = $state(false);
+  // No default: the installed firmware stores this model, so it is an explicit choice.
+  let model = $state("");
+  let chosen = $derived(knownHardware(model));
   let dialog: HTMLDialogElement, poll: ReturnType<typeof setTimeout> | undefined, alive = true;
   async function refresh() {
     try {
@@ -25,13 +29,15 @@
   {#if discovery?.problem}<p role="alert">Installer package unavailable: {discovery.problem}</p><p>Download and extract the complete latest Bosun Desktop release.</p>{/if}
   {#if discovery?.devices.length}
     <label>Captain to install<select bind:value={selected} onchange={() => confirmed = false}><option value="">Select a device</option>{#each discovery.devices as d}<option value={d.id}>{d.label}</option>{/each}</select></label>
-    <label class="confirm"><input type="checkbox" bind:checked={confirmed} /> This is my 10-switch RP2040 MIDI Captain with factory firmware. I want to install Bosun and create new profiles.</label>
+    <fieldset class="models"><legend>Captain model</legend>{#each KNOWN_HARDWARE as option (option.model)}<label><input type="radio" name="install-model" value={option.model} bind:group={model} onchange={() => confirmed = false} /> {hardwareLabel(option)}</label>{/each}</fieldset>
+    {#if model === "mini6"}<p class="note">Mini 6 support follows the community pin map (PySwitch) and has not been tested on a real Mini 6 yet. The installer stops without writing anything unless the pedal has 8 MiB of flash.</p>{/if}
+    {#if chosen}<label class="confirm"><input type="checkbox" bind:checked={confirmed} /> This is my {hardwareLabel(chosen)} with an RP2040 and factory firmware. I want to install Bosun and create new profiles.</label>{/if}
   {:else}<p role="status">Waiting for the Captain. Connect it normally with a USB data cable and close other serial apps. Bosun requests the USB bootloader after you choose Install. Holding footswitch 1 opens USB Setup, not RPI-RP2.</p>{/if}
   <p>Bosun saves and verifies a complete backup before writing. The backup preserves factory settings; you create Bosun profiles after installation.</p>
   <p>Keep the Captain on the same USB port and keep your computer and pedal powered until the process finishes.</p>
   {#if error}<p role="alert">{error}</p>{/if}
-  <footer><button onclick={onClose}>Cancel</button><button class="primary" disabled={!confirmed || !selected || !discovery?.version || !!discovery?.problem} onclick={() => onStart(selected,discovery!.version!)}>Continue</button></footer>
+  <footer><button onclick={onClose}>Cancel</button><button class="primary" disabled={!confirmed || !chosen || !selected || !discovery?.version || !!discovery?.problem} onclick={() => onStart(selected,discovery!.version!,model)}>Continue</button></footer>
 </dialog>
 <style>
-  dialog{width:min(590px,92vw);padding:1.5rem;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:12px;max-height:88vh;overflow:auto}dialog::backdrop{background:#080d16cc}h2{margin-top:0;font-size:1.2rem}p,label{font-size:.9rem;line-height:1.6}label{display:block;margin:1rem 0}select{display:block;width:100%;margin-top:.4rem;padding:.6rem;background:var(--bg);color:var(--text);border:1px solid var(--border-strong)}.confirm{padding:.8rem;background:var(--bg);border-radius:6px}.confirm input{margin-right:.4rem}footer{display:flex;justify-content:flex-end;gap:.6rem;margin-top:1.5rem}button{padding:.6rem 1rem;border:1px solid var(--border-strong);border-radius:5px;background:var(--bg);color:var(--text);cursor:pointer}.primary{background:var(--accent);color:var(--bg)}button:disabled{opacity:.45;cursor:not-allowed}[role=alert]{color:var(--err);overflow-wrap:anywhere}
+  dialog{width:min(590px,92vw);padding:1.5rem;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:12px;max-height:88vh;overflow:auto}dialog::backdrop{background:#080d16cc}h2{margin-top:0;font-size:1.2rem}p,label{font-size:.9rem;line-height:1.6}label{display:block;margin:1rem 0}select{display:block;width:100%;margin-top:.4rem;padding:.6rem;background:var(--bg);color:var(--text);border:1px solid var(--border-strong)}.confirm{padding:.8rem;background:var(--bg);border-radius:6px}.models{border:1px solid var(--border);border-radius:6px;margin:1rem 0;padding:.4rem .8rem}.models legend{font-size:.9rem;padding:0 .3rem}.models label{margin:.4rem 0}.models input{margin-right:.4rem}.note{font-size:.85rem;color:var(--text-muted)}.confirm input{margin-right:.4rem}footer{display:flex;justify-content:flex-end;gap:.6rem;margin-top:1.5rem}button{padding:.6rem 1rem;border:1px solid var(--border-strong);border-radius:5px;background:var(--bg);color:var(--text);cursor:pointer}.primary{background:var(--accent);color:var(--bg)}button:disabled{opacity:.45;cursor:not-allowed}[role=alert]{color:var(--err);overflow-wrap:anywhere}
 </style>

@@ -6,18 +6,27 @@
   import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
   import ColorField from "./ColorField.svelte";
+  import HardwareModelPicker from "./HardwareModelPicker.svelte";
+  import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
 
   type Props = {
     connected: boolean;
     hasActiveProfile: boolean;
     manifest: Manifest | null;
     onClose: () => void;
+    /** Connected model; firmware that can switch models but has no stored
+     *  record asks which pedal this is before the first profile. */
+    hardware?: HardwareLayout;
   };
-  let { connected, hasActiveProfile, manifest, onClose }: Props = $props();
+  let { connected, hasActiveProfile, manifest, onClose, hardware = CAPTAIN_10 }: Props = $props();
 
-  // Steps: welcome -> connect -> profile -> done
-  type Step = "welcome" | "connect" | "profile" | "done";
+  // Steps: welcome -> connect -> model (when unconfirmed) -> profile -> done
+  type Step = "welcome" | "connect" | "model" | "profile" | "done";
   let step = $state<Step>("welcome");
+  let needsModel = $derived(hardware.models.length > 1 && !hardware.configured);
+  function afterConnect(): Step {
+    return hasActiveProfile ? "done" : needsModel ? "model" : "profile";
+  }
 
   // Profile creation form
   let profileId = $state("");
@@ -46,15 +55,16 @@
 
   // Auto-advance based on external state
   $effect(() => {
-    if (step === "connect" && connected) step = "profile";
+    if (step === "connect" && connected) step = afterConnect();
   });
   $effect(() => {
     if (step === "profile" && hasActiveProfile) step = "done";
   });
 
   function next() {
-    if (step === "welcome") step = connected ? (hasActiveProfile ? "done" : "profile") : "connect";
-    else if (step === "connect") step = "profile";
+    if (step === "welcome") step = connected ? afterConnect() : "connect";
+    else if (step === "connect") step = afterConnect();
+    else if (step === "model") step = "profile";
     else if (step === "profile") step = "done";
   }
 
@@ -134,6 +144,17 @@
       </p>
       <div class="actions">
         <button onclick={skip}>I'll do it later</button>
+      </div>
+
+    {:else if step === "model"}
+      <h1>Which MIDI Captain is this?</h1>
+      <p class="lede">
+        Bosun runs on the 10-switch MIDI Captain and on the MIDI Captain Mini 6.
+        Choose your model so the editor and the pedal use the right switches and LEDs.
+      </p>
+      <HardwareModelPicker {hardware} onApplied={() => { step = "profile"; }} />
+      <div class="actions">
+        <button onclick={next}>Not now</button>
       </div>
 
     {:else if step === "profile"}

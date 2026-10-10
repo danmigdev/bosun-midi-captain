@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import TftLayout from "../../src/components/TftLayout.svelte";
+import { MINI_6 } from "../../src/lib/hardware";
 import type { Manifest } from "../../src/lib/protocol";
 
 const commands = vi.hoisted(() => ({
@@ -167,5 +168,44 @@ describe("TftLayout expression indicator", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
     await waitFor(() => expect(commands.putGlobal).toHaveBeenCalledWith(deviceWith([title])));
     expect(original.tft.layout).toEqual([title, pedal]);
+  });
+});
+
+describe("TftLayout on a pedal without expression jacks", () => {
+  it.each([
+    ["the core fields", null, ""],
+    ["the plugin's tft_fields", kemperManifest(), "kemper_player"],
+  ] as const)("hides the pedal indicator affordances offered by %s", async (_source, manifest, activeKind) => {
+    render(TftLayout, { device: deviceWith([title]), manifest, activeKind, hardware: MINI_6 });
+    const field = await screen.findByLabelText("Field");
+    expect(field.querySelector('option[value="patch_name"]')).not.toBeNull();
+    expect(field.querySelector('option[value="expression_mode"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "+ Add label" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Add pedal indicator" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pedal preview")).not.toBeInTheDocument();
+  });
+
+  it("still renders, saves and removes an existing pedal indicator", async () => {
+    const original = deviceWith([title, pedal]);
+    const before = structuredClone(original);
+    const { container } = render(TftLayout, {
+      device: original, manifest: kemperManifest(), activeKind: "kemper_player", hardware: MINI_6,
+    });
+    await waitFor(() => expect(container.querySelectorAll(".entry")).toHaveLength(2));
+    const [titleField, pedalField] = screen.getAllByLabelText("Field") as HTMLSelectElement[];
+    expect(pedalField).toHaveValue("expression_mode");
+    expect(pedalField.selectedOptions[0]).toHaveTextContent("Kemper Player · Expression pedal mode (VOL/WAH)");
+    expect(pedalField.querySelectorAll('option[value="expression_mode"]')).toHaveLength(1);
+    expect(titleField.querySelector('option[value="expression_mode"]')).toBeNull();
+    expect(container.querySelectorAll(".prevlabel")[1]).toHaveTextContent("VOL");
+    expect(screen.queryByLabelText("Pedal preview")).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(commands.putGlobal).toHaveBeenCalledWith(before));
+    await fireEvent.click(within(container.querySelectorAll<HTMLElement>(".entry")[1]).getByTitle("Remove"));
+    expect(container.querySelectorAll(".entry")).toHaveLength(1);
+    await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(commands.putGlobal).toHaveBeenLastCalledWith(deviceWith([title])));
+    expect(original).toEqual(before);
   });
 });

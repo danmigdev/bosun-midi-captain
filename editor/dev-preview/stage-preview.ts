@@ -5,6 +5,7 @@
 // lets you preview Stage View's look with no pedal or Kemper attached.
 import { mount } from "svelte";
 import StageView from "../src/components/StageView.svelte";
+import { CAPTAIN_10, KNOWN_HARDWARE, knownHardware } from "../src/lib/hardware";
 import type { Binding, BindingMode, PatchSummary } from "../src/lib/protocol";
 
 type Win = typeof window & {
@@ -21,8 +22,21 @@ function push(msg: unknown): Promise<void> {
   return new Promise((r) => setTimeout(r, 10));
 }
 
-const SWITCHES = ["1", "2", "3", "4", "up", "A", "B", "C", "D", "down"];
-const COLORS = ["#ff3b3b", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#ec4899", "#06b6d4", "#f97316", "#84cc16", "#64748b"];
+// `?model=mini6` previews another supported pedal (any lib/hardware.ts model
+// id); the default is the 10-switch Captain.
+const requestedModel = new URLSearchParams(location.search).get("model");
+const hardware = knownHardware(requestedModel) ?? CAPTAIN_10;
+if (requestedModel !== null && hardware.model !== requestedModel) {
+  console.warn(`Unknown model "${requestedModel}", previewing ${hardware.model}`);
+}
+
+const SWITCHES = hardware.switches;
+// Colors follow the switch id, so a switch keeps its color on every model.
+const PALETTE: Record<string, string> = {
+  "1": "#ff3b3b", "2": "#3b82f6", "3": "#22c55e", "4": "#eab308", up: "#a855f7",
+  A: "#ec4899", B: "#06b6d4", C: "#f97316", D: "#84cc16", down: "#64748b",
+};
+const COLORS = SWITCHES.map((sw) => PALETTE[sw] ?? "#64748b");
 
 type SwitchCfg = { enabled: boolean; mode: BindingMode; color: string; label: string; active: boolean };
 const switches: Record<string, SwitchCfg> = Object.fromEntries(
@@ -32,7 +46,26 @@ const switches: Record<string, SwitchCfg> = Object.fromEntries(
   ]),
 );
 
-let deviceInfo = { fw: "0.6.5-native", device: "midi_captain_10", bank: 1, slot: 1, stage_input: true };
+let deviceInfo = {
+  fw: "0.6.5-native",
+  // A device name, as the firmware reports it; the model id lives in `hardware`.
+  device: hardware.name,
+  bank: 1,
+  slot: 1,
+  stage_input: true,
+  // DEVICE_INFO.hardware exactly as the firmware sends it. StageView parses
+  // this descriptor itself when no `hardware` prop is passed.
+  hardware: {
+    model: hardware.model,
+    name: hardware.name,
+    configured: true,
+    switches: hardware.switches,
+    rows: hardware.rows,
+    led_count: hardware.led_count,
+    expression_jacks: hardware.expression_jacks,
+    models: KNOWN_HARDWARE.map((known) => known.model),
+  },
+};
 
 mount(StageView, {
   target: document.getElementById("app")!,

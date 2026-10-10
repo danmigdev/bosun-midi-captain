@@ -28,6 +28,7 @@
   import { listSnippets, saveSnippet, bindingFromSnippet, type Snippet } from "../lib/snippets";
   import { History } from "../lib/undo-stack";
   import { filterManifestForProfile } from "../lib/profile-message-types";
+  import { CAPTAIN_10, expressionJacks, missingSwitches, type HardwareLayout } from "../lib/hardware";
 
   type Props = {
     bank: number;
@@ -45,9 +46,11 @@
     linkConfig?: LinkConfig;
     /** Toggle this slot's column lock (linked across banks). */
     onToggleLock?: (slot: number) => void;
+    /** Connected model: its switches and expression jacks. */
+    hardware?: HardwareLayout;
   };
 
-  let { bank, slot, patch, manifest, activeKind = "", device = null, allPatches = [], linkConfig, onToggleLock }: Props = $props();
+  let { bank, slot, patch, manifest, activeKind = "", device = null, allPatches = [], linkConfig, onToggleLock, hardware = CAPTAIN_10 }: Props = $props();
 
   /** Is this patch's slot column locked across banks? */
   let slotLocked = $derived(isSlotLocked(slot, linkConfig, allPatches));
@@ -356,8 +359,11 @@
   // The firmware merges it over device.expression on patch load. A jack with no
   // entry keeps the device-wide target.
   type ExpressionOverride = { jack: number; message: MidiMessage; invert?: boolean };
-  // The two physical jacks the hardware exposes (GP27/GP28 => EXP 1/EXP 2).
-  const EXP_JACKS = [1, 2];
+  // The pedal's physical jacks (10-switch: GP27/GP28 => EXP 1/EXP 2; the
+  // Mini 6 has none), plus any jack this patch overrides that the pedal lacks
+  // (copied from another model) so it stays visible and removable.
+  let expJacks = $derived([...new Set([...expressionJacks(hardware), ...expList().map(o => o.jack)])]
+    .sort((a, b) => a - b));
 
   // Working patch typed with the optional expression field (not on the shared
   // Patch type, which the editor core can't edit here). Read/written via casts.
@@ -442,8 +448,9 @@
     }, 400);
   }
 
-  // All switches in the firmware order
-  const SWITCH_ORDER = ["1","2","3","4","up","A","B","C","D","down"];
+  // Bindings for switches this pedal lacks (a patch copied from another
+  // model). The firmware keeps and ignores them; list them so they can be removed.
+  let orphanSwitches = $derived(missingSwitches(hardware, working.bindings.map(b => b.switch)));
 
   function summarize(b: Binding): string {
     return `${b.mode}${b.auto_momentary === false ? " (no auto-mom)" : ""}`;
@@ -451,7 +458,7 @@
 
   const MODES: BindingMode[] = ["tap","latched","momentary","long_press_alt","double_tap"];
 
-  // ---- Pedal map: a schematic view of the 10 switches.
+  // ---- Pedal map: a schematic view of the pedal's switches.
   // Clicking a switch selects + expands its row. ----
   let selectedSwitch = $state<string | null>(null);
   function selectSwitch(sw: string) {
@@ -498,7 +505,7 @@
     <div class="pmhead">
       <span class="pmtitle">Pedal map</span>
     </div>
-    <PedalMap bindings={working.bindings} selected={selectedSwitch}
+    <PedalMap bindings={working.bindings} {hardware} selected={selectedSwitch}
               onSelect={selectSwitch} />
   </section>
 
@@ -671,7 +678,9 @@
   </section>
 
   <!-- Per-patch expression override: retarget an EXP jack while this patch is
-       active. Calibration/curve stay device-wide (Settings). -->
+       active. Calibration/curve stay device-wide (Settings). Hidden on a
+       pedal without jacks unless this patch carries an override for one. -->
+  {#if expJacks.length > 0}
   <section class="on-enter">
     <button class="onhead" onclick={() => expressionExpanded = !expressionExpanded}>
       <span class="chevron">{expressionExpanded ? "▾" : "▸"}</span>
@@ -690,14 +699,19 @@
           Override which MIDI message a pedal jack sends while this patch is
           active. Calibration and curve stay device-wide - set them in Settings.
         </p>
-        {#each EXP_JACKS as jack}
+        {#each expJacks as jack}
           {@const ov = overrideFor(jack)}
+          {@const present = jack <= hardware.expression_jacks}
           <div class="expjack">
             <label class="expover">
               <input type="checkbox" checked={!!ov}
                      onchange={(e) => toggleExpOverride(jack, (e.target as HTMLInputElement).checked)} />
               <span class="expjackname">EXP {jack}</span>
-              override the target for this patch
+              {#if present}
+                override the target for this patch
+              {:else}
+                not on this pedal - untick to remove the override
+              {/if}
             </label>
             {#if ov}
               {@const msg = expMessage(jack)}
@@ -763,6 +777,7 @@
       </div>
     {/if}
   </section>
+  {/if}
 
   <!-- Cross-bank lock. When closed, this switch is linked across every bank:
        editing this patch propagates to the same slot in all banks. Same
@@ -788,7 +803,7 @@
   </section>
 
   <ul class="bindings">
-    {#each SWITCH_ORDER as sw}
+    {#each hardware.switches as sw}
       {@const b = bindingFor(sw)}
       <li id={`swrow-${sw}`} class:expanded={expanded.has(sw)} class:selected={selectedSwitch === sw}>
         <button class="bindinghead" onclick={() => toggle(sw)}>
@@ -973,6 +988,26 @@
       </li>
     {/each}
   </ul>
+
+  {#if orphanSwitches.length > 0}
+    <section class="orphans" aria-label="Bindings for switches this pedal does not have">
+      <p class="orphans__title">Not on this pedal</p>
+      <p class="orphans__hint">
+        The {hardware.name} has no switch {orphanSwitches.join(", ")}. These
+        bindings were copied from another pedal: they are kept but never fire here.
+      </p>
+      <ul>
+        {#each orphanSwitches as sw (sw)}
+          {@const b = bindingFor(sw)}
+          <li class="orphan">
+            <span class="sw">{sw}</span>
+            <span class="label">{b?.label ?? ""}</span>
+            <button class="unbind" onclick={() => unbind(sw)}>Remove switch {sw} binding</button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 </section>
 
 <style>
@@ -1032,6 +1067,15 @@
     padding: 0.3rem 0.65rem; border-radius: 4px; cursor: pointer; font-size: 0.78rem;
   }
   .bindingfoot .unbind:hover { background: var(--err-bg); }
+  .orphans { margin-top: 0.75rem; padding: 0.5rem 0.6rem; border: 1px dashed var(--border-strong); border-radius: 4px; }
+  .orphans__title { margin: 0 0 0.25rem; font-weight: 600; }
+  .orphans__hint { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+  .orphans ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+  .orphan { display: flex; align-items: center; gap: 0.6rem; }
+  .orphan .sw { font-weight: 600; min-width: 3rem; }
+  .orphan .label { flex: 1; color: var(--text-muted); }
+  .orphan .unbind { background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 0.2rem 0.6rem; cursor: pointer; color: inherit; font: inherit; }
+  .orphan .unbind:hover { background: var(--err-bg); }
   .row { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .row label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.7rem; color: var(--text-muted); }
   .row input, .row select, .msg input, .msg select, .addmsg select {

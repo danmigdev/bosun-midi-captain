@@ -5,6 +5,7 @@
   import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
   import { getBankCount, getRigsPerBank, MAX_BANKS, MAX_RIGS_PER_BANK } from "../lib/bank-layout";
+  import { CAPTAIN_10, expressionJacks, hasSwitch, missingSwitches, type HardwareLayout } from "../lib/hardware";
   import ExpressionPedals from "./ExpressionPedals.svelte";
   import ColorField from "./ColorField.svelte";
 
@@ -29,8 +30,12 @@
     [k: string]: unknown;
   };
 
-  type Props = { device: DeviceConfig | null; manifest?: Manifest | null; activeKind?: string; connected?: boolean };
-  let { device, manifest = null, activeKind = "", connected = true }: Props = $props();
+  type Props = {
+    device: DeviceConfig | null; manifest?: Manifest | null; activeKind?: string; connected?: boolean;
+    /** Connected model; omitted means the 10-switch Captain. */
+    hardware?: HardwareLayout;
+  };
+  let { device, manifest = null, activeKind = "", connected = true, hardware = CAPTAIN_10 }: Props = $props();
 
   /** A full expression-jack entry with sensible defaults (disabled, CC 11). */
   function defaultExpression(jack: number): ExpressionConfig {
@@ -80,12 +85,16 @@
       w.leds.dim = legacy == null ? 64 : Math.round((legacy * 255) / 100);
     }
     if (!w.tft) w.tft = { brightness: 80, theme_color: "#00ff88", rotation: 180, rowstart: 80, colstart: 0 };
-    // Expression jacks: two by default, each backfilled to a complete entry
-    // so the editor can bind enable/invert/curve/message without null checks.
+    // Expression jacks: one default per jack this model has (none on a
+    // pedal without jacks), each backfilled to a complete entry so the
+    // editor can bind enable/invert/curve/message without null checks.
+    // Entries for jacks the pedal lacks (a config copied from another
+    // model) are kept verbatim until the user removes them.
+    const present = expressionJacks(hardware);
     if (!w.expression || w.expression.length === 0) {
-      w.expression = [defaultExpression(1), defaultExpression(2)];
+      if (present.length > 0) w.expression = present.map(jack => defaultExpression(jack));
     } else {
-      w.expression = w.expression.map(e => withExpressionDefaults(e));
+      w.expression = w.expression.map(e => present.includes(e.jack) ? withExpressionDefaults(e) : e);
     }
     if (!w.long_press_actions) w.long_press_actions = {};
     if (!w.preset_navigation) w.preset_navigation = {};
@@ -124,7 +133,7 @@
   }
 
   // Initial copy lifted from `device` via untrack so Svelte doesn't
-  // flag this as state_referenced_locally - the $effect below is the
+  // flag this as state_referenced_locally - the effect below is the
   // source of truth for upstream changes and reseeds working.
   let working = $state<DeviceConfig>(untrack(() => withDefaults(device)));
   let lastFingerprint = $state<string>("");
@@ -132,9 +141,15 @@
   let savedAt = $state<string>("");
   let saveErr = $state<string>("");
 
-  $effect(() => {
+  // Pre-effect: reseed before the DOM updates, so the template never renders
+  // one pass of a working copy seeded for another model (ExpressionPedals
+  // would get un-backfilled entries for jacks the new model has).
+  $effect.pre(() => {
     if (device) {
-      const fp = JSON.stringify(device);
+      // The jack count is part of the fingerprint: expression defaults are
+      // seeded per model, so hardware reported after the config arrived (or
+      // a pedal swap) reseeds instead of keeping the other model's jacks.
+      const fp = `${hardware.expression_jacks}:${JSON.stringify(device)}`;
       if (fp !== lastFingerprint) {
         working = withDefaults(device);
         lastFingerprint = fp;
@@ -163,7 +178,14 @@
   }
 
   const ROTATIONS = [0, 90, 180, 270];
-  const SWITCH_NAMES = ["1","2","3","4","up","A","B","C","D","down"];
+  // The pickers follow the connected model. Keys saved for switches or jacks
+  // it lacks (a config copied from another model) are never dropped: they
+  // are listed under "Not on this pedal" until the user removes them.
+  let switchNames = $derived(hardware.switches);
+  let jacks = $derived(expressionJacks(hardware));
+  let jackSummary = $derived(hardware.expression_jacks === 1 ? "One expression jack."
+    : hardware.expression_jacks === 2 ? "Two expression jacks." : `${hardware.expression_jacks} expression jacks.`);
+  type OrphanRow = { key: string; id: string; detail: string; remove: () => void };
   let bankCountValid = $derived(typeof working.bank_count === "number" && Number.isInteger(working.bank_count)
     && working.bank_count >= 1 && working.bank_count <= MAX_BANKS);
 
@@ -173,12 +195,15 @@
   // dict to preserve any other long-press actions present in the JSON.
   function _findBankStepSwitch(delta: number): string {
     const lpa = working.long_press_actions ?? {};
+    // A switch this pedal has wins over one it lacks: only that one fires.
+    let missing = "";
     for (const [sw, msgs] of Object.entries(lpa)) {
       if ((msgs ?? []).some(m => m.type === "captain_bank_step" && (m as { delta?: number }).delta === delta)) {
-        return sw;
+        if (hasSwitch(hardware, sw)) return sw;
+        if (!missing) missing = sw;
       }
     }
-    return "";
+    return missing;
   }
   let bankUpSwitch = $derived(_findBankStepSwitch(1));
   let bankDownSwitch = $derived(_findBankStepSwitch(-1));
@@ -207,6 +232,31 @@
     _setBankStepSwitch(-1, (e.target as HTMLSelectElement).value);
   }
 
+  /** A stored bank switch this pedal lacks still gets its own option, so the
+   * select shows the real mapping and changing it moves the action. */
+  function isMissingSwitch(sw: string): boolean {
+    return sw !== "" && !hasSwitch(hardware, sw);
+  }
+
+  function longPressSummary(msgs: unknown): string {
+    if (!Array.isArray(msgs) || msgs.length === 0) return "no actions";
+    return msgs.map((m: { type?: string; delta?: unknown }) => {
+      if (m?.type !== "captain_bank_step") return String(m?.type ?? "unknown");
+      return m.delta === 1 ? "Bank up" : m.delta === -1 ? "Bank down" : `Bank step ${m.delta}`;
+    }).join(", ");
+  }
+  function removeLongPress(sw: string) {
+    const lpa = { ...(working.long_press_actions ?? {}) };
+    delete lpa[sw];
+    working.long_press_actions = lpa;
+  }
+  let orphanLongPress = $derived<OrphanRow[]>(
+    missingSwitches(hardware, Object.keys(working.long_press_actions ?? {})).map(sw => ({
+      key: sw, id: sw, detail: longPressSummary(working.long_press_actions?.[sw]),
+      remove: () => removeLongPress(sw),
+    })),
+  );
+
   // Preset-navigation row: device.preset_navigation.switches maps a switch
   // name to the slot (within the CURRENT bank) it jumps to. It's a
   // device-wide overlay, not a patch binding - the firmware only applies it
@@ -227,7 +277,43 @@
     }
     working.preset_navigation = { ...(working.preset_navigation ?? {}), switches };
   }
+  let orphanNav = $derived<OrphanRow[]>(
+    missingSwitches(hardware, Object.keys(working.preset_navigation?.switches ?? {})).map(sw => ({
+      key: sw, id: sw.toUpperCase(), detail: `slot ${navSlotValue(sw)}`,
+      remove: () => setNavSlot(sw, ""),
+    })),
+  );
+
+  function expressionSummary(e: Partial<ExpressionConfig>): string {
+    const state = e.enabled ? "enabled" : "disabled";
+    const m = e.message;
+    if (!m) return state;
+    return `${state}, ${m.type === "cc" ? `CC ${m.cc ?? "?"}` : m.type}`;
+  }
+  // Rows keep the index into working.expression so a removal is exact even
+  // when an imported config repeats a jack number.
+  let orphanExpression = $derived<OrphanRow[]>(
+    (working.expression ?? []).flatMap((e, index) => jacks.includes(e.jack) ? [] : [{
+      key: String(index), id: `EXP ${e.jack ?? "?"}`, detail: expressionSummary(e),
+      remove: () => { working.expression = (working.expression ?? []).filter((_, i) => i !== index); },
+    }]),
+  );
 </script>
+
+{#snippet notOnThisPedal(label: string, note: string, rows: OrphanRow[])}
+  <div class="orphans" role="group" aria-label={label}>
+    <p class="hint small"><strong>Not on this pedal.</strong> {note}</p>
+    <ul>
+      {#each rows as row (row.key)}
+        <li>
+          <span class="orphanid">{row.id}</span>
+          <span class="orphandetail">{row.detail}</span>
+          <button type="button" onclick={row.remove} aria-label="Remove {row.id}">Remove</button>
+        </li>
+      {/each}
+    </ul>
+  </div>
+{/snippet}
 
 {#if !device}
   <p class="muted">Loading device config…</p>
@@ -294,16 +380,23 @@
         <label>Bank up: hold this switch
           <select value={bankUpSwitch} onchange={onBankUpChange}>
             <option value="">- none -</option>
-            {#each SWITCH_NAMES as s}<option value={s}>{s}</option>{/each}
+            {#each switchNames as s}<option value={s}>{s}</option>{/each}
+            {#if isMissingSwitch(bankUpSwitch)}<option value={bankUpSwitch}>{bankUpSwitch} (not on this pedal)</option>{/if}
           </select>
         </label>
         <label>Bank down: hold this switch
           <select value={bankDownSwitch} onchange={onBankDownChange}>
             <option value="">- none -</option>
-            {#each SWITCH_NAMES as s}<option value={s}>{s}</option>{/each}
+            {#each switchNames as s}<option value={s}>{s}</option>{/each}
+            {#if isMissingSwitch(bankDownSwitch)}<option value={bankDownSwitch}>{bankDownSwitch} (not on this pedal)</option>{/if}
           </select>
         </label>
       </div>
+      {#if orphanLongPress.length > 0}
+        {@render notOnThisPedal("Long-press actions not on this pedal",
+          `Long-press actions saved for switches the ${hardware.name} does not have (for example from a backup of another model). They never fire here and are kept until you remove them.`,
+          orphanLongPress)}
+      {/if}
     </section>
 
     <section class="block">
@@ -318,7 +411,7 @@
         patch-bound switch.
       </p>
       <div class="grid">
-        {#each SWITCH_NAMES as sw}
+        {#each switchNames as sw}
           <label>{sw.toUpperCase()}
             <input type="number" min="1" placeholder="unmapped"
                    value={navSlotValue(sw)}
@@ -326,6 +419,11 @@
           </label>
         {/each}
       </div>
+      {#if orphanNav.length > 0}
+        {@render notOnThisPedal("Preset navigation not on this pedal",
+          `Slots saved for switches the ${hardware.name} does not have (for example from a backup of another model). They never fire here and are kept until you remove them.`,
+          orphanNav)}
+      {/if}
     </section>
 
     <section class="block">
@@ -413,16 +511,27 @@
       </div>
     </section>
 
+    <!-- Hidden on a pedal without jacks unless a copied config left entries
+         to remove; ExpressionPedals (which polls STATS) only mounts with jacks. -->
+    {#if jacks.length > 0 || orphanExpression.length > 0}
     <section class="block">
       <h3>Expression pedals</h3>
-      <p class="hint">
-        Two expression jacks. Enable a jack, then move the pedal and use
-        Capture min / Capture max to calibrate its travel. Each jack sends a
-        continuous MIDI message (CC, or a plugin control) with the live
-        0-127 position.
-      </p>
-      <ExpressionPedals bind:expression={working.expression!} {manifest} {activeKind} device={working} {connected} />
+      {#if jacks.length > 0}
+        <p class="hint">
+          {jackSummary} Enable a jack, then move the pedal and use
+          Capture min / Capture max to calibrate its travel. Each jack sends a
+          continuous MIDI message (CC, or a plugin control) with the live
+          0-127 position.
+        </p>
+        <ExpressionPedals bind:expression={working.expression!} {jacks} {manifest} {activeKind} device={working} {connected} />
+      {/if}
+      {#if orphanExpression.length > 0}
+        {@render notOnThisPedal("Expression pedals not on this pedal",
+          `Settings saved for expression jacks the ${hardware.name} does not have (for example from a backup of another model). They are ignored here and kept until you remove them.`,
+          orphanExpression)}
+      {/if}
     </section>
+    {/if}
 
     {#each pluginConfigs as cfg (cfg.key)}
       {@const visibleFields = Object.entries(cfg.fields).filter(([, f]) => !f.hidden)}
@@ -507,6 +616,16 @@
   .muted { color: var(--text-muted); }
   .hint { color: var(--text-muted); font-size: 0.8rem; margin: 0.2rem 0 0.4rem; }
   .hint.small { font-size: 0.75rem; }
+  .orphans { margin-top: 0.7rem; padding: 0.5rem 0.7rem; border: 1px dashed var(--border-strong); border-radius: 4px; }
+  .orphans .hint strong { color: var(--warn-text); }
+  .orphans ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+  .orphans li { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; }
+  .orphanid { font-family: ui-monospace, Consolas, monospace; color: var(--warn-text); min-width: 3.5rem; }
+  .orphandetail { flex: 1; color: var(--text-muted); }
+  .orphans button {
+    background: var(--bg-hover); color: var(--err); border: 1px solid var(--border-strong);
+    padding: 0.2rem 0.6rem; border-radius: 3px; cursor: pointer; font-size: 0.75rem;
+  }
 
   /* ---------- mobile ---------- */
   @media (max-width: 767px) {
@@ -523,6 +642,7 @@
     .grid input[type="checkbox"] { width: auto; min-height: auto; }
     .grid input[type="color"] { width: 100%; min-height: 44px; }
     .cb { flex-wrap: wrap; gap: 0.35rem; }
+    .orphans button { min-height: 44px; }
     .saverow { flex-direction: column; gap: 0.35rem; }
     .saverow button { width: 100%; min-height: 44px; }
   }

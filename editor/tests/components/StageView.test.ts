@@ -1,6 +1,7 @@
 // Component tests for StageView: the live "stage mode" screen showing the
-// 2x5 pedal grid, the current rig/patch header, and live Kemper context
-// (rig name, BPM, tuner) streamed from the firmware via CONTEXT messages.
+// pedal grid (2x5 on the 10-switch Captain, 2x3 on the Mini 6), the current
+// rig/patch header, and live Kemper context (rig name, BPM, tuner) streamed
+// from the firmware via CONTEXT messages.
 //
 // StageView transitively imports src/lib/protocol.ts, which pulls in the
 // Tauri runtime bindings at module scope. The transport drains firmware
@@ -13,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/svelte";
 import StageView from "../../src/components/StageView.svelte";
 import { DEFAULT_LAYOUT } from "../../src/lib/pedal-layout";
+import { CAPTAIN_10, MINI_6, type HardwareLayout } from "../../src/lib/hardware";
 import { FONT_STACKS } from "../../src/lib/stage-theme";
 import {
   fallbackManifest,
@@ -81,10 +83,13 @@ type DeviceInfo = {
   slot: number;
   profile?: string;
   stage_input?: boolean;
+  /** Raw DEVICE_INFO.hardware descriptor (native 0.8+). */
+  hardware?: unknown;
 };
 
 type StageProps = {
   deviceInfo: DeviceInfo | null;
+  hardware?: HardwareLayout;
   manifest: Manifest | null;
   device: Record<string, unknown> | null;
   connected: boolean;
@@ -99,6 +104,13 @@ const SWITCH_ORDER = ["1", "2", "3", "4", "up", "A", "B", "C", "D", "down"];
 const DISPLAY_ORDER = ["1", "2", "3", "4", "UP", "A", "B", "C", "D", "DOWN"];
 
 const DEVICE = { fw: "0.5.4", device: "midi_captain_10" };
+
+/** DEVICE_INFO.hardware exactly as Mini 6 firmware reports it. */
+const MINI_6_DESCRIPTOR = {
+  model: "mini6", name: "MIDI Captain Mini 6", configured: true,
+  switches: ["1", "2", "3", "A", "B", "C"], rows: [["1", "2", "3"], ["A", "B", "C"]],
+  led_count: 18, expression_jacks: 0, models: ["captain10", "mini6"],
+};
 
 it("routes Morph controls with the current profile and rig generation", async () => {
   renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1, profile: "kemper", stage_input: true } });
@@ -154,6 +166,12 @@ function idOf(el: HTMLElement): string | null {
 
 function switchById(container: HTMLElement, id: string): HTMLElement | undefined {
   return switchEls(container).find((el) => idOf(el) === id);
+}
+
+/** Displayed switch IDs per rendered pedal row, top row first. */
+function rowIds(container: HTMLElement): (string | null)[][] {
+  return Array.from(container.querySelectorAll<HTMLElement>(".stage__pedal-row"))
+    .map((row) => Array.from(row.querySelectorAll<HTMLElement>(".stage__switch")).map(idOf));
 }
 
 type SentCommand = { type: string; id: string; bank?: number; slot?: number };
@@ -979,8 +997,9 @@ describe("StageView", () => {
       const nativeInfo = { ...info, stage_input: true };
       const nav = { preset_navigation: { switches: { A: 1, B: 3, C: 7 } } };
 
-      async function renderPreselection(inventory = rigs, device: Record<string, unknown> | null = nav) {
-        const view = renderStage({ deviceInfo: nativeInfo, patches: inventory, device });
+      async function renderPreselection(inventory = rigs, device: Record<string, unknown> | null = nav,
+        extra: Partial<StageProps> = {}) {
+        const view = renderStage({ deviceInfo: nativeInfo, patches: inventory, device, ...extra });
         await pushFirmwareMessage({
           type: "PATCH", bank: 2, slot: 3, profile: "", active_profile: "kemper",
           patch: { name: "Live current", bindings: [
@@ -1105,6 +1124,26 @@ describe("StageView", () => {
         await replyTo(await navigationRequest("LIST_PATCHES", 2), replyInventory(inventory));
         const request = await navigationRequest("SWITCH_PATCH");
         expect(request).toMatchObject({ bank: 25, slot: 10 });
+        await confirmPreselectedRig(request);
+        expect(sentCommands("SWITCH_PATCH")).toHaveLength(1);
+        expect(sentCommands("ACTIVATE_SWITCH")).toHaveLength(0);
+      });
+
+      it("previews one rig per Mini 6 switch, honouring mapped rigs above the switch count", async () => {
+        const inventory = [patch(2, 3, "Current"),
+          ...Array.from({ length: 10 }, (_, index) => patch(25, index + 1, `Tone ${index + 1}`))];
+        // nav maps A, B and C to rigs 1, 3 and 7. The pedal accepts rig 7 on
+        // its C switch, so the preview does too; 1, 2 and 3 take the lowest free rigs.
+        const { container } = await renderPreselection(inventory, nav, { hardware: MINI_6 });
+        await preselectBank(25, inventory);
+        expect(switchEls(container).map(idOf)).toEqual(["RIG 2", "RIG 4", "RIG 5", "RIG 1", "RIG 3", "RIG 7"]);
+        for (const tile of switchEls(container)) expect(tile).toBeEnabled();
+        expect(screen.queryAllByRole("button", { name: /^Rig (6|8|9|10):/ })).toHaveLength(0);
+        await fireEvent.click(screen.getByRole("button", { name: "Rig 7: Tone 7", exact: true }));
+        await replyTo(await navigationRequest("GET_DEVICE_INFO", 2), replyInfo());
+        await replyTo(await navigationRequest("LIST_PATCHES", 2), replyInventory(inventory));
+        const request = await navigationRequest("SWITCH_PATCH");
+        expect(request).toMatchObject({ bank: 25, slot: 7 });
         await confirmPreselectedRig(request);
         expect(sentCommands("SWITCH_PATCH")).toHaveLength(1);
         expect(sentCommands("ACTIVATE_SWITCH")).toHaveLength(0);
@@ -1320,6 +1359,19 @@ describe("StageView", () => {
       await rerender({ connected: true });
       expect(badge()).toHaveTextContent("---");
     });
+
+    it("is absent on a Mini 6, which has no expression jack, even when CONTEXT reports a mode", async () => {
+      const { container } = renderStage({ hardware: MINI_6 });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
+      expect(container.querySelector(".stage__expression")).toBeNull();
+      expect(screen.queryByLabelText(/^Expression pedal/)).not.toBeInTheDocument();
+    });
+
+    it("is present on a 10-switch Captain", async () => {
+      const { container } = renderStage({ hardware: CAPTAIN_10 });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "VOL" } });
+      expect(container.querySelector(".stage__header .stage__expression")).toHaveTextContent("VOL");
+    });
   });
 
   describe("Screen layout title colors", () => {
@@ -1434,6 +1486,69 @@ describe("StageView", () => {
         ["1", "2", "3", "4", "UP"],
         ["A", "B", "C", "D", "DOWN"],
       ]);
+    });
+  });
+
+  describe("hardware models", () => {
+    const MINI_6_ROWS = [["1", "2", "3"], ["A", "B", "C"]];
+    const columns = (container: HTMLElement) =>
+      (container.querySelector(".stage") as HTMLElement).style.getPropertyValue("--stage-columns");
+
+    it("renders a Mini 6 as two rows of three switches without the 10-switch extras", () => {
+      const { container } = renderStage({ hardware: MINI_6 });
+      expect(rowIds(container)).toEqual(MINI_6_ROWS);
+      expect(switchEls(container)).toHaveLength(6);
+      for (const id of ["4", "UP", "D", "DOWN"]) expect(switchById(container, id)).toBeUndefined();
+      // The decorative glow and the CSS column count follow the same grid.
+      expect(Array.from(container.querySelectorAll(".stage__glow-row"), (row) => row.children.length)).toEqual([3, 3]);
+      expect(columns(container)).toBe("3");
+    });
+
+    it("renders the 10-switch Captain unchanged when its layout is passed explicitly", () => {
+      const { container } = renderStage({ hardware: CAPTAIN_10 });
+      expect(rowIds(container)).toEqual([["1", "2", "3", "4", "UP"], ["A", "B", "C", "D", "DOWN"]]);
+      expect(columns(container)).toBe("5");
+    });
+
+    it("falls back to the deviceInfo hardware descriptor when no hardware prop is passed", () => {
+      const { container } = renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1, hardware: MINI_6_DESCRIPTOR } });
+      expect(rowIds(container)).toEqual(MINI_6_ROWS);
+      expect(container.querySelector(".stage__expression")).toBeNull();
+    });
+
+    it("prefers the hardware prop over the deviceInfo descriptor", () => {
+      const { container } = renderStage({
+        hardware: CAPTAIN_10, deviceInfo: { ...DEVICE, bank: 1, slot: 1, hardware: MINI_6_DESCRIPTOR },
+      });
+      expect(switchEls(container)).toHaveLength(10);
+      expect(container.querySelector(".stage__expression")).not.toBeNull();
+    });
+
+    it("follows a hardware change while mounted", async () => {
+      const { container, rerender } = renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1 } });
+      expect(switchEls(container)).toHaveLength(10);
+      await rerender({ hardware: MINI_6 });
+      expect(rowIds(container)).toEqual(MINI_6_ROWS);
+      expect(container.querySelector(".stage__expression")).toBeNull();
+      await rerender({ hardware: CAPTAIN_10 });
+      expect(switchEls(container)).toHaveLength(10);
+      expect(container.querySelector(".stage__expression")).not.toBeNull();
+    });
+
+    it("labels Mini 6 switches from bindings and preset navigation, ignoring switches it lacks", async () => {
+      const { container } = renderStage({
+        hardware: MINI_6, deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
+        device: { preset_navigation: { switches: { A: 2, D: 3 } } },
+        patches: [patch(1, 2, "Lead"), patch(1, 3, "Rhythm")],
+      });
+      await pushFirmwareMessage({
+        type: "PATCH", bank: 1, slot: 1,
+        patch: { bindings: [binding("3", { label: "Delay" }), binding("4", { label: "Copied" })] },
+      });
+      expect(labelOf(switchById(container, "3")!)).toBe("Delay");
+      expect(labelOf(switchById(container, "A")!)).toBe("Lead");
+      expect(container).not.toHaveTextContent("Copied");
+      expect(container).not.toHaveTextContent("Rhythm");
     });
   });
 
@@ -2036,6 +2151,29 @@ describe("StageView", () => {
 
       fireEvent.click(screen.getAllByRole("button", { name: "Reset" })[3]); // tuner row
       expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("");
+    });
+
+    it("hides only the VOL / WAH row on a Mini 6 and keeps that section's saved style", async () => {
+      localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({ version: 2, sections: { expression: { color: "#abcdef" } } }));
+      const { container } = renderStage({ hardware: MINI_6 });
+      await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+      expect(screen.queryByRole("group", { name: "VOL / WAH appearance" })).not.toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Switch ID appearance" })).toBeInTheDocument();
+      expect(screen.getAllByRole("combobox")).toHaveLength(7);
+
+      await fireEvent.input(container.querySelector('input[title="Rig name color"]')!, { target: { value: "#123456" } });
+      const stage = container.querySelector(".stage") as HTMLElement;
+      expect(stage.style.getPropertyValue("--stage-expression-color")).toBe("#abcdef");
+      expect(JSON.parse(localStorage.getItem("BOSUN_STAGE_THEME")!).sections).toEqual({
+        expression: { color: "#abcdef" }, rigName: { color: "#123456" },
+      });
+    });
+
+    it("lists the VOL / WAH row on a 10-switch Captain", async () => {
+      renderStage({ hardware: CAPTAIN_10 });
+      await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+      expect(screen.getByRole("group", { name: "VOL / WAH appearance" })).toBeInTheDocument();
+      expect(screen.getAllByRole("combobox")).toHaveLength(8);
     });
   });
 

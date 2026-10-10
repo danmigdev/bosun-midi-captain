@@ -18,6 +18,7 @@
 
 import { cmd, sendAndAwait, waitForReboot } from "./protocol";
 import type { Patch, MidiLearnTable, PatchSummary } from "./protocol";
+import { CAPTAIN_10, type HardwareLayout } from "./hardware";
 
 export interface ConfigBackup {
   format: "bosun-config-backup";
@@ -30,6 +31,9 @@ export interface ConfigBackup {
   device: Record<string, unknown>;
   patches: Array<{ bank: number; slot: number; patch: Patch }>;
   midi_learn?: MidiLearnTable;
+  /** Pedal model the backup was taken from (editor 0.8+). Older backups
+   * omit it: they all come from the 10-switch Captain. Informational only. */
+  hardware?: { model: string; name: string };
 }
 
 export interface BackupProgress {
@@ -44,6 +48,7 @@ export async function exportConfig(
   profileLabel?: string,
   kind?: string,
   profileId?: string,
+  hardware?: Pick<HardwareLayout, "model" | "name">,
 ): Promise<ConfigBackup> {
   const report = (p: BackupProgress) => onProgress?.(p);
 
@@ -91,7 +96,18 @@ export async function exportConfig(
     device,
     patches,
     midi_learn,
+    ...(hardware ? { hardware: { model: hardware.model, name: hardware.name } } : {}),
   };
+}
+
+/** A notice for restoring a backup taken on another pedal model, or "". The
+ * restore itself is unchanged: entries for switches or jacks the pedal lacks
+ * are kept, never fire, and are listed for removal in the editor. */
+export function backupHardwareNotice(backup: ConfigBackup, hardware: HardwareLayout): string {
+  const source = backup.hardware?.model || CAPTAIN_10.model;
+  if (source === hardware.model) return "";
+  const name = backup.hardware?.name || CAPTAIN_10.name;
+  return `This backup comes from a ${name}. Its bindings and settings for switches or expression jacks the ${hardware.name} does not have are kept but stay inactive: review them in the patch editor and Settings.`;
 }
 
 export function backupFilename(backup: ConfigBackup): string {

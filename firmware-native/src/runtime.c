@@ -6,7 +6,6 @@
 
 _Static_assert(sizeof(bosun_runtime_t) <= 8192, "runtime exceeds its 8 KiB storage budget");
 
-static const char *const switch_names[10] = {"1","2","3","4","up","A","B","C","D","down"};
 static const char *const block_names[8] = {"A","B","C","D","X","Mod","Delay","Reverb"};
 static const char *const action_names[6] = {"press","release","toggle_on","toggle_off","long_press","double_tap"};
 static const char *const mode_names[5] = {"tap","latched","momentary","long_press_alt","double_tap"};
@@ -20,6 +19,9 @@ static const char *const supported[] = {
 };
 
 static bool due(uint32_t now, uint32_t deadline) { return (int32_t)(now - deadline) >= 0; }
+static const bosun_hardware_t *layout(const bosun_runtime_t *rt) { return bosun_hardware_or_default(rt->hardware); }
+static unsigned switch_count(const bosun_runtime_t *rt) { return layout(rt)->switch_count; }
+static const char *switch_name(const bosun_runtime_t *rt, unsigned index) { return layout(rt)->switch_names[index]; }
 static int field(const bosun_json_doc_t *d, int o, const char *key) { return bosun_json_get(d, o, key); }
 static bool is_type(const bosun_json_doc_t *d, int t, bosun_json_type_t type) {
     return d && t >= 0 && t < d->count && d->tokens[t].type == type;
@@ -249,7 +251,9 @@ static void configure_expression(bosun_runtime_t *rt) {
         int curve = enumeration(device, entry, "curve", curves, 3, 0);
         fresh.curve = (uint8_t)(curve < 0 ? 0 : curve);
         fresh.invert = bosun_config_bool(device, entry, "invert", false);
-        fresh.enabled = entry >= 0 && bosun_config_bool(device, entry, "enabled", false);
+        /* A model without this jack never samples or probes its GPIO. */
+        fresh.enabled = entry >= 0 && i < layout(rt)->expression_jacks &&
+            bosun_config_bool(device, entry, "enabled", false);
         int message = field(device, entry, "message");
         const bosun_json_doc_t *message_doc = device;
         int override = rt->config->has_patch ? jack_entry(patch_doc, i + 1) : -1;
@@ -314,9 +318,12 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
         bosun_runtime_binding_t *binding = &rt->bindings[i];
         memset(binding, 0, sizeof(*binding));
         binding->patch_token = binding->global_long_token = -1;
+        binding->mirror_block = UINT8_MAX;
+        /* Entries naming switches this model lacks stay stored, unbound. */
+        if (i >= switch_count(rt)) continue;
         if (is_type(patch_doc, bindings, BOSUN_JSON_ARRAY)) {
             for (int token = bindings + 1; token < patch_doc->tokens[bindings].next; token = patch_doc->tokens[token].next)
-                if (bosun_json_equal(patch_doc, field(patch_doc, token, "switch"), switch_names[i]))
+                if (bosun_json_equal(patch_doc, field(patch_doc, token, "switch"), switch_name(rt, i)))
                     binding->patch_token = (int16_t)token;
         }
         int mode = enumeration(patch_doc, binding->patch_token, "mode", mode_names, 5, 0);
@@ -324,11 +331,11 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
         binding->blocks = binding_blocks(patch_doc, binding->patch_token, &binding->mirror_block);
         bound |= binding->blocks;
         if (binding->patch_token < 0) {
-            int32_t slot = bosun_config_int(device, nav, switch_names[i], 0);
+            int32_t slot = bosun_config_int(device, nav, switch_name(rt, i), 0);
             if (slot > 0 && slot <= 999 && bosun_config_has_patch(rt->config, rt->config->bank, (unsigned)slot))
                 binding->preset_slot = (uint16_t)slot;
         }
-        int long_array = field(device, global_long, switch_names[i]);
+        int long_array = field(device, global_long, switch_name(rt, i));
         int explicit_long = field(patch_doc, field(patch_doc, binding->patch_token, "actions"), "long_press");
         if (binding->mode == BOSUN_SWITCH_TAP && explicit_long < 0 &&
             is_type(device, long_array, BOSUN_JSON_ARRAY) && device->tokens[long_array].next > long_array + 1) {
@@ -387,8 +394,18 @@ void bosun_runtime_init(bosun_runtime_t *rt, bosun_config_t *config,
     if (!rt) return;
     memset(rt, 0, sizeof(*rt));
     rt->config = config; rt->send = send; rt->send_context = context;
+    rt->hardware = bosun_hardware_or_default(NULL);
     for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) bosun_switch_init(&rt->switches[i], NULL);
     bosun_runtime_config_changed(rt);
+}
+
+void bosun_runtime_set_hardware(bosun_runtime_t *rt, const bosun_hardware_t *hardware) {
+    if (!rt) return;
+    rt->hardware = bosun_hardware_or_default(hardware);
+    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) bosun_switch_init(&rt->switches[i], NULL);
+    rt->held_mask = 0;
+    bosun_runtime_config_changed(rt);
+    ++rt->revision;
 }
 
 static bosun_store_result_t storage_result(bosun_runtime_t *rt, bosun_store_result_t result) {
@@ -398,7 +415,7 @@ static bosun_store_result_t storage_result(bosun_runtime_t *rt, bosun_store_resu
 }
 
 static void mirror_effects(bosun_runtime_t *rt, uint8_t changed) {
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) {
+    for (unsigned i = 0; i < switch_count(rt); ++i) {
         unsigned block = rt->bindings[i].mirror_block;
         if (rt->bindings[i].mode == BOSUN_SWITCH_LATCHED && block < BOSUN_KEMPER_BLOCKS &&
             (changed & rt->kemper.state.effect_known & (1u << block)))
@@ -639,15 +656,15 @@ bosun_input_result_t bosun_runtime_activate_switch(bosun_runtime_t *rt,
     const char *name, unsigned bank, unsigned slot, const char *profile,
     uint32_t now_ms, uint16_t raw_pressed) {
     if (!rt || !rt->config || !name || !bosun_config_coordinates(bank, slot)) return BOSUN_INPUT_INVALID;
-    unsigned index = 0;
-    while (index < BOSUN_RUNTIME_SWITCHES && strcmp(name, switch_names[index])) ++index;
-    if (index == BOSUN_RUNTIME_SWITCHES) return BOSUN_INPUT_INVALID;
+    int found = bosun_hardware_switch_index(layout(rt), name);
+    if (found < 0) return BOSUN_INPUT_INVALID;
+    unsigned index = (unsigned)found;
     if (bank != rt->config->bank || slot != rt->config->slot ||
         (profile && strcmp(profile, rt->config->profile))) return BOSUN_INPUT_STALE;
     if (rt->config_revision != rt->config->revision || rt->patch_revision != rt->config->patch_revision)
         bosun_runtime_config_changed(rt);
     if (raw_pressed || rt->queue_count || rt->waiting || rt->preview_active) return BOSUN_INPUT_BUSY;
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i)
+    for (unsigned i = 0; i < switch_count(rt); ++i)
         if (!rt->switches[i].stable || !rt->switches[i].last_raw ||
             (i != index && rt->switches[i].tap_pending)) return BOSUN_INPUT_BUSY;
 
@@ -772,7 +789,7 @@ void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_m
         mirror_effects(rt, (uint8_t)((known ^ rt->kemper.state.effect_known) | (on ^ effects_on(rt))));
         follow_kemper_change(rt, changes);
     }
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) {
+    for (unsigned i = 0; i < switch_count(rt); ++i) {
         bosun_switch_result result = bosun_switch_poll(&rt->switches[i], now_ms,
             !(pressed_mask & (1u << i)), (bosun_switch_mode)rt->bindings[i].mode);
         if (result.edge == BOSUN_SWITCH_PRESS_EDGE && rt->kemper_enabled && rt->kemper.state.tuner_active &&
@@ -796,7 +813,7 @@ void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_m
     }
     drain(rt);
     uint16_t held = 0;
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i)
+    for (unsigned i = 0; i < switch_count(rt); ++i)
         if (bosun_switch_momentary_active(&rt->switches[i], now_ms, (bosun_switch_mode)rt->bindings[i].mode))
             held |= (uint16_t)(1u << i);
     if (held != rt->held_mask) { rt->held_mask = held; ++rt->revision; }
@@ -853,7 +870,7 @@ void bosun_runtime_hold_effect(const bosun_runtime_t *rt, char *out, size_t capa
     out[0] = 0;
     if (!rt || !rt->config) return;
     const bosun_json_doc_t *d = &rt->config->patch_doc;
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) if (rt->held_mask & (1u << i)) {
+    for (unsigned i = 0; i < switch_count(rt); ++i) if (rt->held_mask & (1u << i)) {
         int binding = rt->bindings[i].patch_token;
         if (!bosun_json_string(d, field(d, binding, "hold_text"), out, capacity) || !*out)
             if (!bosun_json_string(d, field(d, binding, "label"), out, capacity)) out[0] = 0;
@@ -904,8 +921,8 @@ bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {
     bosun_runtime_hold_effect(rt, name, sizeof name);
     if (!string_field(w, "hold_effect", name) || !integer_field(w, "hold_mask", rt->held_mask) ||
         !key(w, "switches") || !bosun_json_puts(w, "{")) return false;
-    for (unsigned i = 0; i < BOSUN_RUNTIME_SWITCHES; ++i) {
-        if ((i && !bosun_json_puts(w, ",")) || !bosun_json_quote(w, switch_names[i]) || !bosun_json_puts(w, ":") ||
+    for (unsigned i = 0; i < switch_count(rt); ++i) {
+        if ((i && !bosun_json_puts(w, ",")) || !bosun_json_quote(w, switch_name(rt, i)) || !bosun_json_puts(w, ":") ||
             !bosun_json_puts(w, rt->switches[i].latched_on ? "true" : "false")) return false;
     }
     return bosun_json_puts(w, "}}");

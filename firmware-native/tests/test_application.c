@@ -381,6 +381,49 @@ static void test_leds_and_expression(void) {
     assert(!midi_length[0] && !midi_length[1]);
 }
 
+static void test_mini6_hardware(void) {
+    fixture();
+    assert(app.runtime.hardware == &bosun_hardware_captain10 && !app.protocol.hardware_configured);
+    /* The installer or SET_HARDWARE leaves this record; boot only reads it. */
+    assert(bosun_hardware_save(&bosun_hardware_mini6) == BOSUN_STORE_OK);
+    now = feeds = tasks = 0;
+    assert(bosun_application_init(&app, root));
+    assert(app.runtime.hardware == &bosun_hardware_mini6 && app.protocol.hardware_configured);
+    assert(bosun_config_create("test", "Test", "generic", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&app.config, "test", false) == BOSUN_STORE_OK);
+    const char patch[] = "{\"bindings\":["
+        "{\"switch\":\"A\",\"led\":{\"on\":\"#ff0000\"},\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":20,\"value\":127}]}}},"
+        "{\"switch\":\"C\",\"led\":{\"on\":\"#00ff00\"}},"
+        "{\"switch\":\"up\",\"led\":{\"on\":\"#0000ff\"},\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":21}]}}}]}";
+    const char device[] = "{\"leds\":{\"brightness\":255,\"dim\":4},\"expression\":[{\"jack\":1,\"enabled\":true,"
+        "\"calibration\":{\"min\":0,\"max\":65535},\"message\":{\"type\":\"cc\",\"cc\":11}}]}";
+    assert(bosun_config_put_patch(&app.config, NULL, 1, 1, patch, sizeof patch - 1, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&app.config, 1, 1) == BOSUN_STORE_OK);
+    assert(bosun_config_put_device(&app.config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    adc[0] = adc[1] = 65535;
+    for (unsigned i = 0; i < 30; ++i) tick();
+    /* Mini 6 chain: A owns pixels 9-11 and C 15-17; the board's longer frame
+     * leaves the 12 pixels this chain lacks dark. */
+    for (unsigned pixel = 9; pixel < 12; ++pixel) assert(app.leds[pixel] == 0xff0000 && leds[pixel] == 0xff0000);
+    for (unsigned pixel = 15; pixel < 18; ++pixel) assert(app.leds[pixel] == 0x00ff00);
+    for (unsigned pixel = 0; pixel < BOSUN_LED_COUNT; ++pixel)
+        if (pixel < 9 || (pixel >= 12 && pixel < 15) || pixel >= 18) assert(!app.leds[pixel]);
+    /* No jacks: the configured pedal stays disabled and its pins untouched. */
+    assert(!app.runtime.expression[0].enabled && !app.runtime.expression[0].raw);
+    assert(!probe_charges[0] && !probe_charges[1] && !probe_driven[0] && !probe_driven[1]);
+    /* Unwired 4/up/D/down board bits are ignored; board bit 5 is A. */
+    switches = (1u << 3) | (1u << 4) | (1u << 8) | (1u << 9);
+    for (unsigned i = 0; i < 30; ++i) tick();
+    assert(!midi_length[0] && !midi_length[1] && !app.runtime.held_mask);
+    switches = 1u << 5;
+    for (unsigned i = 0; i < 30; ++i) tick();
+    static const uint8_t cc[] = {0xb0, 20, 127};
+    assert(midi_length[0] == sizeof cc && !memcmp(midi_output[0], cc, sizeof cc));
+    switches = 0;
+    for (unsigned i = 0; i < 30; ++i) tick();
+    assert(midi_length[0] == sizeof cc);
+}
+
 static void test_expression_presence(void) {
     fixture();
     assert(bosun_config_create("test", "Test", "generic", NULL) == BOSUN_STORE_OK);
@@ -554,6 +597,7 @@ static void test_remote_tap_gpio_and_disconnect(void) {
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
+    test_mini6_hardware();
     test_reboot_modes(); test_reboot_backpressure(); test_reboot_unavailable_storage();
     test_unobserved_cdc_edges();
     test_hold_label_matches_context();

@@ -29,6 +29,9 @@ typedef struct {
 } bosun_config_t;
 
 extern const char bosun_default_device[];
+/* Expression jacks of the running model. Without jacks, profiles created
+ * afterwards and the default device.json carry no expression entries. */
+void bosun_config_set_expression_jacks(unsigned jacks);
 bool bosun_config_profile_id(const char *id);
 bool bosun_config_kind_supported(const char *kind);
 bool bosun_config_coordinates(unsigned bank, unsigned slot);

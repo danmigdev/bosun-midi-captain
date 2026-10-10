@@ -25,10 +25,15 @@
 
   type Props = {
     theme: StageTheme;
+    /** False on a pedal without an expression jack, where Stage shows no
+     *  VOL / WAH readout. Only the row is hidden; its saved style is kept. */
+    showExpression?: boolean;
     onchange: (theme: StageTheme) => void;
     onclose: () => void;
   };
-  let { theme, onchange, onclose }: Props = $props();
+  let { theme, showExpression = true, onchange, onclose }: Props = $props();
+  let sections = $derived(showExpression ? STAGE_SECTIONS
+    : STAGE_SECTIONS.filter((section) => section !== "expression"));
 
   const fontOptions = Object.entries(FONT_STACKS).map(([label, value]) => ({ label, value }));
   const globalFontOptions = [{ value: "", label: "Inter (default)" }, ...fontOptions];
@@ -112,7 +117,7 @@
   </div>
 
   <div class="theme-panel__sections">
-    {#each STAGE_SECTIONS as section (section)}
+    {#each sections as section (section)}
       {@const s = theme.sections[section] ?? {}}
       <div class="theme-panel__row" role="group" aria-label={`${SECTION_LABELS[section]} appearance`}>
         <div class="theme-panel__row-header">

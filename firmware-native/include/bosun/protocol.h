@@ -2,7 +2,7 @@
 #define BOSUN_PROTOCOL_H
 #include "bosun/runtime.h"
 
-#define BOSUN_NATIVE_VERSION "0.7.2-native"
+#define BOSUN_NATIVE_VERSION "0.8.0-native"
 #define BOSUN_PROTOCOL_RX_BYTES 26624u
 #define BOSUN_PROTOCOL_TX_BYTES 30720u
 #define BOSUN_PROTOCOL_TOKENS 1792u
@@ -14,6 +14,7 @@
  * retain the suffix while a reply drains. consume_output accepts partial writes.
  * Session reset discards old input/output without changing configuration/MIDI.
  * REBOOT accepts mode="normal" (default) or "bootloader" (ROM BOOTSEL).
+ * SET_HARDWARE persists a supported model and reboots normally if it differs.
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;
@@ -40,6 +41,7 @@ typedef struct {
     char observed_profile[BOSUN_PROFILE_ID_BYTES];
     char id[257], type[49];
     bool discarding, connected, reboot_requested, reboot_bootloader, ui_observed;
+    bool hardware_configured; /* A valid hardware record selected runtime->hardware. */
 } bosun_protocol_t;
 
 void bosun_protocol_init(bosun_protocol_t *protocol, bosun_runtime_t *runtime);

@@ -21,13 +21,21 @@ static union {
 static bosun_json_token_t work_tokens[BOSUN_PATCH_TOKENS];
 _Static_assert(sizeof work_tokens >= BOSUN_DEVICE_BYTES + 1,
                "activation rollback reuses token workspace for previous device JSON");
-const char bosun_default_device[] =
-    "{\"version\":1,\"long_press_ms\":600,\"double_tap_window_ms\":250,"
-    "\"auto_momentary_on_hold\":true,\"auto_momentary_ms\":500,\"long_press_actions\":{},"
-    "\"autosave\":{\"enabled\":false,\"debounce_ms\":2000},\"leds\":{\"brightness\":64,\"dim\":4},"
-    "\"tft\":{\"brightness\":80,\"theme_color\":\"#00ff88\",\"rotation\":180,\"rowstart\":80,\"colstart\":0},"
-    "\"expression\":[{\"jack\":1,\"enabled\":false,\"invert\":false,\"calibration\":{\"min\":300,\"max\":65200},\"curve\":\"linear\",\"message\":{\"type\":\"cc\",\"channel\":1,\"cc\":11,\"value\":0}},"
-    "{\"jack\":2,\"enabled\":false,\"invert\":false,\"calibration\":{\"min\":300,\"max\":65200},\"curve\":\"linear\",\"message\":{\"type\":\"cc\",\"channel\":1,\"cc\":11,\"value\":0}}]}";
+#define DEFAULT_DEVICE_HEAD \
+    "{\"version\":1,\"long_press_ms\":600,\"double_tap_window_ms\":250," \
+    "\"auto_momentary_on_hold\":true,\"auto_momentary_ms\":500,\"long_press_actions\":{}," \
+    "\"autosave\":{\"enabled\":false,\"debounce_ms\":2000},\"leds\":{\"brightness\":64,\"dim\":4}," \
+    "\"tft\":{\"brightness\":80,\"theme_color\":\"#00ff88\",\"rotation\":180,\"rowstart\":80,\"colstart\":0}"
+#define DEFAULT_JACK(n) \
+    "{\"jack\":" #n ",\"enabled\":false,\"invert\":false,\"calibration\":{\"min\":300,\"max\":65200},\"curve\":\"linear\",\"message\":{\"type\":\"cc\",\"channel\":1,\"cc\":11,\"value\":0}}"
+const char bosun_default_device[] = DEFAULT_DEVICE_HEAD ",\"expression\":[" DEFAULT_JACK(1) "," DEFAULT_JACK(2) "]}";
+/* A model without jacks gets no expression entries to explain or remove. */
+static const char default_device_without_jacks[] = DEFAULT_DEVICE_HEAD "}";
+static bool default_device_has_jacks = true;
+void bosun_config_set_expression_jacks(unsigned jacks) { default_device_has_jacks = jacks != 0; }
+static const char *default_device_json(void) {
+    return default_device_has_jacks ? bosun_default_device : default_device_without_jacks;
+}
 
 int32_t bosun_config_int(const bosun_json_doc_t *d, int object, const char *key, int32_t fallback) {
     int32_t n; return bosun_json_integer(d, bosun_json_get(d, object, key), &n) ? n : fallback;
@@ -100,8 +108,10 @@ static int dirty_index(const bosun_config_t *c, unsigned bank, unsigned slot) {
 }
 bool bosun_config_dirty(const bosun_config_t *c, unsigned bank, unsigned slot) { return dirty_index(c, bank, slot) >= 0; }
 static void default_device(bosun_config_t *c) {
-    memcpy(c->device, bosun_default_device, sizeof bosun_default_device);
-    (void)object(c->device, sizeof bosun_default_device - 1, &c->device_doc, c->device_tokens, BOSUN_DEVICE_TOKENS);
+    const char *fallback = default_device_json();
+    size_t length = strlen(fallback);
+    memcpy(c->device, fallback, length + 1);
+    (void)object(c->device, length, &c->device_doc, c->device_tokens, BOSUN_DEVICE_TOKENS);
 }
 static bosun_store_result_t directories(const char *profile) {
     char path[BOSUN_PATH_MAX];
@@ -130,7 +140,7 @@ bosun_store_result_t bosun_config_create(const char *profile, const char *name, 
     r = directories(profile);
     if (r != BOSUN_STORE_OK) return r;
     bosun_config_path(path, sizeof path, profile, "device.json");
-    r = bosun_store_write_atomic(path, bosun_default_device, sizeof bosun_default_device - 1);
+    r = bosun_store_write_atomic(path, default_device_json(), strlen(default_device_json()));
     if (r != BOSUN_STORE_OK) return r;
     bosun_config_path(path, sizeof path, profile, "midi_learn.json");
     r = bosun_store_write_atomic(path, "{\"pc_to_patch\":[]}", 18);
@@ -160,7 +170,7 @@ bosun_store_result_t bosun_config_read(const bosun_config_t *c, const char *prof
     if (length) *length = 0;
     if (!c || !file || !length || !out || !capacity) return BOSUN_STORE_INVALID;
     const char *id = profile && *profile ? profile : c->profile; char path[BOSUN_PATH_MAX];
-    const char *fallback = !strcmp(file, "device.json") ? bosun_default_device :
+    const char *fallback = !strcmp(file, "device.json") ? default_device_json() :
         !strcmp(file, "midi_learn.json") ? "{\"pc_to_patch\":[]}" : NULL;
     const char *memory = (!profile || !*profile) && !strcmp(file, "device.json") ? c->device : NULL;
     if (memory || (!*id && fallback)) {

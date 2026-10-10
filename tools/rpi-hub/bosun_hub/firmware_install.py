@@ -71,6 +71,8 @@ NATIVE_MESSAGES = frozenset({
     "kemper_set_tempo", "kemper_morph", "kemper_morph_trigger", "kemper_wah", "kemper_volume",
     "kemper_looper", "kemper_rotary", "kemper_query_state", "kemper_browse_rig",
 })
+# CircuitPython Bosun only ran on the 10-switch Captain: its migrations keep
+# that model, the native firmware's default when no hardware record exists.
 NATIVE_SWITCHES = frozenset({"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"})
 NATIVE_MODES = frozenset({"tap", "latched", "momentary", "long_press_alt", "double_tap"})
 NATIVE_ACTIONS = frozenset({"press", "release", "toggle_on", "toggle_off", "long_press", "double_tap"})
@@ -255,12 +257,22 @@ def _require_snapshot(snapshot: dict) -> None:
             raise FirmwareInstallError("Incomplete profile snapshot; no firmware was written")
 
 
+def _hardware_model(info: dict) -> str:
+    """DEVICE_INFO without a hardware descriptor comes from a 10-switch Captain."""
+    hardware = info.get("hardware")
+    model = hardware.get("model") if isinstance(hardware, dict) else None
+    return model if isinstance(model, str) and model else "captain10"
+
+
 def _compare_snapshot(before: dict, after: dict, version: str) -> None:
     _require_snapshot(after)
     if after["info"].get("fw") != version:
         raise FirmwareInstallError("The device did not boot the expected firmware version")
     if before["active"] != after["active"] or before["profiles"] != after["profiles"]:
         raise FirmwareInstallError("Profile, settings, patch or MIDI Learn readback differs from the backup")
+    # The model record lives in preserved storage; losing it would remap a Mini 6.
+    if _hardware_model(before["info"]) != _hardware_model(after["info"]):
+        raise FirmwareInstallError("The device reports a different MIDI Captain model after the update")
 
 
 def read_prewrite_recovery(installation_dir: Path) -> tuple[dict, dict]:

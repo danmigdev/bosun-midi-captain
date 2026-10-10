@@ -10,6 +10,7 @@
     type MidiMessage,
   } from "../lib/protocol";
   import { filterManifestForProfile } from "../lib/profile-message-types";
+  import { CAPTAIN_10, expressionJacks } from "../lib/hardware";
 
   type Props = {
     /** device.expression - the array this component edits in place. The parent
@@ -20,8 +21,18 @@
     device?: Record<string, unknown> | null;
     /** Whether a pedal is connected - gates the live-calibration polling. */
     connected?: boolean;
+    /** Jack numbers (1-based) the pedal has; defaults to the 10-switch
+     * Captain's two. Entries for other jacks stay in `expression` untouched
+     * but are not rendered. */
+    jacks?: number[];
   };
-  let { expression = $bindable(), manifest = null, activeKind = "", device = null, connected = true }: Props = $props();
+  let {
+    expression = $bindable(), manifest = null, activeKind = "", device = null, connected = true,
+    jacks = expressionJacks(CAPTAIN_10),
+  }: Props = $props();
+
+  // A nullish array renders nothing, as the plain {#each} over it did.
+  let shown = $derived((expression ?? []).filter(e => jacks.includes(e.jack)));
 
   // Curve options the firmware understands. "linear" is the default; log/exp
   // shape the response for volume-style pedals.
@@ -44,10 +55,12 @@
   // per-jack raw (0..65535) + calibrated value (0..127) we render as bars.
   let live = $state<Record<number, { raw: number; value: number; armed?: boolean; present?: boolean }>>({});
   let statsTimer: ReturnType<typeof setInterval> | null = null;
+  // A pedal without jacks has nothing to calibrate, so it never polls.
+  let polling = $derived(connected && jacks.length > 0);
 
-  onMount(() => { if (connected) startPoll(); });
+  onMount(() => { if (polling) startPoll(); });
   onDestroy(() => stopPoll());
-  $effect(() => { connected ? startPoll() : stopPoll(); });
+  $effect(() => { polling ? startPoll() : stopPoll(); });
 
   function startPoll() {
     if (statsTimer) return;
@@ -136,7 +149,7 @@
   {#if msgTypes.some(t => t.type === "kemper_morph")}
     <p>Choose Set Morph Position to control Morph with this pedal (heel = Base, toe = Morph). Stage shows the last position sent by Bosun.</p>
   {/if}
-  {#each expression as exp, i (exp.jack ?? i)}
+  {#each shown as exp, i (exp.jack ?? i)}
     {@const msg = ensureMessage(exp)}
     <div class="exp" class:disabled={!exp.enabled}>
       <div class="exphead">

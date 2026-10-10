@@ -1,14 +1,16 @@
 <script lang="ts">
   import type { Binding } from "../lib/protocol";
   import { defaultLedFor } from "../lib/switch-colors";
+  import type { HardwareLayout } from "../lib/hardware";
   import {
-    DEFAULT_LAYOUT,
+    layoutFor,
     labelForSwitch,
     isBound,
   } from "../lib/pedal-layout";
 
   let {
     bindings,
+    hardware,
     selected = null,
     onSelect,
     onPress,
@@ -16,6 +18,8 @@
     colorFor,
   }: {
     bindings: Binding[];
+    /** Connected model; omitted means the 10-switch Captain. */
+    hardware?: HardwareLayout;
     selected?: string | null;
     /** Click handler (used by the editor to jump to a switch row). Optional so
      *  the simulator can reuse this map purely for press/release. */
@@ -27,8 +31,8 @@
     colorFor?: (sw: string) => string;
   } = $props();
 
-  // The switches are drawn in a fixed schematic layout.
-  const view = DEFAULT_LAYOUT;
+  // The switches are drawn in the model's fixed schematic layout.
+  let view = $derived(layoutFor(hardware));
 
   /** LED color for a switch, in priority order:
    *  1. an explicit colorFor(sw) override,

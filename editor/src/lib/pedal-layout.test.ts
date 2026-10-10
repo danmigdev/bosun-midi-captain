@@ -4,8 +4,10 @@ import {
   ALL_SWITCHES,
   labelForSwitch,
   isBound,
+  layoutFor,
   type PedalLayout,
 } from "./pedal-layout";
+import { CAPTAIN_10, MINI_6 } from "./hardware";
 import type { Binding } from "./protocol";
 
 function binding(sw: string, label?: string): Binding {
@@ -23,6 +25,20 @@ describe("DEFAULT_LAYOUT", () => {
     expect(flat).toHaveLength(10);
     expect(new Set(flat).size).toBe(10);
     expect([...flat].sort()).toEqual([...ALL_SWITCHES].sort());
+  });
+});
+
+describe("layoutFor", () => {
+  it("draws the 10-switch Captain as two rows of five, also by default", () => {
+    expect(layoutFor(CAPTAIN_10)).toEqual([["1", "2", "3", "4", "up"], ["A", "B", "C", "D", "down"]]);
+    expect(layoutFor(undefined)).toEqual(DEFAULT_LAYOUT);
+    expect(layoutFor(null)).toEqual(DEFAULT_LAYOUT);
+  });
+
+  it("draws the Mini 6 as two rows of three", () => {
+    const layout = layoutFor(MINI_6);
+    expect(layout).toEqual([["1", "2", "3"], ["A", "B", "C"]]);
+    expect(switchesOf(layout)).not.toContain("up");
   });
 });
 

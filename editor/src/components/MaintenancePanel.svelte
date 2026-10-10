@@ -4,26 +4,31 @@
   import { cmd, waitForReboot, type DeviceStats, type ProfileInfo } from "../lib/protocol";
   import {
     exportConfig, backupFilename, timestampedFolderName,
-    validateBackup, importConfig, inferKindFromDevice,
+    validateBackup, importConfig, inferKindFromDevice, backupHardwareNotice,
     type BackupProgress, type RestoreProgress, type ConfigBackup,
   } from "../lib/config-backup";
   import { pickFirmwareSource, prepareFirmwareSource } from "../lib/installer";
   import { IS_ANDROID } from "../lib/platform";
 
   import { isNativeFirmware, supportsFirmwareFileOta, type FirmwareIdentity } from "../lib/firmware-capabilities";
+  import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
+  import HardwareModelPicker from "./HardwareModelPicker.svelte";
 
   type Props = {
     connected: boolean; activeProfile?: ProfileInfo | null; firmwareInfo?: FirmwareIdentity | null;
     unifiedRelease?: string | null; resumeUnifiedUpdate?: boolean; onUnifiedUpdate?: () => void;
     usbRelease?: string | null; onUsbUpdate?: () => void;
     onBootloader?: () => Promise<void>;
+    hardware?: HardwareLayout;
   };
   let { connected, activeProfile = null, firmwareInfo = null,
     unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate,
-    usbRelease = null, onUsbUpdate, onBootloader }: Props = $props();
+    usbRelease = null, onUsbUpdate, onBootloader, hardware = CAPTAIN_10 }: Props = $props();
   let canUpdateFirmware = $derived(connected && supportsFirmwareFileOta(firmwareInfo));
 
   let stats = $state<DeviceStats | null>(null);
+  // A model change restarts the pedal: pause the stats poll meanwhile.
+  let modelBusy = $state(false);
   let statsErr = $state<string>("");
   let rebooting = $state(false);
   let rebootMsg = $state<string>("");
@@ -146,6 +151,7 @@
           t.name || t.id,
           t.kind,
           t.active ? undefined : t.id,
+          hardware,
         );
 
         const filename = backupFilename(backup);
@@ -380,7 +386,7 @@
   // banner even though everything is fine. The $effect re-evaluates
   // automatically when any of these state vars flip.
   $effect(() => {
-    if (connected && !backupBusy && !restoreBusy && !rebooting) {
+    if (connected && !backupBusy && !restoreBusy && !rebooting && !modelBusy) {
       startStatsPoll();
     } else {
       stopStatsPoll();
@@ -399,7 +405,7 @@
     // Defense in depth: even with the $effect above, an in-flight
     // request might land here if the timer fires concurrently with the
     // state flip. Skip when busy so we don't compete with the real op.
-    if (rebooting || backupBusy || restoreBusy) return;
+    if (rebooting || backupBusy || restoreBusy || modelBusy) return;
     try {
       const s = await cmd.getStats();
       stats = s; statsErr = "";
@@ -563,6 +569,9 @@
         <p class="muted small" style="margin: 0 0 0.6rem;">
           Generated {pendingBackup.generated_at}{pendingBackup.kind ? ` · kind ${pendingBackup.kind}` : ""}
         </p>
+        {#if backupHardwareNotice(pendingBackup, hardware)}
+          <p class="small hardware-notice" role="note">{backupHardwareNotice(pendingBackup, hardware)}</p>
+        {/if}
         {#if !activeProfile}
           <p class="muted small" style="margin: 0 0 0.6rem;">
             This pedal has no profile yet, so the import must create one. Give it a name below.
@@ -642,7 +651,7 @@
       <section class="block">
         <h3>USB firmware</h3>
         <p class="muted small">Install or reinstall the bundled native firmware directly from this computer. Bosun keeps a full recovery backup and verifies your saved configuration after restarting the Captain.</p>
-        <button class="primary" disabled={!connected} onclick={onUsbUpdate}>Install firmware (USB) — {usbRelease}</button>
+        <button class="primary" disabled={!connected} onclick={onUsbUpdate}>Install firmware (USB): {usbRelease}</button>
       </section>
     {/if}
     {#if unifiedRelease || resumeUnifiedUpdate}
@@ -701,6 +710,14 @@
     </section>
   {/if}
 
+  {#if isNativeFirmware(firmwareInfo)}
+    <section class="block">
+      <h3>Pedal model</h3>
+      <HardwareModelPicker {hardware} disabled={rebooting || backupBusy || restoreBusy || fwSrcBusy}
+        onBusy={(busy) => { modelBusy = busy; }} />
+    </section>
+  {/if}
+
   <section class="block">
     <h3>Reboot</h3>
     <p class="muted small">
@@ -708,7 +725,7 @@
       <code>firmware/config/</code> or to recover from a stuck state.
     </p>
     <div class="row">
-      <button onclick={doReboot} disabled={rebooting}>
+      <button onclick={doReboot} disabled={rebooting || modelBusy}>
         {rebooting ? "Rebooting…" : "Reboot pedal"}
       </button>
       {#if onBootloader}
@@ -738,6 +755,7 @@
   button:hover:not(:disabled) { background: var(--bg-hover); }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .curr { color: var(--text-muted); font-size: 0.8rem; margin: 0.5rem 0 0; }
+  .hardware-notice { color: var(--warn-text); margin: 0 0 0.6rem; }
   code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px; color: var(--warn-text); font-family: ui-monospace, Consolas, monospace; }
   .dialog {
     background: var(--bg); border: 1px solid var(--border); border-radius: 6px;

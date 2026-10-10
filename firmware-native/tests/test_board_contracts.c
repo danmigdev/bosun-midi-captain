@@ -101,8 +101,18 @@ static void bootloader_shortcut(void) {
     for (unsigned mask = 0; mask < 1024; ++mask) {
         boot_mask = (uint16_t)mask; boot_elapsed = 0;
         bool entered = bosun_bootloader_held(read_boot_switches, boot_wait);
-        assert(entered == (mask == BOSUN_BOOTLOADER_CHORD));
+        /* Pins 4, up, D and down are unwired on a Mini 6: their level,
+         * whatever the board leaves there, neither blocks nor cancels. */
+        assert(entered == ((mask & 0x00e7u) == BOSUN_BOOTLOADER_CHORD));
         assert(boot_elapsed == (entered ? 3000u : 0u));
+    }
+    boot_mask = BOSUN_BOOTLOADER_CHORD | (1u << 3) | (1u << 4) | (1u << 8) | (1u << 9);
+    boot_elapsed = 0;
+    assert(bosun_bootloader_held(read_boot_switches, boot_wait));
+    for (unsigned other = 1; other < 8; ++other) {
+        if (!(0x00e7u & (1u << other))) continue;
+        boot_mask = (uint16_t)(BOSUN_BOOTLOADER_CHORD | (1u << other)); boot_elapsed = 0;
+        assert(!bosun_bootloader_held(read_boot_switches, boot_wait));
     }
     for (unsigned release = 0; release <= 3000; release += 10) {
         boot_mask = BOSUN_BOOTLOADER_CHORD; boot_elapsed = 0; release_at = release;

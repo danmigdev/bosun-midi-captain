@@ -750,13 +750,35 @@ def test_player_migration_accepts_typed_profile_but_rejects_profiler_only_progra
         install._require_native_compatible(before)
 
 
+def test_snapshot_comparison_keeps_the_hardware_model():
+    legacy = snapshot("0.7.2-native")
+    after = snapshot("0.8.0-native")
+    after["info"]["hardware"] = {"model": "captain10", "configured": False}
+    # Firmware before 0.8 reports no model: it is the 10-switch default.
+    install._compare_snapshot(legacy, after, "0.8.0-native")
+    mini = snapshot("0.8.0-native")
+    mini["info"]["hardware"] = {"model": "mini6", "configured": True}
+    kept = snapshot("0.8.1-native")
+    kept["info"]["hardware"] = {"model": "mini6", "configured": True}
+    install._compare_snapshot(mini, kept, "0.8.1-native")
+    lost = snapshot("0.8.1-native")
+    lost["info"]["hardware"] = {"model": "captain10", "configured": False}
+    with pytest.raises(install.FirmwareInstallError, match="different MIDI Captain model"):
+        install._compare_snapshot(mini, lost, "0.8.1-native")
+
+
 def test_cp_preflight_limits_and_names_match_the_native_runtime_source():
     root = Path(__file__).resolve().parents[3]
     runtime = (root / "firmware-native/src/runtime.c").read_text(encoding="utf-8")
+    hardware = (root / "firmware-native/src/hardware.c").read_text(encoding="utf-8")
     header = (root / "firmware-native/include/bosun/runtime.h").read_text(encoding="utf-8")
-    for name, actual in (("supported", install.NATIVE_MESSAGES), ("switch_names", install.NATIVE_SWITCHES),
-                         ("mode_names", install.NATIVE_MODES), ("action_names", install.NATIVE_ACTIONS)):
-        body = re.search(r"\b" + name + r"\[[^]]*\]\s*=\s*\{([^}]+)\}", runtime).group(1)
+    # CircuitPython Bosun only ran on the 10-switch Captain, so migrations
+    # are checked against that model's switch names.
+    for name, actual, source in (("supported", install.NATIVE_MESSAGES, runtime),
+                                 ("captain10_names", install.NATIVE_SWITCHES, hardware),
+                                 ("mode_names", install.NATIVE_MODES, runtime),
+                                 ("action_names", install.NATIVE_ACTIONS, runtime)):
+        body = re.search(r"\b" + name + r"\[[^]]*\]\s*=\s*\{([^}]+)\}", source).group(1)
         assert set(re.findall(r'"([^"]+)"', body)) == actual
     assert int(re.search(r"#define BOSUN_RUNTIME_COMMANDS (\d+)u", header).group(1)) == install.NATIVE_COMMAND_LIMIT
     assert int(re.search(r"#define BOSUN_PATCH_CATALOG_MAX (\d+)u", (root / "firmware-native/include/bosun/config.h").read_text()).group(1)) == install.NATIVE_NAVIGATION_LIMIT

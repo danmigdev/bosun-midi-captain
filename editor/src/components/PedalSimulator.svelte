@@ -8,15 +8,19 @@
     cmd, onFirmwareMessage, summarizeMessage,
     type Binding, type FirmwareMessage,
   } from "../lib/protocol";
+  import type { HardwareLayout } from "../lib/hardware";
 
   let {
     bindings,
     device = null,
     connected,
+    hardware,
   }: {
     bindings: Binding[];
     device?: Record<string, unknown> | null;
     connected: boolean;
+    /** Connected model; omitted means the 10-switch Captain. */
+    hardware?: HardwareLayout;
   } = $props();
 
   type Mode = "model" | "live";
@@ -247,6 +251,7 @@
 
   <PedalMap
     {bindings}
+    {hardware}
     selected={pressed}
     {colorFor}
     onPress={mode === "model" ? simPress : undefined}

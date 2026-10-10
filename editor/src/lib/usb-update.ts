@@ -4,7 +4,7 @@ import { IS_ANDROID } from "./platform";
 export type UsbUpdateJob = {
   mode?: "install" | "update";
   id: string;
-  phase: "preflight" | "bootloader" | "backup" | "writing" | "rebooting" | "restoring" | "done" | "restored" | "failed" | "recovery-required";
+  phase: "preflight" | "bootloader" | "backup" | "writing" | "rebooting" | "model" | "restoring" | "done" | "restored" | "failed" | "recovery-required";
   message: string;
   percent: number;
   port: string;
@@ -30,7 +30,10 @@ export function recoverUsbUpdate(): Promise<void> {
   if (IS_ANDROID) return Promise.reject(new Error("USB firmware recovery requires Bosun Desktop"));
   return invoke("usb_update_recover");
 }
-export function startFactoryInstall(candidateId: string): Promise<UsbUpdateJob> {
+/** `model` is the MIDI Captain model the user selected (lib/hardware.ts id);
+ * the installer stores it on the pedal after verifying the firmware. */
+export function startFactoryInstall(candidateId: string, model: string): Promise<UsbUpdateJob> {
   if (IS_ANDROID || !candidateId) return Promise.reject(new Error("Select a Captain in Bosun Desktop"));
-  return invoke("factory_install_start", { candidateId, confirmedModel: true });
+  if (!model) return Promise.reject(new Error("Choose your MIDI Captain model"));
+  return invoke("factory_install_start", { candidateId, model });
 }

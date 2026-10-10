@@ -2,10 +2,12 @@
 #define BOSUN_RUNTIME_H
 
 #include "bosun/config.h"
+#include "bosun/hardware.h"
 #include "bosun/kemper.h"
 #include "bosun/switch_fsm.h"
 
-#define BOSUN_RUNTIME_SWITCHES 10u
+/* Capacity for the largest model; hardware->switch_count switches are live. */
+#define BOSUN_RUNTIME_SWITCHES BOSUN_HARDWARE_SWITCHES_MAX
 #define BOSUN_RUNTIME_COMMANDS 128u
 #define BOSUN_RUNTIME_NAV_PATCHES BOSUN_PATCH_CATALOG_MAX
 #define BOSUN_RUNTIME_COMMANDS_PER_TICK 32u
@@ -57,6 +59,7 @@ typedef void (*bosun_runtime_binding_fn)(void *context, uint8_t switch_index, ui
 
 typedef struct {
     bosun_config_t *config;
+    const bosun_hardware_t *hardware; /* Never NULL after init. */
     bosun_midi_send_fn send;
     void *send_context;
     bosun_runtime_monitor_fn monitor;
@@ -86,9 +89,12 @@ typedef struct {
 
 /* Runtime storage is caller owned and <= 8 KiB (config owns JSON separately).
  * init/config_changed emit no MIDI. tick drains bounded work and never sleeps.
- * pressed_mask follows physical order 1,2,3,4,up,A,B,C,D,down; ADCs are 0..65535. */
+ * pressed_mask, hold_mask and switch indices follow hardware->switch_names
+ * (logical chain order); ADCs are 0..65535. init selects the 10-switch model. */
 void bosun_runtime_init(bosun_runtime_t *runtime, bosun_config_t *config,
     bosun_midi_send_fn send, void *context);
+/* Startup only: releases every switch gesture and rebinds; emits no MIDI. */
+void bosun_runtime_set_hardware(bosun_runtime_t *runtime, const bosun_hardware_t *hardware);
 void bosun_runtime_tick(bosun_runtime_t *runtime, uint32_t now_ms,
     uint16_t pressed_mask, uint16_t expression1, uint16_t expression2);
 void bosun_runtime_feed_midi(bosun_runtime_t *runtime, uint8_t port,

@@ -2,16 +2,19 @@
   import { cmd, patchIdOf, type BindingMode, type Patch, type PatchSummary } from "../lib/protocol";
   import { defaultLedFor } from "../lib/switch-colors";
   import { getBankCount, getRigsPerBank, DEFAULT_RIGS_PER_BANK, MAX_BANKS, nextFreePatch } from "../lib/bank-layout";
+  import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
 
   type Props = {
     patches: PatchSummary[];
     currentPatchEnvelope: { bank: number; slot: number; patch: Patch } | null;
     rigsPerBank?: number;
     bankCount?: number;
+    /** Connected model: new patches bind exactly its switches. */
+    hardware?: HardwareLayout;
     ready?: boolean;
   };
 
-  let { patches, currentPatchEnvelope, rigsPerBank = DEFAULT_RIGS_PER_BANK, bankCount = MAX_BANKS, ready = true }: Props = $props();
+  let { patches, currentPatchEnvelope, rigsPerBank = DEFAULT_RIGS_PER_BANK, bankCount = MAX_BANKS, hardware = CAPTAIN_10, ready = true }: Props = $props();
   let configuredSlots = $derived(getRigsPerBank({ rigs_per_bank: rigsPerBank }));
   let configuredBanks = $derived(getBankCount({ bank_count: bankCount }));
   let error = $state("");
@@ -22,13 +25,11 @@
   let targetSlot = $state(1);
   let targetName = $state("");
 
-  const SWITCH_ORDER = ["1","2","3","4","up","A","B","C","D","down"];
-
   function blankPatch(name: string): Patch {
     return {
       name,
       tft_color: "#00ff88",
-      bindings: SWITCH_ORDER.map(sw => ({
+      bindings: hardware.switches.map(sw => ({
         switch: sw,
         mode: "tap" as BindingMode,
         label: "",

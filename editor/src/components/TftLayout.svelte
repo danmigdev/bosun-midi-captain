@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
+  import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
   import ColorField from "./ColorField.svelte";
 
   type LayoutEntry = {
@@ -28,8 +29,13 @@
     device: Record<string, unknown> | null;
     manifest: Manifest | null;
     activeKind?: string;
+    /** Connected model; omitted means the 10-switch Captain. */
+    hardware?: HardwareLayout;
   };
-  let { device, manifest, activeKind = "" }: Props = $props();
+  let { device, manifest, activeKind = "", hardware = CAPTAIN_10 }: Props = $props();
+  // Without expression jacks there is no way to add a pedal indicator; a
+  // layout that already has one keeps rendering it and can remove it.
+  let hasJacks = $derived(hardware.expression_jacks > 0);
 
   // Working copy of the layout. Initialized from device.tft.layout and
   // pushed back via cmd.putGlobal on Save.
@@ -81,10 +87,13 @@
     }
     return out;
   });
-  let allFields = $derived<FieldOpt[]>([
+  let knownFields = $derived<FieldOpt[]>([
     ...CORE_FIELDS.filter(core => !pluginFields.some(field => field.id === core.id)),
     ...pluginFields,
   ]);
+  // Addable fields. The pedal indicator is dropped on a pedal without jacks
+  // whether the core list or the plugin's tft_fields provides it.
+  let allFields = $derived(knownFields.filter(field => hasJacks || field.id !== "expression_mode"));
 
   function addEntry() {
     layout = [...layout, {
@@ -337,7 +346,8 @@
                       onchange={(ev) => e.field = (ev.target as HTMLSelectElement).value}>
                 <option value="">- literal text -</option>
                 {#if e.field && !allFields.some(f => f.id === e.field)}
-                  <option value={e.field}>{e.field}</option>
+                  {@const known = knownFields.find(f => f.id === e.field)}
+                  <option value={e.field}>{known ? `${known.source} · ${known.label}` : e.field}</option>
                 {/if}
                 {#each allFields as f}
                   <option value={f.id}>{f.source} · {f.label}</option>
@@ -394,12 +404,14 @@
         </div>
       {/each}
       <button class="addbtn" onclick={addEntry}>+ Add label</button>
-      <button class="addbtn" onclick={addExpressionEntry}>+ Add pedal indicator</button>
+      {#if hasJacks}
+        <button class="addbtn" onclick={addExpressionEntry}>+ Add pedal indicator</button>
+      {/if}
     </div>
 
     <div class="previewWrap">
       <h3>Preview (240×240)</h3>
-      {#if hasExpressionEntry}
+      {#if hasExpressionEntry && hasJacks}
         <label class="pedalPreview">Pedal preview
           <select bind:value={expressionPreviewMode}>
             <option value="VOL">VOL</option>

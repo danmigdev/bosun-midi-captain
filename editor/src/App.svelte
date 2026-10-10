@@ -43,6 +43,7 @@
     type BundledUpdateManifest, type PendingUpdate,
   } from "./lib/unified-update";
   import { isNativeFirmware, supportsFirmwareFileOta, supportsBootloader, type FirmwareIdentity } from "./lib/firmware-capabilities";
+  import { CAPTAIN_10, parseHardware, type HardwareLayout } from "./lib/hardware";
   import { enterBootloader } from "./lib/bootloader";
   import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
   import type { SetlistItem } from "./lib/setlists";
@@ -124,11 +125,13 @@
   let showSetupWizard = $state(false);
   let installCandidate = $state<string | undefined>();
   let installVersion = $state("");
-  function openFactoryInstall(candidate: string, version: string) {
+  let installModel = $state("captain10");
+  function openFactoryInstall(candidate: string, version: string, model: string) {
     showInstaller = false;
     usbJob = null;
     installCandidate = candidate;
     installVersion = version;
+    installModel = model;
     usbUpdatePort = "";
     showUsbUpdate = true;
   }
@@ -291,7 +294,11 @@
   // One-shot check on mount (fire-and-forget).
   $effect(() => { void checkForFirmwareUpdate(); });
 
-  let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean }) | null>(null);
+  let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean; hardware: HardwareLayout }) | null>(null);
+  // The connected pedal's switch layout. Kept across the transient
+  // deviceInfo resets (reconnect, resync, profile switch) so a Mini 6 never
+  // flashes the 10-switch layout while DEVICE_INFO is re-read.
+  let hardware = $state<HardwareLayout>(CAPTAIN_10);
   let hubUpdateOnly = $state(false);
   let canUpdateFirmware = $derived(connected && !hubUpdateOnly && supportsFirmwareFileOta(deviceInfo));
   let bundledUpdate = $state<BundledUpdateManifest | null>(null);
@@ -1194,11 +1201,10 @@
   // can edit name, color, bindings from there.
   async function createBlankPatch(bank: number, slot: number) {
     const { defaultLedFor } = await import("./lib/switch-colors");
-    const SWITCH_ORDER = ["1","2","3","4","up","A","B","C","D","down"];
     const blank: Patch = {
       name: `Patch ${String(bank).padStart(2,"0")}/${String(slot).padStart(2,"0")}`,
       tft_color: "#00ff88",
-      bindings: SWITCH_ORDER.map(sw => ({
+      bindings: hardware.switches.map(sw => ({
         switch: sw,
         mode: "tap",
         label: "",
@@ -1333,23 +1339,28 @@
   function handleMessage(msg: FirmwareMessage) {
     if (!isLogNoise(msg)) pushLog(msg);
     switch (msg.type) {
-      case "DEVICE_INFO":
+      case "DEVICE_INFO": {
+        const reported = parseHardware(msg.hardware);
         if (deviceInfo && (deviceInfo.fw !== msg.fw || deviceInfo.device !== msg.device
           || deviceInfo.native_experimental !== msg.native_experimental
-          || deviceInfo.firmware_ota !== msg.firmware_ota)) firmwarePushSession++;
+          || deviceInfo.firmware_ota !== msg.firmware_ota
+          || deviceInfo.hardware.model !== reported.model)) firmwarePushSession++;
+        hardware = reported;
         deviceInfo = {
           fw: msg.fw, device: msg.device,
           native_experimental: msg.native_experimental, firmware_ota: msg.firmware_ota,
           reboot_modes: msg.reboot_modes,
           bank: msg.current.bank, slot: msg.current.slot,
-          profile: (msg as { profile?: string }).profile ?? "",
+          profile: msg.profile ?? "",
           stage_input: msg.stage_input === true,
+          hardware: reported,
         };
         // NOTE: do NOT auto-fetch the current Captain patch on connect.
         // currentPatch stays null until the user explicitly opens one
         // from the Patches list - that's what enables Clone/Delete and
         // tells the user "this is what those buttons will act on".
         break;
+      }
       case "MANIFEST":
         manifest = { core_messages: msg.core_messages, plugins: msg.plugins };
         manifestRetries = 0;
@@ -1474,9 +1485,9 @@
   // the manifest. A nav item can declare a `kind` to be shown only when
   // the matching plugin is the active profile; plugin recipe items
   // inherit their kind from the plugin id.
-  // The 10 physical switches, in firmware order. Passed to QuickSetup so the
-  // user can assign recipe roles to switches.
-  const SWITCH_NAMES = ["1","2","3","4","up","A","B","C","D","down"];
+  // The connected pedal's physical switches, in firmware order. Passed to
+  // QuickSetup so the user can assign recipe roles to switches.
+  let switchNames = $derived(hardware.switches);
 
   // Apply a recipe's generated bindings to the currently-open patch. Each
   // binding is written straight to the firmware, then we re-read the patch and
@@ -1819,7 +1830,7 @@
         {:else if page === "patches"}
           <header class="pageHead">
             <h2>Patches</h2>
-            <PatchActions {patches} currentPatchEnvelope={currentPatch} {rigsPerBank} {bankCount} ready={!!globalDevice} />
+            <PatchActions {patches} currentPatchEnvelope={currentPatch} {rigsPerBank} {bankCount} {hardware} ready={!!globalDevice} />
           </header>
           {#if !globalDevice}
             {#if settingsLoadError}
@@ -1938,7 +1949,7 @@
               {/if}
               <PatchEditor bank={currentPatch.bank} slot={currentPatch.slot}
                            patch={currentPatch.patch} {manifest} {activeKind}
-                           device={globalDevice}
+                           device={globalDevice} {hardware}
                            allPatches={patches} {linkConfig}
                            onToggleLock={(s) => { void toggleSlotLock(s); }} />
             {:else if editorTab === "quicksetup"}
@@ -1946,7 +1957,7 @@
                 Guided setups for this patch: pick which switches to use and the bindings are written for you - no need to know the MIDI messages. Applying jumps you back to Switches to see the result.
               </p>
               <QuickSetup
-                switches={SWITCH_NAMES}
+                switches={switchNames}
                 {manifest}
                 {activeKind}
                 existing={currentPatch.patch.bindings}
@@ -1956,6 +1967,7 @@
               <PedalSimulator
                 bindings={currentPatch.patch.bindings}
                 device={globalDevice}
+                {hardware}
                 {connected}
               />
             {/if}
@@ -2045,20 +2057,20 @@
           {/each}
 
         {:else if page === "tft"}
-          <TftLayout device={globalDevice} {manifest} {activeKind} />
+          <TftLayout device={globalDevice} {manifest} {activeKind} {hardware} />
 
         {:else if page === "settings"}
           <header class="pageHead">
             <h2>Settings</h2>
             <button onclick={() => cmd.getGlobal()}>Reload</button>
           </header>
-          <Settings device={globalDevice} {manifest} {activeKind} {connected} />
+          <Settings device={globalDevice} {manifest} {activeKind} {connected} {hardware} />
 
         {:else if page === "maint"}
           <header class="pageHead">
             <h2>Maintenance</h2>
           </header>
-          <MaintenancePanel {connected} {activeProfile} firmwareInfo={deviceInfo}
+          <MaintenancePanel {connected} {activeProfile} firmwareInfo={deviceInfo} {hardware}
                             onBootloader={canEnterBootloader ? doEnterBootloader : undefined}
                             usbRelease={canUseUsbUpdate ? bundledUpdate?.release : null}
                             onUsbUpdate={openUsbUpdate}
@@ -2103,7 +2115,7 @@
             {/if}
           </div>
         {:else if page === "stage"}
-          <StageView {deviceInfo} {manifest} device={globalDevice} {connected} {patches} onExit={() => page = "home"} />
+          <StageView {deviceInfo} {hardware} {manifest} device={globalDevice} {connected} {patches} onExit={() => page = "home"} />
         {/if}
       </main>
     </div>
@@ -2135,7 +2147,7 @@
 
   {#if showUsbUpdate && !IS_ANDROID}
     <NativeUsbUpdate port={usbUpdatePort} installed={usbInstalled} version={installCandidate ? installVersion : bundledUpdate?.firmware_version || usbJob?.version || ""}
-                     candidateId={installCandidate} job={usbJob} canStart={() => installCandidate ? !usbLocked && !busy : canUseUsbUpdate && connectedPortName === usbUpdatePort}
+                     candidateId={installCandidate} model={installModel} job={usbJob} canStart={() => installCandidate ? !usbLocked && !busy : canUseUsbUpdate && connectedPortName === usbUpdatePort}
                      onPreparing={prepareUsbUpdate} onJob={acceptUsbJob} onClose={closeUsbUpdate} />
   {/if}
 
@@ -2156,6 +2168,7 @@
       {connected}
       hasActiveProfile={!!activeProfile}
       {manifest}
+      {hardware}
       onClose={() => showOnboarding = false} />
   {/if}
 

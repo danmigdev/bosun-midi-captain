@@ -142,7 +142,7 @@ pub fn candidates() -> Result<Vec<Candidate>, String> {
         if (d.vendor_id(), d.product_id()) == (0x2e8a, 0x0003) {
             found.push(Candidate {
                 id,
-                label: "RP2040 in BOOTSEL — confirm this is your 10-switch MIDI Captain".into(),
+                label: "RP2040 in BOOTSEL - confirm this is your MIDI Captain".into(),
                 port: String::new(),
                 identity: UsbIdentity {
                     serial: String::new(),
@@ -170,9 +170,9 @@ pub fn candidates() -> Result<Vec<Candidate>, String> {
                 found.push(Candidate {
                     id,
                     label: format!(
-                        "{} — {port} — {serial}",
+                        "{} - {port} - {serial}",
                         if d.product_id() == 0xcafe {
-                            "Factory USB device — confirm your MIDI Captain"
+                            "Factory USB device - confirm your MIDI Captain"
                         } else {
                             "MIDI Captain"
                         }
@@ -354,11 +354,12 @@ impl Helper {
             };
             let data = h.request(1, 0, 0, &[])?;
             let flash_uid: String = data[..8].iter().map(|b| format!("{b:02X}")).collect();
-            if flash_uid != h.uid || word(&data, 8) as usize != FLASH_BYTES || word(&data, 12) != 1
-            {
-                return Err(
-                    "Unsupported Captain identity, flash size or installer protocol".into(),
-                );
+            if flash_uid != h.uid || word(&data, 12) != 1 {
+                return Err("Unsupported Captain identity or installer protocol".into());
+            }
+            // The helper reports a capacity only for the supported 8 MiB chip.
+            if word(&data, 8) as usize != FLASH_BYTES {
+                return Err("This Captain does not report the 8 MiB flash chip Bosun requires. Nothing was written; the pedal keeps its current firmware.".into());
             }
             return Ok(Some(h));
         }

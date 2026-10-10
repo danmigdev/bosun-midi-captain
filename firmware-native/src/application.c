@@ -25,7 +25,8 @@ static bool expression_read(void *context, uint8_t jack, uint16_t *raw) {
 
 static void expression_input(bosun_application_t *app) {
     uint8_t enabled = 0;
-    for (unsigned i = 0; i < 2; ++i) {
+    /* A model without jacks never reads, charges or releases their GPIOs. */
+    for (unsigned i = 0; i < 2 && i < app->runtime.hardware->expression_jacks; ++i) {
         /* Capture the ordinary value before the first charge; the runtime
          * movement gate must start at the pedal's real parked position. */
         if (!bosun_expression_presence_busy(&app->expression_presence, (uint8_t)(i + 1)))
@@ -192,7 +193,8 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
         int colors = bosun_json_get(device, nav, "bank_colors");
         char bank[8]; (void)snprintf(bank, sizeof bank, "%u", app->config.bank);
         uint32_t bank_color = color(device, bosun_json_get(device, colors, bank), 0x888888);
-        for (unsigned sw = 0; sw < BOSUN_SWITCH_COUNT; ++sw) {
+        const bosun_hardware_t *hardware = runtime->hardware;
+        for (unsigned sw = 0; sw < hardware->switch_count; ++sw) {
             const bosun_runtime_binding_t *binding = &runtime->bindings[sw];
             uint32_t rgb = 0;
             if (binding->patch_token >= 0) {
@@ -214,6 +216,11 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
             for (unsigned pixel = 3 * sw; pixel < 3 * sw + 3; ++pixel) {
                 if (app->leds[pixel] != rgb) { app->leds[pixel] = rgb; app->leds_dirty = true; }
             }
+        }
+        /* The board clocks the longest chain; a shorter one passes the dark
+         * tail out of its last pixel. */
+        for (unsigned pixel = hardware->led_count; pixel < BOSUN_LED_COUNT; ++pixel) {
+            if (app->leds[pixel]) { app->leds[pixel] = 0; app->leds_dirty = true; }
         }
     }
     if (app->leds_dirty) {
@@ -271,11 +278,16 @@ bool bosun_application_init(bosun_application_t *app, const char *host_root) {
     memset(app, 0, sizeof *app);
     if (!bosun_board_init(NULL)) return false;
     (void)bosun_store_mount(host_root); /* Deliberately no format/fallback write. */
+    bool hardware_configured = false;
+    const bosun_hardware_t *hardware = bosun_hardware_load(&hardware_configured);
+    bosun_config_set_expression_jacks(hardware->expression_jacks);
     app->boot_result = bosun_config_init(&app->config);
     bosun_runtime_init(&app->runtime, &app->config, bosun_application_send_midi, app);
+    bosun_runtime_set_hardware(&app->runtime, hardware);
     app->startup_action_pending = app->boot_result == BOSUN_STORE_OK &&
         app->config.has_patch && !app->runtime.kemper_enabled;
     bosun_protocol_init(&app->protocol, &app->runtime);
+    app->protocol.hardware_configured = hardware_configured;
     app->protocol.read_led = bosun_board_leds_get;
     app->protocol.read_switches = bosun_board_switches;
     bosun_display_init(&app->display);
@@ -308,7 +320,8 @@ void bosun_application_tick(bosun_application_t *app) {
         app->runtime.patch_revision != app->config.patch_revision)
         bosun_runtime_config_changed(&app->runtime);
     expression_input(app);
-    bosun_runtime_tick(&app->runtime, now, bosun_board_switches(),
+    bosun_runtime_tick(&app->runtime, now,
+                       bosun_hardware_logical_mask(app->runtime.hardware, bosun_board_switches()),
                        app->expression_raw[0], app->expression_raw[1]);
     bosun_config_tick(&app->config, now);
     flush_midi(app);

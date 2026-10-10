@@ -23,10 +23,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("starts factory installation only after Install and keeps status polling read-only", async () => {
   mocks.factory.mockResolvedValue({...job("preflight"),mode:"install"});
-  const options={...props(),candidateId:"pinned-device"}; render(NativeUsbUpdate,options);
+  const options={...props(),candidateId:"pinned-device",model:"mini6"}; render(NativeUsbUpdate,options);
   expect(mocks.factory).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole("button",{name:"Install",exact:true}));
-  await waitFor(() => expect(mocks.factory).toHaveBeenCalledExactlyOnceWith("pinned-device"));
+  await waitFor(() => expect(mocks.factory).toHaveBeenCalledExactlyOnceWith("pinned-device","mini6"));
   expect(mocks.start).not.toHaveBeenCalled();
 });
 

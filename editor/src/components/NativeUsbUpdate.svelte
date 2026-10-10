@@ -6,9 +6,11 @@
     port: string; installed?: string; version: string; job: UsbUpdateJob | null;
     canStart: () => boolean; onPreparing: () => void;
     candidateId?: string;
+    /** First installation: the MIDI Captain model chosen in the installer. */
+    model?: string;
     onJob: (job: UsbUpdateJob | null) => void; onClose: () => void;
   };
-  let { port, installed, version, job, canStart, onPreparing, onJob, onClose, candidateId }: Props = $props();
+  let { port, installed, version, job, canStart, onPreparing, onJob, onClose, candidateId, model = "captain10" }: Props = $props();
   let working = $state(false);
   let error = $state("");
   let waiting = $state(false);
@@ -19,7 +21,7 @@
   const running = $derived(working || waiting || usbUpdateRunning(job));
   const labels: Record<string,string> = {
     preflight: "Checking the Captain", bootloader: "Starting USB bootloader", backup: "Backing up the Captain",
-    writing: "Installing firmware", rebooting: "Verifying the update", restoring: "Restoring backup",
+    writing: "Installing firmware", rebooting: "Verifying the update", model: "Storing the pedal model", restoring: "Restoring backup",
     done: "Bosun updated", restored: "Original firmware restored", failed: "Update stopped", "recovery-required": "Restore the Captain",
   };
   function schedulePoll() {
@@ -43,7 +45,7 @@
       previousId = (await usbUpdateStatus())?.id;
       ignoredJobId = recover ? undefined : previousId;
       if (recover) { await recoverUsbUpdate(); onJob(await usbUpdateStatus()); }
-      else onJob(candidateId ? await startFactoryInstall(candidateId) : await startUsbUpdate(port));
+      else onJob(candidateId ? await startFactoryInstall(candidateId, model) : await startUsbUpdate(port));
     } catch (e) {
       error = String(e);
       // A lost IPC reply may still have started the worker. Status is read-only:

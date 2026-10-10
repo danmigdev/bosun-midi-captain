@@ -3,10 +3,10 @@ set(BOSUN_PLATFORM host CACHE STRING "Build platform: host or rp2040")
 set_property(CACHE BOSUN_PLATFORM PROPERTY STRINGS host rp2040)
 if(BOSUN_PLATFORM STREQUAL "rp2040")
     include(cmake/pico_sdk.cmake)
-    project(BosunNative VERSION 0.7.2 LANGUAGES C CXX ASM)
+    project(BosunNative VERSION 0.8.0 LANGUAGES C CXX ASM)
     pico_sdk_init()
 elseif(BOSUN_PLATFORM STREQUAL "host")
-    project(BosunNative VERSION 0.7.2 LANGUAGES C)
+    project(BosunNative VERSION 0.8.0 LANGUAGES C)
 else()
     message(FATAL_ERROR "Unsupported BOSUN_PLATFORM=${BOSUN_PLATFORM}")
 endif()
@@ -48,7 +48,8 @@ target_include_directories(bosun_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gener
 # Required inventory: a missing component must fail CI, never silently build a
 # partial application. No source glob can pull host fakes into the ARM image.
 target_sources(bosun_core PRIVATE src/config.c src/runtime.c src/protocol.c
-    src/application.c src/storage_path.c src/display.c src/expression_presence.c)
+    src/application.c src/storage_path.c src/display.c src/expression_presence.c
+    src/hardware.c)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/littlefs/lfs.c")
     add_library(bosun_littlefs STATIC third_party/littlefs/lfs.c third_party/littlefs/lfs_util.c)
@@ -125,10 +126,12 @@ else()
     else()
         message(STATUS "USB platform host tests need PICO_SDK_PATH; remaining host tests are SDK independent")
     endif()
-    foreach(suite json midi switch_fsm kemper config runtime protocol application storage display expression_presence)
+    foreach(suite json midi switch_fsm kemper config runtime protocol application storage display expression_presence hardware)
         bosun_add_test(${suite} tests/test_${suite}.c)
         target_link_libraries(test_${suite} PRIVATE bosun_core)
     endforeach()
+    # The boot chord constant must stay the intersection of every model's pins.
+    target_include_directories(test_hardware PRIVATE platform/rp2040)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_storage_lfs.c")
         bosun_add_test(storage_lfs tests/test_storage_lfs.c platform/rp2040/storage.c src/storage_path.c)
         target_include_directories(test_storage_lfs PRIVATE include)

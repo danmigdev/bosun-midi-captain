@@ -20,6 +20,8 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
 static GATE: Mutex<()> = Mutex::new(());
+/// MIDI Captain models the bundled native firmware accepts in SET_HARDWARE.
+const SUPPORTED_MODELS: [&str; 2] = ["captain10", "mini6"];
 static BUSY: AtomicBool = AtomicBool::new(false);
 static PENDING: AtomicBool = AtomicBool::new(false);
 pub fn busy() -> bool {
@@ -39,6 +41,9 @@ pub struct Job {
     pub mode: String,
     #[serde(default)]
     pub loader_sha256: String,
+    /// First installation only: the MIDI Captain model the user selected.
+    #[serde(default)]
+    pub model: String,
     pub id: String,
     pub phase: String,
     pub message: String,
@@ -485,6 +490,18 @@ impl Worker {
         drop(helper);
         result?;
         self.job.port = verify_runtime(&self.job.identity, &self.job.version, &Value::Null)?;
+        // The firmware is installed and verified at this point. Storing the
+        // model must never turn into a failure that restores stock firmware:
+        // an unconfirmed pedal is asked for its model when it first connects.
+        if !self.job.model.is_empty() {
+            self.publish("model", 100, "Firmware verified. Storing the selected MIDI Captain model")?;
+            match apply_hardware(&self.job.identity, &self.job.port, &self.job.model) {
+                Ok(port) => self.job.port = port,
+                Err(error) => {
+                    return self.publish("done", 100, &format!("Native Bosun installed and storage verified, but the pedal model could not be stored ({error}). Choose your model when Bosun asks, or in Maintenance > Pedal model. The complete original backup is retained on this computer."));
+                }
+            }
+        }
         self.publish("done",100,"Native Bosun installed and storage verified. Create a profile for your Kemper model to finish setup. The complete original backup is retained on this computer.")
     }
     fn restore_factory(&mut self) -> Result<(), String> {
@@ -628,6 +645,9 @@ impl Runtime {
         Ok(Self(handle))
     }
     fn request(&self, command: &str, expected: &str) -> Result<Value, String> {
+        self.request_with(command, json!({}), expected)
+    }
+    fn request_with(&self, command: &str, fields: Value, expected: &str) -> Result<Value, String> {
         let id = format!(
             "usb-{}",
             SystemTime::now()
@@ -635,8 +655,14 @@ impl Runtime {
                 .map_err(|e| e.to_string())?
                 .as_nanos()
         );
+        let mut message = json!({"type":command,"id":id});
+        if let (Some(target), Some(extra)) = (message.as_object_mut(), fields.as_object()) {
+            for (key, value) in extra {
+                target.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
         self.0
-            .write_all(format!("\n{}\n", json!({"type":command,"id":id})).as_bytes())
+            .write_all(format!("\n{message}\n").as_bytes())
             .map_err(|e| e.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut buffer = Vec::new();
@@ -722,6 +748,31 @@ fn verify_runtime(
     Err(last)
 }
 
+/// Store the selected model on a freshly installed pedal. A model other than
+/// the firmware default restarts it once; the stored record is read back.
+fn apply_hardware(identity: &UsbIdentity, port: &str, model: &str) -> Result<String, String> {
+    let reply = Runtime::open_retry(port)?.request_with("SET_HARDWARE", json!({"model": model}), "ACK")?;
+    if reply["model"] != model {
+        return Err("the Captain did not accept the selected model".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut last = "the Captain did not reconnect".to_string();
+    while Instant::now() < deadline {
+        for candidate in identity.serial_ports() {
+            match Runtime::open(&candidate).and_then(|runtime| runtime.request("GET_DEVICE_INFO", "DEVICE_INFO")) {
+                Ok(info) if info["hardware"]["model"] == model && info["hardware"]["configured"] == true => {
+                    return Ok(candidate);
+                }
+                // Before its restart the firmware still reports the old model.
+                Ok(_) => last = "the Captain still reports another model".into(),
+                Err(error) => last = error,
+            }
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    Err(last)
+}
+
 fn detach(app: &AppHandle) -> Result<(), String> {
     crate::midi::midi_bridge_stop(app.state());
     crate::serial::disconnect(app.state())?;
@@ -759,6 +810,7 @@ pub async fn usb_update_start(port: String, app: AppHandle) -> Result<Job, Strin
         let mut job = Job {
             mode: "update".into(),
             loader_sha256: String::new(),
+            model: String::new(),
             id: format!(
                 "{}-{}",
                 SystemTime::now()
@@ -840,13 +892,13 @@ pub async fn usb_update_recover(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn factory_install_start(
     candidate_id: String,
-    confirmed_model: bool,
+    model: String,
     app: AppHandle,
 ) -> Result<Job, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _gate = normal_operation()?;
-        if !confirmed_model {
-            return Err("Confirm the supported 10-switch MIDI Captain before installing".into());
+        if !SUPPORTED_MODELS.contains(&model.as_str()) {
+            return Err("Choose your MIDI Captain model before installing".into());
         }
         if crate::tcp_serial::tcp_active() {
             return Err(
@@ -881,6 +933,7 @@ pub async fn factory_install_start(
             ),
             mode: "install".into(),
             loader_sha256: firmware_package::sha256(&assets.loader),
+            model,
             phase: "preflight".into(),
             message: "Preparing first native installation".into(),
             percent: 0,
@@ -915,6 +968,17 @@ pub async fn factory_install_start(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn supported_models_match_the_native_firmware_table() {
+        // The installer must offer exactly the models SET_HARDWARE accepts.
+        let firmware = include_str!("../../../firmware-native/src/hardware.c");
+        let defined: Vec<&str> = firmware
+            .split("const bosun_hardware_t bosun_hardware_")
+            .skip(1)
+            .filter_map(|definition| definition.split('"').nth(1))
+            .collect();
+        assert_eq!(defined, SUPPORTED_MODELS);
+    }
     struct Fake {
         data: Vec<u8>,
         fail: bool,
@@ -1009,6 +1073,7 @@ mod tests {
         let mut job = Job {
             mode: "update".into(),
             loader_sha256: String::new(),
+            model: String::new(),
             id: id.clone(),
             phase: "writing".into(),
             message: String::new(),

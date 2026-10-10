@@ -58,16 +58,37 @@ it("requires device and model confirmation and never invokes a legacy firmware i
   const start=vi.fn(); render(Installer,{onClose:vi.fn(),onStart:start});
   await screen.findByText("Captain COM5");
   expect(screen.getByRole("button",{name:"Continue"})).toBeDisabled();
+  // The model is an explicit choice: no confirmation is offered before it.
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole("radio",{name:"MIDI Captain (10 switches)"}));
+  expect(screen.getByRole("button",{name:"Continue"})).toBeDisabled();
   expect(start).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole("checkbox",{name:/This is my MIDI Captain \(10 switches\)/}));
+  await fireEvent.click(screen.getByRole("button",{name:"Continue"}));
+  expect(start).toHaveBeenCalledExactlyOnceWith("selected","0.6.6-native","captain10");
+  expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith("factory_install_discover");
+});
+it("installs a Mini 6 only after its own confirmation, with an untested-hardware note", async () => {
+  mocks.invoke.mockResolvedValue({ devices:[{id:"selected",port:"COM5",label:"Captain COM5"}],version:"0.8.0-native",problem:null });
+  const start=vi.fn(); render(Installer,{onClose:vi.fn(),onStart:start});
+  await screen.findByText("Captain COM5");
+  await fireEvent.click(screen.getByRole("radio",{name:"MIDI Captain (10 switches)"}));
+  await fireEvent.click(screen.getByRole("checkbox"));
+  // Changing the model withdraws the confirmation given for the other one.
+  await fireEvent.click(screen.getByRole("radio",{name:"MIDI Captain Mini 6 (6 switches)"}));
+  expect(screen.getByRole("checkbox",{name:/This is my MIDI Captain Mini 6 \(6 switches\)/})).not.toBeChecked();
+  expect(screen.getByRole("button",{name:"Continue"})).toBeDisabled();
+  expect(screen.getByText(/not been tested on a real Mini 6/)).toBeInTheDocument();
   await fireEvent.click(screen.getByRole("checkbox"));
   await fireEvent.click(screen.getByRole("button",{name:"Continue"}));
-  expect(start).toHaveBeenCalledExactlyOnceWith("selected","0.6.6-native");
-  expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith("factory_install_discover");
+  expect(start).toHaveBeenCalledExactlyOnceWith("selected","0.8.0-native","mini6");
 });
 it("blocks incomplete assets even when a Captain is connected",async () => {
   mocks.invoke.mockResolvedValue({devices:[{id:"selected",port:"COM5",label:"Captain COM5"}],version:null,problem:"Checksum mismatch"});
   render(Installer,{onClose:vi.fn(),onStart:vi.fn()});
-  await screen.findByRole("alert"); await fireEvent.click(screen.getByRole("checkbox"));
+  await screen.findByRole("alert");
+  await fireEvent.click(screen.getByRole("radio",{name:"MIDI Captain (10 switches)"}));
+  await fireEvent.click(screen.getByRole("checkbox"));
   expect(screen.getByRole("button",{name:"Continue"})).toBeDisabled();
 });
 it("rejects shell syntax in credentials and quotes literal paths", () => {

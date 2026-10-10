@@ -8,6 +8,7 @@
   // the Stage-relevant subset. StageView itself is used unchanged.
   import { onMount } from "svelte";
   import StageView from "../components/StageView.svelte";
+  import { CAPTAIN_10, parseHardware, type HardwareLayout } from "../lib/hardware";
   import {
     cmd,
     sendAndAwait,
@@ -31,6 +32,10 @@
 
   let connected = $state(false);
   let deviceInfo = $state<DeviceInfo | null>(null);
+  // The pedal's switch layout from the latest DEVICE_INFO. Link drops and
+  // resyncs keep it, so a Mini 6 never flashes the 10-switch grid while
+  // DEVICE_INFO is re-read; only the next DEVICE_INFO replaces it.
+  let hardware = $state.raw<HardwareLayout>(CAPTAIN_10);
   let manifest = $state<Manifest | null>(null);
   let globalDevice = $state<Record<string, unknown> | null>(null);
   let patches = $state<PatchSummary[]>([]);
@@ -204,6 +209,9 @@
                 profile,
                 stage_input: msg.stage_input === true,
               };
+              // Firmware that predates hardware reporting omits it and is
+              // always the 10-switch Captain, which parseHardware returns.
+              hardware = parseHardware(msg.hardware);
               if (profileChanged) invalidatePatchList(true);
               if (isRecord(msg.tft_colors)) {
                 globalDevice = { ...(globalDevice ?? {}), tft_colors: msg.tft_colors };
@@ -339,6 +347,7 @@
 {#if everBooted}
   <StageView
     {deviceInfo}
+    {hardware}
     {manifest}
     device={globalDevice}
     {connected}

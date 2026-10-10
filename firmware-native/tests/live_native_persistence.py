@@ -237,7 +237,8 @@ class Acceptance:
 
     def info_projection(self, info, change=None):
         require_native(info)
-        for key in ("device", "profile", "preset_navigation", "tft_colors", "tft_labels"):
+        # hardware: the model record must survive every reboot (absent before 0.8).
+        for key in ("device", "profile", "preset_navigation", "tft_colors", "tft_labels", "hardware"):
             if key not in self.snapshot["info"]:
                 continue
             expected = copy.deepcopy(self.snapshot["info"][key])

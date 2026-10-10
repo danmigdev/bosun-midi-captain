@@ -13,7 +13,7 @@
     type Manifest,
     type PatchSummary,
   } from "../lib/protocol";
-  import { DEFAULT_LAYOUT } from "../lib/pedal-layout";
+  import { parseHardware, type HardwareLayout } from "../lib/hardware";
   import { getBankCount, MAX_BANKS } from "../lib/bank-layout";
   import { ledColorFor } from "../lib/led-color";
   import {
@@ -27,15 +27,21 @@
   import "../lib/stage-controls.css";
 
   type Props = {
-    deviceInfo: { fw: string; device: string; bank: number; slot: number; profile?: string; stage_input?: boolean } | null;
+    deviceInfo: { fw: string; device: string; bank: number; slot: number; profile?: string; stage_input?: boolean; hardware?: unknown } | null;
+    /** The connected pedal's switch layout (lib/hardware.ts). Without it,
+     *  deviceInfo's DEVICE_INFO.hardware descriptor is parsed instead. */
+    hardware?: HardwareLayout;
     manifest: Manifest | null;
     device: Record<string, unknown> | null;
     connected: boolean;
     patches: PatchSummary[];
     onExit: () => void;
   };
-  let { deviceInfo, manifest, device, connected, patches, onExit }: Props = $props();
+  let { deviceInfo, hardware, manifest, device, connected, patches, onExit }: Props = $props();
   let bankCount = $derived(getBankCount(device));
+  // Firmware that predates hardware reporting omits the descriptor and is
+  // always the 10-switch Captain, which parseHardware returns for it.
+  let pedalLayout = $derived(hardware ?? parseHardware(deviceInfo?.hardware));
 
   // Preset-navigation row (e.g. rig-select switches): a device-level
   // overlay, not a patch binding, so it never shows up in fullPatch.bindings
@@ -248,13 +254,16 @@
     && refreshedInventory.profile === deviceInfo?.profile ? refreshedInventory.patches : patches);
 
   // Preserve configured rig-switch positions, then use remaining positions
-  // for unmapped slots. This exposes all ten possible slots even on a generic
-  // profile without preset navigation; live effect bindings are not executed.
+  // for unmapped slots. This exposes one slot per physical switch (all ten
+  // possible slots on the 10-switch Captain) even on a generic profile
+  // without preset navigation; live effect bindings are not executed.
   let preselectionSlots = $derived.by(() => {
     const slots = new Map<string, number>();
     const used = new Set<number>();
     if (!preselectedBank) return slots;
-    const switches = DEFAULT_LAYOUT.flat();
+    const switches = pedalLayout.switches;
+    // Like the pedal, honour an explicit mapping to any slot (1-10), even
+    // past the switch count; unmapped switches take the lowest free slots.
     for (const sw of switches) {
       const slot = navSlotFor(sw);
       if (slot !== null && Number.isInteger(slot) && slot >= 1 && slot <= 10 && !used.has(slot)) {
@@ -592,8 +601,10 @@
   // belonged to the previous rig.
   let contextLocation = "";
 
-  // 2-row x 5-column pedal layout
-  let rows = $derived(DEFAULT_LAYOUT);
+  // The model's physical rows, top row first: 2 x 5 on the 10-switch
+  // Captain, 2 x 3 on the Mini 6. The widest row sizes the switch type.
+  let rows = $derived(pedalLayout.rows);
+  let columns = $derived(Math.max(1, ...rows.map((row) => row.length)));
 
   // --- derived ---
   let rigName = $derived(
@@ -1034,6 +1045,7 @@
 </script>
 
 <div class="stage" class:stage--preselect={!!preselectedBank} style={stageThemeVars}
+  style:--stage-columns={`${columns}`}
   style:--stage-beam-seconds-per-pixel={`${borderSecondsPerPixel}s`}
   style:--stage-action-height={stageActionHeight === undefined ? undefined : `${stageActionHeight}px`}
   style:--stage-action-width={stageActionWidth === undefined ? undefined : `${stageActionWidth}px`}
@@ -1052,7 +1064,8 @@
     {/each}
   </span>
   {#if showThemeEditor}
-    <StageThemeEditor theme={stageTheme} onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
+    <StageThemeEditor theme={stageTheme} showExpression={pedalLayout.expression_jacks > 0}
+      onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
   {/if}
   {#if showBankPicker}
     <StageBankPicker banks={bankPickerLoaded ? bankOptions : []} currentBank={bankPickerCurrent}
@@ -1065,7 +1078,7 @@
       onclose={() => (tunerDismissed = true)} />
   {/if}
 
-  <!-- header: rig name + bank/rig + BPM + expression -->
+  <!-- header: rig name + bank/rig + BPM + expression (pedals with a jack) -->
   <div class="stage__header" use:measureStageHeader>
     <div class="stage__rig-name" style:color={screenColors.title} use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
     <div class="stage__bank-controls" role="group" aria-label="Bank navigation" aria-busy={bankChangePending}>
@@ -1097,9 +1110,11 @@
         <span class="stage__navigation-error" role="status">Update Captain firmware to control switches from Stage.</span>
       {/if}
     </div>
-    <span class="stage__expression" style:color={stageTheme.sections.expression?.color ?? screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
-      <span class="stage__expression-label"><span>{expressionMode}</span></span>
-    </span>
+    {#if pedalLayout.expression_jacks > 0}
+      <span class="stage__expression" style:color={stageTheme.sections.expression?.color ?? screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
+        <span class="stage__expression-label"><span>{expressionMode}</span></span>
+      </span>
+    {/if}
     <div class="stage__controls">
       <button class="stage__icon-btn stage__exit-btn stage-control-icon stage-control-icon--close" onclick={onExit} aria-label="Exit Stage">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
@@ -1130,7 +1145,7 @@
 
   <div class="stage__divider" aria-hidden="true"></div>
 
-  <!-- 2-row x 5-column footswitch grid -->
+  <!-- footswitch grid, one row per physical row of the pedal -->
   <div class="stage__pedal">
     <!-- ambient floor glow: echoes each engaged switch's own LED colour,
          purely decorative - never the source of truth for switch state -->
@@ -1188,6 +1203,11 @@
 <style>
   .stage {
     --stage-label-font-size: clamp(0.8rem, 3.2vw, 3rem);
+    /* Switch type follows the card width. --stage-columns cards share a row:
+       5 on the 10-switch Captain (exactly the 3.2vw label and 2vw ID sizes),
+       3 on the Mini 6, whose wider cards get proportionally larger text. */
+    --stage-card-label-size: clamp(0.8rem, calc(16vw / var(--stage-columns, 5)), 3rem);
+    --stage-card-id-size: clamp(0.65rem, calc(10vw / var(--stage-columns, 5)), 1.3rem);
     /* Stage is a dark instrument display in either editor shell theme.
        Saved section fonts/colours and inline TFT colours still win below. */
     --stage-display-bg: #080c10;
@@ -1583,7 +1603,7 @@
   }
 
   .stage__switch-label {
-    font-size: calc(var(--stage-label-font-size) * var(--stage-switch-label-scale, 1));
+    font-size: calc(var(--stage-card-label-size) * var(--stage-switch-label-scale, 1));
     color: var(--stage-switch-label-color, #ffffff);
     font-family: var(--stage-switch-label-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-align: center;
@@ -1619,7 +1639,7 @@
   .stage__switch-id {
     position: absolute;
     top: clamp(8px, 1.2vh, 14px); left: clamp(8px, 1vw, 16px);
-    font-size: calc(clamp(0.65rem, 2vw, 1.3rem) * var(--stage-switch-id-scale, 1));
+    font-size: calc(var(--stage-card-id-size) * var(--stage-switch-id-scale, 1));
     color: var(--stage-switch-id-color, var(--stage-display-muted));
     font-family: var(--stage-switch-id-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     font-weight: 600; letter-spacing: 0.08em;
@@ -1641,6 +1661,9 @@
   @media (orientation: landscape) {
     .stage {
       --stage-label-font-size: min(8.5vh, 2.8vw, 4.5rem);
+      /* Same 2.8vw / 1.2vw at 5 columns; the height bounds hold for any count. */
+      --stage-card-label-size: min(8.5vh, calc(14vw / var(--stage-columns, 5)), 4.5rem);
+      --stage-card-id-size: min(3.4vh, calc(6vw / var(--stage-columns, 5)), 1.6rem);
       padding: max(clamp(8px, 1.8vh, 18px), calc(var(--stage-corner-radius) * 0.32));
       gap: clamp(6px, 1.4vh, 12px);
     }
@@ -1690,9 +1713,6 @@
     .stage__switch-label {
       color: var(--stage-switch-label-color, #ffffff);
       line-height: 1.1;
-    }
-    .stage__switch-id {
-      font-size: calc(min(3.4vh, 1.2vw, 1.6rem) * var(--stage-switch-id-scale, 1));
     }
   }
 </style>

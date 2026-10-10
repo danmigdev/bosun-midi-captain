@@ -67,7 +67,7 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * command envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "table", "on", "request", "mode", "switch"};
+        "table", "on", "request", "mode", "switch", "model"};
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
         for (unsigned k = 0; k < sizeof names / sizeof *names; ++k)
@@ -210,9 +210,16 @@ static void observe_changes(bosun_protocol_t *p, bool discarded, uint8_t source)
     p->observed_external_rigs = p->runtime->kemper.state.external_rig_changes;
     p->observed_device_hash = hash; p->ui_observed = true;
 }
+static const bosun_hardware_t *layout(const bosun_protocol_t *p) {
+    return bosun_hardware_or_default(p->runtime->hardware);
+}
+/* Unwired board bits must never make a model look busy. */
+static uint16_t raw_pressed(const bosun_protocol_t *p) {
+    return p->read_switches ? (uint16_t)(p->read_switches() & bosun_hardware_board_mask(layout(p))) : 0;
+}
 static void binding_fired(void *context, uint8_t index, uint8_t action) {
     bosun_protocol_t *p = context;
-    if (!p->connected || p->reboot_requested || index >= BOSUN_RUNTIME_SWITCHES || action >= 6) return;
+    if (!p->connected || p->reboot_requested || index >= layout(p)->switch_count || action >= 6) return;
     observe_changes(p, false, 0);
     p->binding_pending[index] = (uint8_t)(action + 1u);
 }
@@ -249,12 +256,12 @@ static bool emit_ui_event(bosun_protocol_t *p) {
     } else if (p->ui_pending & UI_DIRTY) {
         p->ui_pending &= (uint8_t)~UI_DIRTY; begin_event(p, "dirty_state_changed"); dirty(p);
     } else {
-        static const char *const switches[] = {"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"};
         static const char *const actions[] = {"press", "release", "toggle_on", "toggle_off", "long_press", "double_tap"};
+        const bosun_hardware_t *hardware = layout(p);
         unsigned index = 0;
-        while (index < BOSUN_RUNTIME_SWITCHES && !p->binding_pending[index]) ++index;
-        if (index == BOSUN_RUNTIME_SWITCHES) return false;
-        begin_event(p, "binding_fired"); string(&p->writer, "switch", switches[index]);
+        while (index < hardware->switch_count && !p->binding_pending[index]) ++index;
+        if (index == hardware->switch_count) return false;
+        begin_event(p, "binding_fired"); string(&p->writer, "switch", hardware->switch_names[index]);
         string(&p->writer, "action", actions[p->binding_pending[index] - 1u]);
         p->binding_pending[index] = 0;
     }
@@ -304,11 +311,44 @@ static void tft_projection(bosun_protocol_t *p, const bosun_json_doc_t *d) {
     }
     bosun_json_puts(&p->writer, "}");
 }
+static void name_list(bosun_json_writer_t *w, const char *const *names, unsigned count) {
+    bosun_json_puts(w, "[");
+    for (unsigned i = 0; i < count; ++i) {
+        if (i) bosun_json_puts(w, ",");
+        bosun_json_quote(w, names[i]);
+    }
+    bosun_json_puts(w, "]");
+}
+/* Clients without this object assume the 10-switch Captain, which is what
+ * every earlier firmware reports. Rows list switches top row first. */
+static void hardware_info(bosun_protocol_t *p) {
+    const bosun_hardware_t *h = layout(p);
+    field(&p->writer, "hardware"); bosun_json_puts(&p->writer, "{\"model\":");
+    bosun_json_quote(&p->writer, h->model); string(&p->writer, "name", h->name);
+    field(&p->writer, "configured"); bosun_json_puts(&p->writer, p->hardware_configured ? "true" : "false");
+    field(&p->writer, "switches"); name_list(&p->writer, h->switch_names, h->switch_count);
+    field(&p->writer, "rows"); bosun_json_puts(&p->writer, "[");
+    for (unsigned row = 0; row * h->row_length < h->switch_count; ++row) {
+        if (row) bosun_json_puts(&p->writer, ",");
+        unsigned first = row * h->row_length, left = h->switch_count - first;
+        name_list(&p->writer, h->switch_names + first, left < h->row_length ? left : h->row_length);
+    }
+    bosun_json_puts(&p->writer, "]");
+    integer(&p->writer, "led_count", h->led_count);
+    integer(&p->writer, "expression_jacks", h->expression_jacks);
+    field(&p->writer, "models"); bosun_json_puts(&p->writer, "[");
+    for (unsigned i = 0; i < bosun_hardware_count(); ++i) {
+        if (i) bosun_json_puts(&p->writer, ",");
+        bosun_json_quote(&p->writer, bosun_hardware_at(i)->model);
+    }
+    bosun_json_puts(&p->writer, "]}");
+}
 static void device_info(bosun_protocol_t *p) {
     bosun_config_t *c = p->runtime->config; const bosun_json_doc_t *d = &c->device_doc;
     begin(p, "DEVICE_INFO"); string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
     field(&p->writer, "device");
-    if (!raw(&p->writer, d, bosun_json_get(d, 0, "device_name"))) bosun_json_quote(&p->writer, "MIDI Captain");
+    if (!raw(&p->writer, d, bosun_json_get(d, 0, "device_name"))) bosun_json_quote(&p->writer, layout(p)->name);
+    hardware_info(p);
     field(&p->writer, "current"); bosun_json_puts(&p->writer, "{\"bank\":");
     bosun_json_write_integer(&p->writer, c->bank); integer(&p->writer, "slot", c->slot);
     bosun_json_puts(&p->writer, "}"); string(&p->writer, "profile", c->profile);
@@ -379,7 +419,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         if (!rt->kemper.state.connected || !rt->kemper.state.rig_name_fresh ||
             bosun_kemper_transition_active(&rt->kemper) || rt->preview_active ||
             rt->config_revision != c->revision || rt->patch_revision != c->patch_revision ||
-            rt->queue_count || rt->waiting || (p->read_switches && p->read_switches()))
+            rt->queue_count || rt->waiting || raw_pressed(p))
             { error(p, "busy"); goto done; }
         bool success;
         if (!strcmp(action, "position")) {
@@ -398,7 +438,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         if (!coordinates(p, &bank, &slot, false) || !text_arg(p, "switch", name, sizeof name, false))
             { error(p, "invalid_request"); goto done; }
         bosun_input_result_t result = bosun_runtime_activate_switch(rt, name, bank, slot,
-            get(p, "profile") >= 0 ? profile : NULL, now_ms, p->read_switches ? p->read_switches() : 0);
+            get(p, "profile") >= 0 ? profile : NULL, now_ms, raw_pressed(p));
         static const char *const errors[] = {NULL, "invalid_request", "stale_state", "busy", "unbound"};
         if (result != BOSUN_INPUT_OK) { error(p, errors[result]); goto done; }
     }
@@ -539,9 +579,9 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         }
     } else if (!strcmp(p->type, "LED_DUMP")) {
         if (!p->read_led) { error(p, "leds_unavailable"); goto done; }
-        static const char *const names[] = {"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"};
+        const bosun_hardware_t *hardware = layout(p);
         begin(p, "LED_DUMP"); bosun_json_puts(&p->writer, ",\"pixels\":[");
-        for (unsigned i = 0; i < 30; ++i) {
+        for (unsigned i = 0; i < hardware->led_count; ++i) {
             uint32_t rgb = p->read_led((uint8_t)i);
             bosun_json_puts(&p->writer, i ? ",[" : "[");
             bosun_json_write_integer(&p->writer, (int32_t)((rgb >> 16) & 255));
@@ -552,13 +592,13 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             bosun_json_puts(&p->writer, "]");
         }
         bosun_json_puts(&p->writer, "],\"switch_indices\":{");
-        for (unsigned sw = 0; sw < 10; ++sw) {
+        for (unsigned sw = 0; sw < hardware->switch_count; ++sw) {
             if (sw) bosun_json_puts(&p->writer, ",");
-            bosun_json_quote(&p->writer, names[sw]); bosun_json_puts(&p->writer, ":[");
+            bosun_json_quote(&p->writer, hardware->switch_names[sw]); bosun_json_puts(&p->writer, ":[");
             for (unsigned i = 0; i < 3; ++i) {
                 if (i) bosun_json_puts(&p->writer, ",");
-                /* Bottom row ring order matches Captain board.py. */
-                unsigned within = sw >= 5 && i ? 3 - i : i;
+                /* Bottom row ring order matches Captain board.py and PySwitch. */
+                unsigned within = sw >= hardware->row_length && i ? 3 - i : i;
                 bosun_json_write_integer(&p->writer, (int32_t)(sw * 3 + within));
             }
             bosun_json_puts(&p->writer, "]");
@@ -577,6 +617,21 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         unsigned_integer(&p->writer, "storage_errors", rt->storage_errors);
         unsigned_integer(&p->writer, "midi_events_dropped", p->midi_events_dropped);
         field(&p->writer, "storage_ready"); bosun_json_puts(&p->writer, bosun_store_ready() ? "true" : "false");
+    } else if (!strcmp(p->type, "SET_HARDWARE")) {
+        /* Persist first; a different model takes effect through a normal
+         * reboot so every layer starts from one consistent layout. */
+        char model[32];
+        const bosun_hardware_t *hardware = text_arg(p, "model", model, sizeof model, false) ?
+            bosun_hardware_find(model) : NULL;
+        if (!hardware) { error(p, "unsupported_hardware"); goto done; }
+        r = bosun_hardware_save(hardware);
+        if (r == BOSUN_STORE_OK) {
+            bool reboot = hardware != layout(p);
+            p->hardware_configured = true;
+            string(&p->writer, "model", hardware->model);
+            field(&p->writer, "reboot"); bosun_json_puts(&p->writer, reboot ? "true" : "false");
+            if (reboot) { p->reboot_bootloader = false; p->reboot_requested = true; }
+        }
     } else if (!strcmp(p->type, "REBOOT")) {
         int mode = get(p, "mode");
         bool bootloader = mode >= 0 && bosun_json_equal(&p->request, mode, "bootloader");

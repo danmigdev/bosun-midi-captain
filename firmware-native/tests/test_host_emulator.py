@@ -155,6 +155,47 @@ class HostApplicationTests(unittest.TestCase):
         client.request("REBOOT", "ACK")
         self.assertEqual(emulator.process.wait(timeout=5), 0)
 
+    def test_default_hardware_is_the_10_switch_captain_and_boot_writes_no_record(self):
+        _, client = self.start()
+        hardware = client.request("GET_DEVICE_INFO", "DEVICE_INFO")["hardware"]
+        self.assertEqual((hardware["model"], hardware["configured"]), ("captain10", False))
+        self.assertEqual(hardware["rows"], [["1", "2", "3", "4", "up"], ["A", "B", "C", "D", "down"]])
+        self.assertEqual(len(client.request("LED_DUMP", "LED_DUMP")["pixels"]), 30)
+        self.assertFalse((self.root / "config/hardware.json").exists())
+
+    def test_mini6_record_selects_its_layout_until_set_hardware_restarts(self):
+        record = self.root / "config/hardware.json"
+        record.write_text(json.dumps({"version": 1, "model": "mini6"}), encoding="utf-8")
+        emulator, client = self.start()
+        info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
+        self.assertEqual(info["device"], "Offline Captain")
+        self.assertEqual(info["hardware"], {
+            "model": "mini6", "name": "MIDI Captain Mini 6", "configured": True,
+            "switches": ["1", "2", "3", "A", "B", "C"], "rows": [["1", "2", "3"], ["A", "B", "C"]],
+            "led_count": 18, "expression_jacks": 0, "models": ["captain10", "mini6"],
+        })
+        leds = client.request("LED_DUMP", "LED_DUMP")
+        self.assertEqual(len(leds["pixels"]), 18)
+        self.assertEqual(leds["switch_indices"]["C"], [15, 17, 16])
+        self.assertNotIn("up", leds["switch_indices"])
+        rejected = client.request("ACTIVATE_SWITCH", "ERROR", switch="up", bank=1, slot=1)
+        self.assertEqual(rejected["error"], "invalid_request")
+        context = client.request("GET_CONTEXT", "CONTEXT")["context"]
+        self.assertEqual(list(context["switches"]), ["1", "2", "3", "A", "B", "C"])
+        # Confirming the running model persists without a restart.
+        self.assertFalse(client.request("SET_HARDWARE", "ACK", model="mini6")["reboot"])
+        self.assertIsNone(emulator.process.poll())
+        self.assertEqual(client.request("SET_HARDWARE", "ERROR", model="nano4")["error"], "unsupported_hardware")
+        acknowledged = client.request("SET_HARDWARE", "ACK", model="captain10")
+        self.assertEqual((acknowledged["model"], acknowledged["reboot"]), ("captain10", True))
+        self.assertEqual(emulator.process.wait(timeout=5), 0)
+        self.assertEqual(json.loads(record.read_text(encoding="utf-8")), {"version": 1, "model": "captain10"})
+        _, client = self.start()
+        hardware = client.request("GET_DEVICE_INFO", "DEVICE_INFO")["hardware"]
+        self.assertEqual((hardware["model"], hardware["configured"]), ("captain10", True))
+        self.assertEqual(len(client.request("LED_DUMP", "LED_DUMP")["pixels"]), 30)
+        self.assertEqual((self.root / "untouched.txt").read_text(), "original sentinel")
+
     def test_batched_requests_and_reconnect_drop_partial_session(self):
         emulator, client = self.start()
         for iteration in range(100):

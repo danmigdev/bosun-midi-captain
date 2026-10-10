@@ -100,6 +100,20 @@ const sw = (container: HTMLElement, id: string) =>
   [...container.querySelectorAll(".stage__switch")].find(
     (el) => el.querySelector(".stage__switch-id")?.textContent === id,
   )!;
+/** Displayed switch IDs of every Stage tile, in DOM order. */
+const tileIds = (container: HTMLElement) =>
+  [...container.querySelectorAll(".stage__switch")].map(
+    (el) => el.querySelector(".stage__switch-id")?.textContent,
+  );
+
+/** DEVICE_INFO.hardware exactly as Mini 6 firmware reports it. */
+const MINI_6_HARDWARE = {
+  model: "mini6", name: "MIDI Captain Mini 6", configured: true,
+  switches: ["1", "2", "3", "A", "B", "C"], rows: [["1", "2", "3"], ["A", "B", "C"]],
+  led_count: 18, expression_jacks: 0, models: ["captain10", "mini6"],
+};
+const MINI_6_TILES = ["1", "2", "3", "A", "B", "C"];
+const CAPTAIN_10_TILES = ["1", "2", "3", "4", "UP", "A", "B", "C", "D", "DOWN"];
 
 describe("kiosk integration", () => {
   it("applies and refreshes the bank limit from the compact firmware projection without GET_GLOBAL", async () => {
@@ -294,6 +308,66 @@ describe("kiosk integration", () => {
       view.unmount();
       vi.useRealTimers();
     }
+  });
+
+  it("renders a Mini 6 from DEVICE_INFO.hardware and keeps its grid across reconnects until the next DEVICE_INFO", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    // Nothing has described the pedal yet: the 10-switch Captain is assumed.
+    await waitFor(() => expect(tileIds(container)).toEqual(CAPTAIN_10_TILES));
+    const deviceInfo = (bank = 1) => ({
+      type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.8.0-native", device: "MIDI Captain Mini 6", current: { bank, slot: 1 },
+      profile: "generic", preset_navigation: {}, hardware: MINI_6_HARDWARE,
+    });
+    reply(deviceInfo());
+    reply({ type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id, profile: "generic", patches: [] });
+    await waitFor(() => expect(tileIds(container)).toEqual(MINI_6_TILES));
+    expect(container.querySelectorAll(".stage__pedal-row")).toHaveLength(2);
+    expect(container.querySelector(".stage__expression")).toBeNull();
+
+    // Pedal link drop: the grid stays while DEVICE_INFO is re-read.
+    const infos = sentCount("GET_DEVICE_INFO");
+    reply({ type: "HUB", link: "down" });
+    await waitFor(() => expect(container.textContent).toContain("reconnecting"));
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBeGreaterThan(infos));
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+
+    // Hub restart: a new WebSocket and bootstrap reset, still no 10-switch flash.
+    sock().close();
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(1));
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+    sock()._open();
+    sock()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    await waitFor(() => expect(lastSent("GET_DEVICE_INFO")).toBeTruthy());
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+    reply(deviceInfo(2));
+    await waitFor(() => expect(container.querySelector(".stage__bank-number")).toHaveTextContent("BANK 2"));
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+    expect(container.querySelector(".stage__expression")).toBeNull();
+  });
+
+  it("returns to the 10-switch grid when the next DEVICE_INFO has no hardware descriptor", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    const deviceInfo = (hardware?: unknown) => ({
+      type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
+      fw: "0.6.5-native", device: "MIDI Captain", current: { bank: 1, slot: 1 },
+      preset_navigation: {}, hardware,
+    });
+    reply(deviceInfo(MINI_6_HARDWARE));
+    await waitFor(() => expect(tileIds(container)).toEqual(MINI_6_TILES));
+    const infos = sentCount("GET_DEVICE_INFO");
+    reply({ type: "HUB", link: "down" });
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(sentCount("GET_DEVICE_INFO")).toBeGreaterThan(infos));
+    expect(tileIds(container)).toEqual(MINI_6_TILES);
+    // Firmware that predates hardware reporting only ran on the 10-switch Captain.
+    reply(deviceInfo());
+    await waitFor(() => expect(tileIds(container)).toEqual(CAPTAIN_10_TILES));
+    expect(container.querySelector(".stage__expression")).not.toBeNull();
   });
 
   it("shows 'Waiting for the pedal' until the hub link is up", async () => {

@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import PedalMap from "../../src/components/PedalMap.svelte";
+import { CAPTAIN_10, MINI_6 } from "../../src/lib/hardware";
 import type { Binding } from "../../src/lib/protocol";
 
 /** The ten switches in DOM order (matches DEFAULT_LAYOUT row-major). */
@@ -43,6 +44,32 @@ describe("PedalMap", () => {
     const leds = ledsOf(container);
     expect(leds).toHaveLength(10);
     expect(screen.getByRole("group", { name: "Pedal switch map" })).toBeInTheDocument();
+  });
+
+  it("renders the same 10 switches when given the 10-switch hardware", () => {
+    render(PedalMap, { bindings: [], hardware: CAPTAIN_10 });
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(
+      SWITCH_ORDER.map((sw) => `Switch ${sw} (empty)`),
+    );
+  });
+
+  it("renders a Mini 6 as two rows of three switches", () => {
+    const { container } = render(PedalMap, {
+      bindings: [binding("A", { label: "Drive", led: { on: "#123456" } }), binding("up", { label: "Boost" })],
+      hardware: MINI_6,
+    });
+    const rows = Array.from(container.querySelectorAll(".row"));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.querySelectorAll("button").length)).toEqual([3, 3]);
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Switch 1 (empty)", "Switch 2 (empty)", "Switch 3 (empty)",
+      "Switch A - Drive", "Switch B (empty)", "Switch C (empty)",
+    ]);
+    // A binding for a switch the Mini 6 lacks is not drawn as a stomp.
+    expect(screen.queryByRole("button", { name: /Switch up/ })).toBeNull();
+    const leds = ledsOf(container);
+    expect(leds).toHaveLength(6);
+    expect(ledColorOf(leds[3])).toBe("#123456");
   });
 
   it("shows the binding label on bound switches", () => {

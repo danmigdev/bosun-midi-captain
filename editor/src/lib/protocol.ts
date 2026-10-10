@@ -405,6 +405,10 @@ export type FirmwareMessage =
       backup?: string; release?: string; firmware_version?: string;
       sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string }
   | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number };
+      profile?: string;
+      /** Native 0.8+: the model's switch layout (see lib/hardware.ts parseHardware).
+       * Absent on every earlier firmware, which only ran on the 10-switch Captain. */
+      hardware?: unknown;
       /** Native firmware uses a separate release line and does not accept Python file OTA. */
       native_experimental?: boolean; firmware_ota?: boolean; reboot_modes?: string[];
       /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
@@ -963,6 +967,11 @@ export const cmd = {
   getMidiLearn:   () => send({ type: "GET_MIDI_LEARN", id: nextId() }),
   putMidiLearn:   (table: MidiLearnTable) => send({ type: "PUT_MIDI_LEARN", id: nextId(), table }),
   reboot:         () => { if (!IS_ANDROID) send({ type: "REBOOT", id: nextId() }); },
+  // Native 0.8+: persist the pedal model (lib/hardware.ts ids). The firmware
+  // restarts normally when the model differs; `reboot` reports whether it will.
+  setHardware:    (model: string) =>
+                    sendAndAwait<{ type: "ACK"; model?: string; reboot?: boolean }>(
+                      { type: "SET_HARDWARE", model }, 4000),
   getStats:       () => sendAndAwait<{ type: "STATS" } & DeviceStats>({ type: "STATS" }, 6000),
   putFileBegin:   (path: string, size: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_BEGIN", path, size }, 5000),
   putFileChunk:   (path: string, data_b64: string, offset: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64, offset }, 5000),
