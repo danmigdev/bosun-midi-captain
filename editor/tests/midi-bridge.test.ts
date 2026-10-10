@@ -42,11 +42,11 @@ const fakeBridge = vi.hoisted(() => {
   const MIDI_ACTIVE_SENSING = 0xfe;
 
   const KEMPER_PATTERNS = ["profiler", "kemper"];
-  const CAPTAIN_PATTERNS = ["circuitpython", "captain"];
+  const CAPTAIN_PATTERNS = ["bosun", "captain"];
 
   const DEFAULT_DEVICES = [
     "Kemper Profiler Player",
-    "PaintAudio MIDI Captain (CircuitPython)",
+    "PaintAudio MIDI Captain Bosun Native",
   ];
 
   let devices: string[] = [...DEFAULT_DEVICES];
@@ -224,12 +224,12 @@ describe("BridgeStatus type", () => {
     const active: BridgeStatus = {
       active: true,
       kemper_port: "Kemper Profiler Player",
-      pedal_port: "PaintAudio MIDI Captain (CircuitPython)",
+      pedal_port: "PaintAudio MIDI Captain Bosun Native",
     };
     expect(active).toEqual({
       active: true,
       kemper_port: "Kemper Profiler Player",
-      pedal_port: "PaintAudio MIDI Captain (CircuitPython)",
+      pedal_port: "PaintAudio MIDI Captain Bosun Native",
     });
   });
 
@@ -274,8 +274,8 @@ describe("MidiPorts type", () => {
 
   it("accepts a populated port list", () => {
     const populated: MidiPorts = {
-      inputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"],
-      outputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"],
+      inputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"],
+      outputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"],
     };
     expect(populated.inputs).toHaveLength(2);
     expect(populated.outputs).toHaveLength(2);
@@ -374,7 +374,7 @@ describe("bridge state machine", () => {
     expect(status).toEqual({
       active: true,
       kemper_port: "Kemper Profiler Player",
-      pedal_port: "PaintAudio MIDI Captain (CircuitPython)",
+      pedal_port: "PaintAudio MIDI Captain Bosun Native",
     });
     expect(fakeBridge.openCount()).toBe(2);
   });
@@ -425,22 +425,22 @@ describe("bridge state machine", () => {
 
 describe("device name matching", () => {
   it("matches the Kemper by the default patterns (profiler/kemper)", async () => {
-    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart();
     expect(status.kemper_port).toBe("Kemper Profiler Player");
     expect(status.active).toBe(true);
   });
 
   it("matches a device carrying only the 'kemper' pattern", async () => {
-    fakeBridge.setDevices(["Kemper Stage", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["Kemper Stage", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart();
     expect(status.kemper_port).toBe("Kemper Stage");
   });
 
-  it("matches the pedal by the default patterns (circuitpython/captain)", async () => {
-    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"]);
+  it("matches the pedal by the default patterns (bosun/captain)", async () => {
+    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart();
-    expect(status.pedal_port).toBe("PaintAudio MIDI Captain (CircuitPython)");
+    expect(status.pedal_port).toBe("PaintAudio MIDI Captain Bosun Native");
   });
 
   it("matches a device carrying only the 'captain' pattern", async () => {
@@ -449,15 +449,21 @@ describe("device name matching", () => {
     expect(status.pedal_port).toBe("MIDI Captain 10");
   });
 
+  it("matches a device carrying only the 'bosun' pattern", async () => {
+    fakeBridge.setDevices(["Kemper Profiler Player", "Bosun MIDI"]);
+    const status = await midiBridgeStart();
+    expect(status.pedal_port).toBe("Bosun MIDI");
+  });
+
   it("a hint overrides the default matching", async () => {
     // 'audiobox' matches no default pattern; only the hint finds it.
-    fakeBridge.setDevices(["AudioBox USB MIDI", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["AudioBox USB MIDI", "PaintAudio MIDI Captain Bosun Native"]);
     expect((await midiBridgeStart()).active).toBe(false);
     expect((await midiBridgeStart("audiobox")).kemper_port).toBe("AudioBox USB MIDI");
   });
 
   it("hint matching is case-insensitive", async () => {
-    fakeBridge.setDevices(["AUDIOBOX USB MIDI", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["AUDIOBOX USB MIDI", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart("audiobox");
     expect(status.kemper_port).toBe("AUDIOBOX USB MIDI");
   });
@@ -465,7 +471,7 @@ describe("device name matching", () => {
   it("a pedal hint selects a different pedal than the defaults would", async () => {
     fakeBridge.setDevices([
       "Kemper Profiler Player",
-      "PaintAudio MIDI Captain (CircuitPython)",
+      "PaintAudio MIDI Captain Bosun Native",
       "External USB Synth",
     ]);
     const status = await midiBridgeStart(undefined, "synth");
@@ -473,7 +479,7 @@ describe("device name matching", () => {
   });
 
   it("treats a blank hint as absent (Android isNullOrBlank semantics)", async () => {
-    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart("");
     expect(status.active).toBe(true);
     expect(status.kemper_port).toBe("Kemper Profiler Player");
@@ -484,12 +490,12 @@ describe("device name matching", () => {
     // device is eligible, so the bridge cannot start. (This is the Android
     // spec; the Kotlin as written falls back to patterns on a miss, which
     // would let the hint-less "Kemper Profiler Player" match anyway.)
-    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart("zzz-no-match");
     expect(status).toEqual({
       active: false,
       kemper_port: null,
-      pedal_port: "PaintAudio MIDI Captain (CircuitPython)",
+      pedal_port: "PaintAudio MIDI Captain Bosun Native",
     });
   });
 });
@@ -523,12 +529,12 @@ describe("edge cases", () => {
   });
 
   it("returns a partial status when only one device is present", async () => {
-    fakeBridge.setDevices(["PaintAudio MIDI Captain (CircuitPython)"]);
+    fakeBridge.setDevices(["PaintAudio MIDI Captain Bosun Native"]);
     const status = await midiBridgeStart();
     expect(status).toEqual({
       active: false,
       kemper_port: null,
-      pedal_port: "PaintAudio MIDI Captain (CircuitPython)",
+      pedal_port: "PaintAudio MIDI Captain Bosun Native",
     });
   });
 
@@ -565,7 +571,7 @@ describe("edge cases", () => {
   it("keeps the bridge running when an unrelated device is unplugged", async () => {
     fakeBridge.setDevices([
       "Kemper Profiler Player",
-      "PaintAudio MIDI Captain (CircuitPython)",
+      "PaintAudio MIDI Captain Bosun Native",
       "Some Other Synth",
     ]);
     await midiBridgeStart();
@@ -575,7 +581,7 @@ describe("edge cases", () => {
     const status = await midiBridgeStatus();
     expect(status.active).toBe(true);
     expect(status.kemper_port).toBe("Kemper Profiler Player");
-    expect(status.pedal_port).toBe("PaintAudio MIDI Captain (CircuitPython)");
+    expect(status.pedal_port).toBe("PaintAudio MIDI Captain Bosun Native");
   });
 
   it("calls exactly the four commands the Android backend registers", async () => {

@@ -41,18 +41,15 @@
   let patches = $state<PatchSummary[]>([]);
   let everBooted = $state(false);
 
-  let hasGlobal = false;
   let hasPatchList = false;
   let deviceInfoRetry: ReturnType<typeof setTimeout> | null = null;
   let deviceInfoRefreshPending = false;
-  let globalRetry: ReturnType<typeof setTimeout> | null = null;
   let patchListRetry: ReturnType<typeof setTimeout> | null = null;
   let patchListGeneration = 0;
   let patchListRequest: { generation: number; started: number } | null = null;
   let patchListProfile: string | undefined;
   const DEVICE_INFO_RETRY_MS = 1_500;
   const PATCH_LIST_RETRY_MS = 2_500;
-  const GLOBAL_RETRY_MS = 10_000;
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -133,16 +130,6 @@
     requestPatchList();
   }
 
-  function requestGlobalFallback(): void {
-    if (!hasGlobal && globalRetry === null) {
-      cmd.getGlobal();
-      globalRetry = setTimeout(() => {
-        globalRetry = null;
-        requestGlobalFallback();
-      }, GLOBAL_RETRY_MS);
-    }
-  }
-
   function resync(): void {
     // Re-sync current location and inventory on every (re)connect; patches
     // may have been edited while this browser was disconnected.
@@ -150,20 +137,17 @@
     requestDeviceInfo();
 
     // PATCH_LIST is small and supplies the lower-row rig names. It is sent
-    // immediately, independently of navigation config. New firmware carries
-    // the tiny preset_navigation subtree in DEVICE_INFO; legacy firmware is
-    // detected from that response and only then falls back to GET_GLOBAL.
+    // immediately, independently of navigation config, which arrives as the
+    // tiny preset_navigation subtree in DEVICE_INFO.
     invalidatePatchList(true);
     everBooted = true;
 
-    // The manifest is deliberately NOT fetched. On the RP2040 it streams
-    // field-by-field for ~7 s as a background generator, and a GET_PATCH
-    // arriving mid-stream (every rig change) can wedge that generator,
-    // permanently queueing every later CONTEXT push / EVENT behind it -
-    // the Stage view then goes deaf to effect toggles. StageView only
-    // uses the manifest for label fallbacks on UNLABELLED bindings
-    // (uncommon - switches carry their own label), so the Stage view
-    // does without it.
+    // The manifest is deliberately NOT fetched. It is the largest response
+    // in the protocol, and while it streams every later CONTEXT push /
+    // EVENT queues behind it - the Stage view would go deaf to effect
+    // toggles. StageView only uses the manifest for label fallbacks on
+    // UNLABELLED bindings (uncommon - switches carry their own label), so
+    // the Stage view does without it.
   }
 
   onMount(() => {
@@ -228,13 +212,6 @@
                   // Absent on older firmware; discard the previous profile's limit.
                   bank_count: msg.bank_count,
                 };
-                hasGlobal = true;
-                if (globalRetry) clearTimeout(globalRetry);
-                globalRetry = null;
-              } else if (!hasGlobal) {
-                // Backward compatibility with firmware that predates the
-                // DEVICE_INFO fast path. LIST_PATCHES is already in flight.
-                requestGlobalFallback();
               }
               if (deviceInfoRefreshPending) {
                 deviceInfoRefreshPending = false;
@@ -244,16 +221,6 @@
             }
             case "MANIFEST":
               manifest = msg as unknown as Manifest;
-              break;
-            case "GLOBAL":
-              // A malformed response must not permanently disarm the retry:
-              // preset_navigation comes from this object and without it the
-              // lower row cannot be mapped even if PATCH_LIST succeeded.
-              if (!isRecord(msg.device)) break;
-              globalDevice = msg.device;
-              hasGlobal = true;
-              if (globalRetry) clearTimeout(globalRetry);
-              globalRetry = null;
               break;
             case "CONTEXT": {
               const bank = Number(msg.context?.bank);
@@ -273,8 +240,8 @@
             case "EVENT":
               if (connected && (msg.event === "dirty_state_changed"
                   || msg.event === "saved" || msg.event === "discarded")) {
-                // Both CP and native emit these for patch edits/creation,
-                // saving and discarding (including removal of dirty patches).
+                // The firmware emits these for patch edits/creation, saving
+                // and discarding (including removal of dirty patches).
                 invalidatePatchList();
               }
               if (msg.event === "global_changed" && connected) {
@@ -314,11 +281,9 @@
         // Anything in flight on the old CDC session is gone; allow the next
         // link-up to retry immediately rather than waiting for the watchdog.
         if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
-        if (globalRetry) clearTimeout(globalRetry);
         if (patchListRetry) clearTimeout(patchListRetry);
         deviceInfoRetry = null;
         deviceInfoRefreshPending = false;
-        globalRetry = null;
         patchListRetry = null;
         patchListRequest = null;
         ++patchListGeneration;
@@ -333,10 +298,8 @@
       for (const off of offs) off();
       if (poll) clearInterval(poll);
       if (deviceInfoRetry) clearTimeout(deviceInfoRetry);
-      if (globalRetry) clearTimeout(globalRetry);
       if (patchListRetry) clearTimeout(patchListRetry);
       deviceInfoRetry = null;
-      globalRetry = null;
       patchListRetry = null;
       patchListRequest = null;
       ++patchListGeneration;

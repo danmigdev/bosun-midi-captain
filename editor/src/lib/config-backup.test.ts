@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  validateBackup, inferKindFromDevice, backupFilename, timestampedFolderName,
+  validateBackup, backupFilename, timestampedFolderName,
   type ConfigBackup,
 } from "./config-backup";
 
@@ -21,11 +21,6 @@ function v2Backup(overrides: Partial<ConfigBackup> = {}): ConfigBackup {
 describe("validateBackup", () => {
   it("accepts a clean v2 backup", () => {
     const b = v2Backup();
-    expect(validateBackup(b)).toEqual(b);
-  });
-
-  it("accepts a legacy v1 backup (no kind)", () => {
-    const b = v2Backup({ version: 1, kind: undefined });
     expect(validateBackup(b)).toEqual(b);
   });
 
@@ -52,20 +47,6 @@ describe("validateBackup", () => {
   it("rejects non-object input", () => {
     expect(() => validateBackup(null)).toThrow();
     expect(() => validateBackup(42)).toThrow();
-  });
-});
-
-describe("inferKindFromDevice", () => {
-  it("returns kemper_player when device.kemper is present", () => {
-    expect(inferKindFromDevice({ kemper: { enabled: true } })).toBe("kemper_player");
-  });
-
-  it("returns ampero_ii_stage when device.ampero is present", () => {
-    expect(inferKindFromDevice({ ampero: { enabled: false } })).toBe("ampero_ii_stage");
-  });
-
-  it("returns empty string when no known plugin section is present", () => {
-    expect(inferKindFromDevice({ device_name: "x" })).toBe("");
   });
 });
 

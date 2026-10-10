@@ -1,10 +1,11 @@
-// Scenarios mirror tools/fsm_test.py - keep the two in sync.
+// Scenarios follow the firmware FSM (firmware-native/src/switch_fsm.c, tested
+// by firmware-native/tests/test_switch_fsm.c) - keep the two in sync.
 //
-// The Python harness drives a debounced hardware pin: a press/release only
-// "settles" on the second poll (~6ms after the raw edge), so press_start is
-// registered at that settle time. This simulator drives CLEAN edges, so the
-// press()/release()/tick() timestamps below correspond to the Python settle
-// times (e.g. Python polls at t=100 then t=106 -> here we press at 106).
+// The firmware debounces a hardware pin: a press/release only "settles" once
+// the raw level has held for 5 ms, so press_start is registered at that
+// settle time. This simulator drives CLEAN edges, so the press()/release()/
+// tick() timestamps below are settle times (e.g. a raw edge at t=100 polled
+// again at t=106 settles at 106 -> here we press at 106).
 
 import { describe, it, expect } from "vitest";
 import { SwitchFsm } from "./switch-fsm";

@@ -1,17 +1,14 @@
 /**
- * Unit tests for the pure helpers in src/lib/firmware-update.ts and the
- * humanBytes formatter in src/lib/firmware-push.ts.
+ * Unit tests for compareVersions in src/lib/firmware-update.ts.
  *
- * These are the version-comparison brains behind the "Update firmware"
- * affordance: compareVersions decides whether a GitHub release is newer
- * than what the pedal reports, and humanBytes formats the file sizes shown
- * in the push log. All pure - no Tauri, no network - so they are cheap to
- * lock down and easy to regress on.
+ * This is the version-comparison brain behind the firmware update offers:
+ * it decides whether the bundled release is newer than what the pedal
+ * reports. Pure - no Tauri, no network - so it is cheap to lock down and
+ * easy to regress on.
  */
 import { describe, it, expect } from "vitest";
 
 import { compareVersions } from "../src/lib/firmware-update";
-import { FIRMWARE_CHUNK_B64, humanBytes } from "../src/lib/firmware-push";
 
 describe("compareVersions", () => {
   it("orders by major, then minor, then patch", () => {
@@ -29,6 +26,7 @@ describe("compareVersions", () => {
     expect(compareVersions("0.2.0-scaffold", "0.2.0")).toBe(0);
     expect(compareVersions("0.2.0-rc.1", "0.2.0")).toBe(0);
     expect(compareVersions("0.3.0-beta", "0.2.0")).toBeGreaterThan(0);
+    expect(compareVersions("0.6.5", "0.6.5-native")).toBe(0);
   });
 
   it("treats missing segments as zero", () => {
@@ -41,32 +39,5 @@ describe("compareVersions", () => {
     // parseInt("x") is NaN -> coerced to 0 by the `|| 0` guard.
     expect(compareVersions("x.y.z", "0.0.0")).toBe(0);
     expect(compareVersions("1.x.0", "1.0.5")).toBeLessThan(0);
-  });
-});
-
-describe("humanBytes", () => {
-  it("formats bytes under 1 KiB as raw byte counts", () => {
-    expect(humanBytes(0)).toBe("0 B");
-    expect(humanBytes(512)).toBe("512 B");
-    expect(humanBytes(1023)).toBe("1023 B");
-  });
-
-  it("formats KiB with one decimal", () => {
-    expect(humanBytes(1024)).toBe("1.0 KB");
-    expect(humanBytes(1536)).toBe("1.5 KB");
-  });
-
-  it("formats MiB with two decimals", () => {
-    expect(humanBytes(1024 * 1024)).toBe("1.00 MB");
-    expect(humanBytes(1024 * 1024 * 2.5)).toBe("2.50 MB");
-  });
-});
-
-describe("firmware upload memory budget", () => {
-  it("keeps every decoded OTA chunk at or below 96 bytes", () => {
-    // Base64 carries 3 raw bytes per 4 characters. Keeping this a multiple of
-    // four also means chunks never split a base64 quantum.
-    expect(FIRMWARE_CHUNK_B64 % 4).toBe(0);
-    expect((FIRMWARE_CHUNK_B64 / 4) * 3).toBeLessThanOrEqual(96);
   });
 });

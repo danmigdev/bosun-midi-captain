@@ -1,6 +1,6 @@
-//! The desktop sends a release package to the Pi; it never treats a native
-//! binary as a CircuitPython file tree. Missing optional assets disable the
-//! unified update offer (for development and builds without a native release).
+//! The desktop sends the bundled native release package to the Pi. Missing
+//! optional assets disable the unified update offer (for development and
+//! builds without a native release).
 use std::io::Read;
 use std::path::Path;
 use base64::{engine::general_purpose::STANDARD, Engine};

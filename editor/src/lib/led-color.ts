@@ -1,8 +1,9 @@
 import type { Binding } from "../lib/protocol";
 
-// Port of firmware/lib/captain/leds.py:_color_for (and parse_hex) so the editor
-// can preview exactly what colour the pedal will light for a given binding and
-// latched state. Keep this in lockstep with the firmware.
+// Port of the switch LED colour logic in firmware-native/src/application.c
+// (render_leds and its color()/scale() helpers) so the editor can preview
+// exactly what colour the pedal will light for a given binding and latched
+// state. Keep this in lockstep with the firmware.
 
 // Off (dimmed) latched LED brightness on the same 0-255 scale as the overall LED
 // brightness (device.leds.brightness). Scales the on colour: 255 = as bright as
@@ -12,7 +13,7 @@ export const DEFAULT_LATCHED_OFF_DIM = 64;
 /**
  * Parse '#rrggbb' into an [r, g, b] tuple of ints. Anything malformed
  * (not a string, wrong length, missing leading '#', non-hex digits) -> [0,0,0].
- * Mirrors Python parse_hex.
+ * Mirrors the firmware's color() parser.
  */
 export function parseHex(color: string): [number, number, number] {
   if (typeof color !== "string" || color.length !== 7 || color[0] !== "#") {
@@ -35,8 +36,8 @@ export function rgbToHex([r, g, b]: [number, number, number]): string {
 
 /**
  * Return the '#rrggbb' colour the pedal will render for this binding, given
- * whether the switch is currently latched on. Replicates the firmware
- * _color_for exactly, including the "dim the on colour when latched-off and
+ * whether the switch is currently latched on. Replicates the firmware's
+ * render_leds exactly, including the "dim the on colour when latched-off and
  * off is absent or black" behaviour.
  */
 export function ledColorFor(
@@ -60,7 +61,7 @@ export function ledColorFor(
       return rgbToHex(offRgb);
     }
     const d = dim;
-    // Round (not floor) the dim scaling - mirrors firmware leds.py _color_for.
+    // Round (not floor) the dim scaling - mirrors the firmware's scale().
     // The strip applies overall brightness with a second integer truncation, so
     // flooring here made some latched-off colours vanish to black at low dim
     // while others survived (colour-dependent quantization). +127 == round-half.

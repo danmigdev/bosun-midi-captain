@@ -10,7 +10,7 @@ package com.bosun.app
  * Number, low nibble = Code Index Number / CIN) followed by up to 3 raw
  * MIDI data bytes, padded with zero where the CIN implies fewer. This is
  * the wire format on the bulk endpoints of a USB-MIDI class-compliant
- * device (both the Kemper and the Captain, via CircuitPython's usb_midi) -
+ * device (both the Kemper and the Captain's own USB-MIDI interface) -
  * a different, lower layer than android.media.midi's Java API.
  *
  * Why this exists instead of android.media.midi: that framework's own

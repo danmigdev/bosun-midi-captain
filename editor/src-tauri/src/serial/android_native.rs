@@ -180,9 +180,9 @@ pub fn available_ports() -> Result<Vec<String>, String> {
 
 /// Opens the Captain's data CDC interface. `baud` is accepted for call-site
 /// symmetry with the old plugin-based `open()` but is otherwise unused -
-/// CircuitPython's CDC ACM does not act on the line-coding baud value (see
-/// BosunSerialDevice.setLineCoding's doc comment). Returns the canonical
-/// port name on success.
+/// the firmware's CDC ACM is not a real UART and ignores the line-coding baud
+/// value (see BosunSerialDevice.setLineCoding's doc comment). Returns the
+/// canonical port name on success.
 pub fn open(path: String, _baud: u32, generation: u64) -> Result<String, String> {
     with_jni(move |env, activity| {
         let context = application_context(env, activity)?;

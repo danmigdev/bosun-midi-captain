@@ -19,7 +19,7 @@ export async function collectPatchCatalog(
       const page = message as unknown as Record<string, unknown>;
       if (page.type !== 'PATCH_LIST' || !Array.isArray(page.patches))
         throw new Error('Invalid patch inventory');
-      // CircuitPython and older native firmware return the complete list.
+      // Older firmware returns the complete list.
       if (page.offset === undefined) {
         if (offset !== 0) throw new Error('Patch pagination disappeared');
         return { message, paginated: false };

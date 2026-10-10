@@ -8,7 +8,7 @@ export function tunerReading(note: unknown, deviance: unknown) {
   const direction = !valid ? "waiting" : Math.abs(offset) <= 200 ? "center"
     : offset < 0 ? "flat" : "sharp";
   return {
-    note: name?.[0] ?? "—",
+    note: name?.[0] ?? "-",
     accidental: name?.slice(1).replace("#", "♯").replace("b", "♭") ?? "",
     valid,
     direction,

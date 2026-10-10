@@ -56,12 +56,11 @@ const WRITE_TIMEOUT_MS: u64 = 1000;
 /// time to land and reset `last_ok` before that timer would misfire.
 /// Needed because StageView deliberately stopped polling GET_CONTEXT on
 /// a timer (see its module comment) in favour of the firmware's
-/// change-triggered `_push_context` - so on Stage, with nothing changing
+/// change-triggered CONTEXT push - so on Stage, with nothing changing
 /// on the pedal, minutes can pass with zero legitimate traffic, which
 /// the wall-clock stall check otherwise can't tell apart from a dead
-/// link (2026-08-15: confirmed live - a full reconnect cycle, including
-/// a DTR-triggered USB re-enumeration that tears down the Kemper MIDI
-/// bridge, was firing every ~15-30 s purely from Stage-view idleness).
+/// link (2026-08-15: confirmed live - a full reconnect cycle was firing
+/// every ~15-30 s purely from Stage-view idleness).
 const KEEPALIVE_IDLE: Duration = Duration::from_secs(6);
 const MAX_INBOX_LINES: usize = 4096;
 const MAX_OUTBOX_LINES: usize = 1024;
@@ -172,9 +171,9 @@ pub async fn connect(
 
     // Single I/O thread: reads incoming data, writes queued commands.
     // A channel lets connect() wait for the sentinel sync to finish
-    // before returning to the frontend, so refetchAll doesn't race
-    // the firmware's reboot.  The thread also self-heals: if no write
-    // succeeds and no data arrives for STALL_RECOVERY_MS, it closes
+    // before returning to the frontend, so refetchAll doesn't race a
+    // firmware that is still booting.  The thread also self-heals: if no
+    // write succeeds and no data arrives for STALL_RECOVERY_MS, it closes
     // and reopens the port and re-runs the sentinel sync.
     let path = canonical.clone();
     let stop = Arc::new(Mutex::new(false));
@@ -212,14 +211,13 @@ pub async fn connect(
         // see the comment on `alive_for_thread.store` below), so nothing
         // previously told the frontend a recovery was even happening. That
         // silence is why the Kemper<->Captain MIDI bridge and the pedal's
-        // switch/effect LEDs went stale until a manual reconnect: the
-        // stall-triggered reopen() re-asserts DTR, which reboots the RP2040
-        // and re-enumerates its whole composite USB device (see the
-        // "CRITICAL: re-enumerate" note below) - including the USB-MIDI
-        // interface BosunMidiBridge relays through. Android's MidiManager
-        // reacts to that vanish/reappear by tearing the Kotlin bridge down
-        // (its DeviceCallback.onDeviceRemoved), but nothing ever brought it
-        // back up because the frontend's `connected` flag never blinked.
+        // switch/effect LEDs went stale until a manual reconnect: a stall
+        // typically means the pedal restarted or its USB link reset, which
+        // re-enumerates its whole composite USB device - including the
+        // USB-MIDI interface BosunMidiBridge relays through. The Kotlin
+        // bridge stops itself when a bridged device detaches, but nothing
+        // ever brought it back up because the frontend's `connected` flag
+        // never blinked.
         // Emitting firmware-reconnecting/-reconnected around the episode
         // (2026-08-14) lets App.svelte's existing `_bridgeAutoDone` reset
         // fire again on the "reconnected" transition, and lets Stage view's
@@ -229,8 +227,9 @@ pub async fn connect(
 
         // Outer loop: one iteration per connection lifecycle.  A stall
         // (no successful write and no inbound data for 15 s) closes and
-        // reopens the port, which re-asserts DTR, resets the CP and
-        // re-runs the sentinel sync -- self-healing without user action.
+        // reopens the port, which re-asserts DTR (a fresh session on the
+        // firmware's data CDC) and re-runs the sentinel sync --
+        // self-healing without user action.
         'connection: loop {
             if *stop_for_thread.lock().unwrap() { break; }
 
@@ -257,13 +256,12 @@ pub async fn connect(
                 }
                 std::thread::sleep(Duration::from_millis(1500));
 
-                // The close() above dropped/re-asserted DTR, which triggers
-                // the RP2040's own hardware reset - not just a
-                // protocol-level reboot - so the device can vanish from the
-                // OS's USB device list entirely for several seconds while
-                // it re-enumerates (the sentinel PING/ACK phase below
-                // already budgets up to 20 s for the firmware itself to
-                // finish booting on top of that). Poll for it to reappear
+                // A stall usually means the pedal restarted or its USB link
+                // reset, so the device can vanish from the OS's USB device
+                // list entirely for several seconds while it re-enumerates
+                // (the sentinel PING/ACK phase below already budgets up to
+                // 20 s for the firmware itself to finish booting on top of
+                // that). Poll for it to reappear
                 // instead of checking once and giving up (2026-08-15:
                 // confirmed live on the raw-USB transport - checking only
                 // once, 1.5 s after close(), missed the re-enumeration
@@ -312,10 +310,11 @@ pub async fn connect(
             first_cycle = false;
 
             // --- Sentinel PING/ACK phase ---
-            // open() asserts DTR, which triggers a CP soft-reset.  Until
-            // the firmware finishes rebooting (~9 s), writes may be NAKed
-            // or simply unanswered.  Keep retrying the PING until the
-            // firmware ACKs it -- only then start serving the outbox.
+            // open() asserts DTR, which starts a fresh session on the
+            // firmware's data CDC.  A pedal that is still booting may NAK
+            // writes or leave them unanswered for several seconds, so keep
+            // retrying the PING until the firmware ACKs it -- only then
+            // start serving the outbox.
             let sync_id = format!("__sync_{}_{}",
                 std::process::id(),
                 std::time::SystemTime::now()
@@ -564,8 +563,8 @@ pub async fn connect(
 
     // Wait for the sentinel sync result before returning.  The I/O
     // thread retries the PING for up to 20 s while the firmware
-    // reboots (DTR-triggered CP reset); refetchAll must not start
-    // until the firmware has ACKed.
+    // finishes booting; refetchAll must not start until the firmware
+    // has ACKed.
     let sync_result = tauri::async_runtime::spawn_blocking(move || {
         sync_rx.recv_timeout(Duration::from_secs(25))
     }).await.map_err(|e| format!("sync worker: {e}"))?;

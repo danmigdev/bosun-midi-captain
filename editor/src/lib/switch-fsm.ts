@@ -1,8 +1,8 @@
-// Pure TypeScript port of the firmware switch FSM (SwitchFsm) from
-// firmware/lib/captain/bindings.py. This is the offline simulator variant:
-// it drives CLEAN edges (no debounce, no pins, no digitalio) and ports ONLY
-// the mode logic, with an injected clock. Keep the transitions in sync with
-// the firmware SwitchFsm and with tools/fsm_test.py.
+// Pure TypeScript port of the firmware switch FSM from
+// firmware-native/src/switch_fsm.c. This is the offline simulator variant:
+// it drives CLEAN edges (no debounce, no pins) and ports ONLY the mode logic,
+// with an injected clock. Keep the transitions in sync with switch_fsm.c and
+// its tests in firmware-native/tests/test_switch_fsm.c.
 
 export type SwitchMode =
   | "tap"
@@ -40,8 +40,8 @@ export class SwitchFsm {
   private firedLongPress = false;
   private latchedPrePress = false;
   private tapPendingUntilMs = 0;
-  // Mirrors `not self._stable` (switch currently held). Set on press,
-  // cleared on release; gates the long_press tick just like the firmware.
+  // Mirrors `!stable` (switch currently held). Set on press, cleared on
+  // release; gates the long_press tick just like the firmware.
   private pressed = false;
 
   constructor(options: SwitchFsmOptions = {}) {
@@ -51,8 +51,8 @@ export class SwitchFsm {
     this.autoMomentaryMs = options.autoMomentaryMs ?? 500;
   }
 
-  /** Reset scratch state and latchedOn. Mirrors firmware reset() minus the
-   * pin-held special case (the simulator has no hardware pin to inspect). */
+  /** Reset scratch state and latchedOn. Mirrors bosun_switch_reset() minus
+   * the pin-held special case (the simulator has no hardware pin to inspect). */
   reset(): void {
     this.pressStartMs = 0;
     this.firedLongPress = false;
@@ -62,7 +62,7 @@ export class SwitchFsm {
     this.pressed = false;
   }
 
-  /** Replicates _on_press. */
+  /** Replicates the firmware's press(). */
   press(nowMs: number, mode: string): ActionKey[] {
     this.pressed = true;
     if (mode === "tap") {
@@ -93,7 +93,7 @@ export class SwitchFsm {
     return [];
   }
 
-  /** Replicates _on_release. */
+  /** Replicates the firmware's release(). */
   release(nowMs: number, mode: string): ActionKey[] {
     this.pressed = false;
     if (mode === "momentary") {
@@ -118,9 +118,9 @@ export class SwitchFsm {
     return [];
   }
 
-  /** Replicates _on_tick. In the firmware the pin-held check is `not self._stable`;
-   * in the simulator we track held state via the double_tap window / long-press
-   * timer set on press. */
+  /** Replicates the timer half of bosun_switch_poll(). In the firmware the
+   * pin-held check is `!stable`; in the simulator we track held state via the
+   * double_tap window / long-press timer set on press. */
   tick(nowMs: number, mode: string): ActionKey[] {
     const triggers: ActionKey[] = [];
     if (mode === "long_press_alt" && this.pressed && !this.firedLongPress) {

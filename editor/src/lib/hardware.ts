@@ -1,9 +1,9 @@
 // Hardware layouts of the supported PaintAudio MIDI Captain models.
 //
 // Native firmware 0.8 and later reports its model in DEVICE_INFO.hardware.
-// Every earlier firmware (native and CircuitPython) only ran on the 10-switch
-// Captain, so a missing descriptor means CAPTAIN_10. Switch order is the
-// NeoPixel chain order; rows are the physical rows, top row first.
+// Every earlier release only ran on the 10-switch Captain, so a missing
+// descriptor means CAPTAIN_10. Switch order is the NeoPixel chain order;
+// rows are the physical rows, top row first.
 
 export interface HardwareLayout {
   /** Stable model id, e.g. "captain10" or "mini6". */

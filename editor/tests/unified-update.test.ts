@@ -34,11 +34,7 @@ vi.mock("../src/lib/protocol", async (importOriginal) => ({
 vi.mock("../src/lib/network-bootstrap", () => ({ readNetworkBootstrap: mocks.readNetworkBootstrap }));
 vi.mock("../src/lib/installer", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/lib/installer")>(),
-  detectPedal: vi.fn(async () => ({ kind: "none" })),
-}));
-vi.mock("../src/lib/firmware-update", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../src/lib/firmware-update")>(),
-  fetchBundledVersion: vi.fn(async () => "0.6.4"), fetchLatestRelease: vi.fn(async () => null),
+  detectPedal: vi.fn(async () => ({ bootloader_drive: null, circuitpy_drive: null, usb_pedal_present: false })),
 }));
 vi.mock("../src/lib/android-lifecycle", () => ({
   onLifecycleChange: mocks.lifecycle, onBackButton: vi.fn(() => () => {}),
@@ -97,9 +93,9 @@ beforeEach(() => {
   for (const command of Object.values(mocks.cmd)) command.mockReset().mockResolvedValue({});
   mocks.cmd.listProfiles.mockResolvedValue({ profiles: [] });
   mocks.cmd.getStats.mockResolvedValue({
-    uptime_ms: 1000, mem_free: 19556, mem_alloc: 234396, loop_iters: 42,
-    midi_rx_count: 0, midi_tx_count: 0, protocol_cmd_count: 1,
-    last_patch_switch_ms: 0, current: { bank: 1, slot: 1 },
+    uptime_ms: 1000, midi_rx_count: 0, midi_tx_count: 0, midi_tx_failed: 0,
+    queue_overflows: 0, unsupported_messages: 0, invalid_messages: 0,
+    protocol_errors: 0, storage_errors: 0, midi_events_dropped: 0, storage_ready: true,
   });
 });
 
@@ -116,16 +112,16 @@ function commands(type: string) {
 }
 
 describe("unified update package and transport", () => {
-  it.each(["0.6.4", "0.6.5", "0.1.0-native", "0.1.0-native-experimental"])("offers one Bosun release to installed %s", installed => {
+  it.each(["0.6.4-native", "0.1.0-native", "0.1.0-native-experimental"])("offers one Bosun release to installed %s", installed => {
     expect(unifiedUpdateAvailable(installed, manifest)).toBe(true);
   });
-  it.each([undefined, "", "not-a-version", "0.6.5-native", "0.6.6"])("does not offer an upgrade from %s", installed => {
+  it.each([undefined, "", "not-a-version", "0.6.5-native", "0.6.6-native"])("does not offer an upgrade from %s", installed => {
     expect(unifiedUpdateAvailable(installed, manifest)).toBe(false);
   });
   it("accepts only the supported bundled manifest schema and board", async () => {
     bundledManifest = manifest;
     expect(await bundledUpdateManifest()).toEqual(manifest);
-    for (const change of [{ schema: 2 }, { board: "other" }, { family: "circuitpython" }, { flash_bytes: 1024 }, { firmware_sha256: "invalid" }]) {
+    for (const change of [{ schema: 2 }, { board: "other" }, { family: "other" }, { flash_bytes: 1024 }, { firmware_sha256: "invalid" }]) {
       bundledManifest = { ...manifest, ...change } as BundledUpdateManifest;
       expect(await bundledUpdateManifest()).toBeNull();
     }
@@ -264,7 +260,7 @@ describe("unified update package and transport", () => {
 
 function renderDialog() {
   return render(UnifiedFirmwareUpdate, {
-    manifest, installed: "0.6.4", endpoint, isCurrentConnection: () => true,
+    manifest, installed: "0.6.4-native", endpoint, isCurrentConnection: () => true,
     onClose: vi.fn(), onJob: vi.fn(), onComplete: vi.fn(),
   });
 }
@@ -438,13 +434,12 @@ async function renderConnectedApp(fw: string) {
   mocks.onFirmwareMessage.mock.calls[0][0]({
     type: "DEVICE_INFO", fw, device: "MIDI Captain", profile: "kemper",
     current: { bank: 1, slot: 1 },
-    ...(fw.includes("native") ? { native_experimental: true, firmware_ota: false } : {}),
   });
   await tick();
 }
 
 describe("App unified update entry points", () => {
-  it.each(["0.6.4", "0.1.0-native-experimental"])("offers the same Bosun update flow to %s", async fw => {
+  it.each(["0.6.4-native", "0.1.0-native-experimental"])("offers the same Bosun update flow to %s", async fw => {
     await renderConnectedApp(fw);
     const button = await screen.findByRole("button", { name: `Update Bosun (${fw} -> 0.6.5)` });
     expect(screen.queryByRole("button", { name: /^Update firmware \(/ })).not.toBeInTheDocument();
@@ -458,8 +453,6 @@ describe("App unified update entry points", () => {
     await fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: /Maintenance$/ }));
     await fireEvent.click(await screen.findByRole("button", { name: "Update Bosun to 0.6.5" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("to 0.6.5");
-    expect(screen.queryByRole("button", { name: "Update from bundled" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^From folder/ })).not.toBeInTheDocument();
   });
   it("does not advertise the new bundle when the hub cannot perform the update", async () => {
     mocks.sendAndAwait.mockResolvedValue({ type: "HUB_UPDATE", phase: "ready", supported: false });

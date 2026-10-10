@@ -168,8 +168,9 @@ class UsbMidiDevice private constructor(
      * Encodes and writes one complete MIDI message. Safe to call from any
      * thread; each call is one or more small, bounded bulkTransfer writes.
      * A write failure is logged and swallowed - matches the "a missed CC
-     * beats a stuck pedal" philosophy already used on the firmware side's
-     * own USB-MIDI retry loop (see midi.py's _tx_usb).
+     * beats a stuck pedal" philosophy of the firmware itself, which drops an
+     * outgoing message rather than block when its MIDI output queue is full
+     * (bosun_application_send_midi in firmware-native/src/application.c).
      */
     @Synchronized
     fun send(message: ByteArray): Boolean {

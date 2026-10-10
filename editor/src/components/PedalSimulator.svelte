@@ -36,7 +36,7 @@
   let seq = 0;
   const MAX_LOG = 400;
 
-  // --- device switch-timing (mirrors app.py SwitchArray construction) ---
+  // --- device switch-timing (mirrors firmware-native/src/runtime.c) ---
   function num(key: string, def: number): number {
     const v = device?.[key];
     return typeof v === "number" ? v : def;

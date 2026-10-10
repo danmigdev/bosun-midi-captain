@@ -34,7 +34,8 @@ object BosunSerialBridge {
     const val PORT_NAME = "usb-data"
 
     /** Same vendor IDs BosunMidiBridge already matches the Captain against
-     * (Adafruit/CircuitPython + Raspberry Pi RP2040 boards). */
+     * (Adafruit, which Bosun's native firmware reports, + Raspberry Pi
+     * RP2040 boards). */
     private val CAPTAIN_VENDOR_IDS = setOf(0x239A, 0x2E8A)
 
     @Volatile private var device: BosunSerialDevice? = null
@@ -142,7 +143,7 @@ object BosunSerialBridge {
         val label = listOfNotNull(usbDevice.manufacturerName, usbDevice.productName)
             .joinToString(" ").trim()
         if (label.isNotBlank()) {
-            return listOf("circuitpython", "captain", "pico", "raspberry")
+            return listOf("bosun", "captain")
                 .any { label.contains(it, ignoreCase = true) }
         }
         return usbDevice.vendorId in CAPTAIN_VENDOR_IDS

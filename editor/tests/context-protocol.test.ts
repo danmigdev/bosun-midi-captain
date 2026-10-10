@@ -1,17 +1,18 @@
 // Protocol-level tests for CONTEXT message handling and Stage Mode data flow.
 //
 // CONTEXT is the firmware's push of the live display_context over the data
-// port. Two producers exist:
-//   - GET_CONTEXT request/response (firmware/lib/captain/protocol.py
-//     _get_context) - carries an `id` echoed back to the requester
-//   - fire-and-forget pushes (firmware/lib/captain/app.py _push_context,
-//     throttled to ~1 Hz, no `id`) - plain `{"type": "CONTEXT", ...}` lines
+// port. Two producers exist (both in firmware-native/src/protocol.c):
+//   - GET_CONTEXT request/response - carries an `id` echoed back to the
+//     requester
+//   - unsolicited pushes (bosun_protocol_tick, sent when the runtime or
+//     Kemper state changes, at most every 50 ms) - CONTEXT lines that answer
+//     no request
 //
 // The context dict is owned by the captain core (patch_name / bank / slot)
-// plus whatever the active plugin publishes via update_context(): the Kemper
-// plugin writes kemper_rig_name, kemper_bank, kemper_rig_in_bank, kemper_rig,
-// kemper_bpm, kemper_tuner*, kemper_connected (see
-// firmware/lib/plugins/kemper.py) and mirrors the tuner fields to generic
+// plus whatever the active plugin publishes: a Kemper profile adds
+// kemper_rig_name, kemper_bank, kemper_rig_in_bank, kemper_rig, kemper_bpm,
+// kemper_tuner*, kemper_connected (see bosun_runtime_context in
+// firmware-native/src/runtime.c) and mirrors the tuner fields to generic
 // tuner / tuner_note / tuner_deviance aliases.
 //
 // These tests pin:
@@ -108,8 +109,8 @@ async function flush() {
 // ----------------------------------------------------------------------
 
 /** The display_context shape a Kemper profile publishes: captain core
- *  fields + everything firmware/lib/plugins/kemper.py writes via _publish
- *  (including the generic tuner aliases mirrored by _add_tuner_aliases). */
+ *  fields + every Kemper field bosun_runtime_context writes (including the
+ *  generic tuner aliases). */
 interface KemperDisplayContext {
   patch_name: string;
   bank: number;
@@ -281,7 +282,7 @@ describe("cmd.getContext()", () => {
       cmd.getContext();
       await flushMicrotasks();
       const id = (JSON.parse(harness.sent[harness.sent.length - 1]) as { id: string }).id;
-      // Firmware replies echoing the request id (protocol.py _get_context).
+      // Firmware replies echoing the request id.
       enqueue({ type: "CONTEXT", id, context: { patch_name: "Lead", bank: 1, slot: 1 } });
       await flush();
       expect(seen).toHaveLength(1);
@@ -296,9 +297,9 @@ describe("cmd.getContext()", () => {
   });
 
   it("delivers fire-and-forget CONTEXT pushes (no id) to subscribers", async () => {
-    // app.py _push_context sends {"type": "CONTEXT", "context": ...} with NO
-    // id - the drain routes id-less lines straight to subscribers, so Stage
-    // Mode keeps updating even without an outstanding request.
+    // An unsolicited CONTEXT push answers no request, so it carries no id to
+    // correlate - the drain routes such lines straight to subscribers, so
+    // Stage Mode keeps updating even without an outstanding request.
     const seen: FirmwareMessage[] = [];
     const unsub = await onFirmwareMessage((m) => seen.push(m));
     try {

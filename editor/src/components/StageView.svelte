@@ -45,8 +45,8 @@
 
   // Preset-navigation row (e.g. rig-select switches): a device-level
   // overlay, not a patch binding, so it never shows up in fullPatch.bindings
-  // - mirrors firmware's _paint_preset_nav_leds (captain/app.py), which
-  // paints these switches from device.preset_navigation, not the patch.
+  // - mirrors the firmware's render_leds (firmware-native/src/application.c),
+  // which paints these switches from device.preset_navigation, not the patch.
   // Without this a nav switch had no binding to read a label from and
   // rendered "-" forever (2026-08-14: reported as "bottom row shows no
   // rig names").
@@ -65,9 +65,10 @@
 
   /** The patch a nav switch targets IN THE CURRENT BANK, or null if the
    *  switch isn't mapped or that slot has no saved patch. Mirrors the
-   *  firmware's available_slots gate (_paint_preset_nav_leds / bindings.py):
-   *  a mapped switch pointing at an empty slot is fully inert on the real
-   *  pedal (LED off, no navigation) - showing a "RIG N" placeholder here
+   *  firmware's saved-slot gate (bosun_runtime_config_changed in
+   *  firmware-native/src/runtime.c): a mapped switch pointing at an empty
+   *  slot is fully inert on the real pedal (LED off, no navigation) -
+   *  showing a "RIG N" placeholder here
    *  when nothing's there would claim a working switch that does nothing
    *  when pressed. Only a slot that actually holds a patch counts as bound. */
   function navPatchFor(sw: string): PatchSummary | null {
@@ -453,8 +454,8 @@
       if (!canContinue()) return;
       if (info.type !== "DEVICE_INFO" || inventory.type !== "PATCH_LIST"
           || !Array.isArray(inventory.patches) || !info.current) throw new Error("Invalid navigation state");
-      // Legacy CP replies leave the active-list profile empty. Native replies
-      // carry the real ID; never combine a position and list from two profiles.
+      // Both replies name their profile (DEVICE_INFO's is empty only while no
+      // profile is active); never combine a position and list from two profiles.
       if ((info.profile && inventory.profile && info.profile !== inventory.profile)
           || (info.profile && deviceInfo?.profile && info.profile !== deviceInfo.profile)) {
         throw new Error("Navigation profile changed");
@@ -825,8 +826,8 @@
   // Fetches the CURRENT context once (fast first paint on entering Stage,
   // before the firmware's own next proactive push). NOT re-run on a timer:
   // the firmware already pushes a fresh CONTEXT message on every change
-  // (captain/app.py _push_context, throttled to 1 Hz, unconditional -
-  // running regardless of which page the editor shows), so polling again
+  // (bosun_protocol_tick in firmware-native/src/protocol.c, at most every
+  // 50 ms, regardless of which page the editor shows), so polling again
   // every 2 s here was pure redundant traffic on an already-busy data CDC
   // channel - competing with patch fetches, switch EVENT delivery and the
   // Kemper bridge's own USB-MIDI servicing for the same main-loop tick

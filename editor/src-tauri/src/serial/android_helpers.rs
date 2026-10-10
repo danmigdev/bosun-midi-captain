@@ -18,28 +18,22 @@ pub fn port_index(name: &str) -> i32 {
 }
 
 /// Sort port names in descending index order so the data CDC (index 1+)
-/// is tried before the console CDC (index 0).  Opening the console CDC
-/// asserts DTR and soft-resets CircuitPython, killing the connection.
+/// is tried before the console CDC (index 0), which only prints status
+/// lines and never answers the protocol.
 #[cfg(any(target_os = "android", test))]
 pub fn sort_ports_desc(ports: &mut Vec<String>) {
     ports.sort_by(|a, b| port_index(b).cmp(&port_index(a)));
 }
 
-/// Does `buf` contain the PING ACK marker for `id`?  The firmware
-/// serializes JSON with a space after the colon ("id": "..."), while
-/// our PING uses compact form ("id":"...").  Match BOTH variants -
-/// matching only the compact form made the sentinel sync miss every
-/// ACK (2026-08-12 regression).
+/// Does `buf` contain the PING ACK marker for `id`?  The firmware writes
+/// compact JSON ({"type":"ACK","id":"..."}); the ACK type and our id must
+/// be on the same protocol line.
 pub fn marker_found(buf: &[u8], id: &str) -> bool {
-    let compact = format!("\"id\":\"{}\"", id);
-    let spaced = format!("\"id\": \"{}\"", id);
-    let ack_compact = b"\"type\":\"ACK\"";
-    let ack_spaced = b"\"type\": \"ACK\"";
+    let id_needle = format!("\"id\":\"{}\"", id);
+    let ack_needle = b"\"type\":\"ACK\"";
     buf.split(|b| *b == b'\n').any(|line| {
-        let has_id = line.windows(compact.len()).any(|w| w == compact.as_bytes())
-            || line.windows(spaced.len()).any(|w| w == spaced.as_bytes());
-        has_id && (line.windows(ack_compact.len()).any(|w| w == ack_compact)
-            || line.windows(ack_spaced.len()).any(|w| w == ack_spaced))
+        line.windows(id_needle.len()).any(|w| w == id_needle.as_bytes())
+            && line.windows(ack_needle.len()).any(|w| w == ack_needle)
     })
 }
 
@@ -143,15 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn marker_matches_firmware_spaced_format() {
-        // Real ACK payload from the firmware (see [sync] debug logs).
-        let ack = b"{\"fw\": \"0.5.2\", \"type\": \"ACK\", \"id\": \"__sync_123_456\"}\n";
-        assert!(marker_found(ack, "__sync_123_456"));
-    }
-
-    #[test]
-    fn marker_matches_compact_format() {
-        let ack = b"{\"type\":\"ACK\",\"id\":\"__sync_123_456\"}\n";
+    fn marker_matches_firmware_ack() {
+        let ack = b"{\"type\":\"ACK\",\"id\":\"__sync_123_456\",\"fw\":\"0.8.0-native\"}\n";
         assert!(marker_found(ack, "__sync_123_456"));
     }
 
@@ -169,7 +156,7 @@ mod tests {
 
     #[test]
     fn marker_rejects_other_ids() {
-        let ack = b"{\"type\":\"ACK\",\"id\": \"__sync_999_999\"}\n";
+        let ack = b"{\"type\":\"ACK\",\"id\":\"__sync_999_999\"}\n";
         assert!(!marker_found(ack, "__sync_123_456"));
     }
 
@@ -178,7 +165,7 @@ mod tests {
         // The ACK may arrive split across USB reads; the marker search
         // runs on the accumulated buffer.
         let mut buf = Vec::new();
-        buf.extend_from_slice(b"{\"type\":\"ACK\",\"id\": \"__sync_");
+        buf.extend_from_slice(b"{\"type\":\"ACK\",\"id\":\"__sync_");
         assert!(!marker_found(&buf, "__sync_123_456"));
         buf.extend_from_slice(b"123_456\"}\n");
         assert!(marker_found(&buf, "__sync_123_456"));

@@ -57,7 +57,7 @@ import androidx.core.content.ContextCompat
  *
  * The kemper/captain hints narrow the device search; when a hint is blank the
  * standard name patterns are used ("profiler"/"kemper" for the Kemper,
- * "circuitpython"/"captain" for the pedal), with vendor-ID matching
+ * "bosun"/"captain" for the pedal), with vendor-ID matching
  * (res/xml/device_filter.xml's set) as a fallback when USB string
  * descriptors are unavailable.
  */
@@ -80,8 +80,9 @@ object BosunMidiBridge {
     /** Kemper GmbH. */
     private val KEMPER_VENDOR_IDS = setOf(0x133E)
 
-    /** Adafruit (CircuitPython) and Raspberry Pi (other RP2040 boards) -
-     *  see res/xml/device_filter.xml and MainActivity.BOSUN_VENDOR_IDS. */
+    /** Adafruit (the VID Bosun's native firmware reports, 239a:80f4) and
+     *  Raspberry Pi (other RP2040 boards) - see res/xml/device_filter.xml
+     *  and MainActivity.BOSUN_VENDOR_IDS. */
     private val CAPTAIN_VENDOR_IDS = setOf(0x239A, 0x2E8A)
 
     /**
@@ -418,15 +419,12 @@ object BosunMidiBridge {
             kemper = devices.firstOrNull {
                 matches(it, kemperHint, KEMPER_VENDOR_IDS, "profiler", "kemper")
             }
-            // The pedal's USB descriptor strings say "Raspberry Pi Pico"
-            // (VID 0x239A), so on Android it shows as "Raspberry Pi Pico
-            // Raspberry Pi Pico" - NOT "CircuitPython Audio" like on
-            // desktop MIDI ports. Match pico/raspberry too.
+            // The native firmware's USB strings are "PaintAudio" / "MIDI
+            // Captain Bosun Native" (firmware-native/platform/rp2040/
+            // usb_descriptors.c), so the pedal's label here is "PaintAudio
+            // MIDI Captain Bosun Native".
             captain = devices.firstOrNull {
-                matches(
-                    it, captainHint, CAPTAIN_VENDOR_IDS,
-                    "circuitpython", "captain", "pico", "raspberry"
-                )
+                matches(it, captainHint, CAPTAIN_VENDOR_IDS, "bosun", "captain")
             }
             if (kemper != null && captain != null) break
             SystemClock.sleep(ENUMERATION_POLL_MS)

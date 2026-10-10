@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sendAndAwait } from "./protocol";
 import { compareVersions } from "./firmware-update";
-import { isNativeFirmware } from "./firmware-capabilities";
 
 export interface BundledUpdateManifest {
   schema: 1;
@@ -46,10 +45,7 @@ export function isTerminalUpdate(status: Pick<HubUpdateStatus, "phase">): boolea
 
 export function unifiedUpdateAvailable(installed: string | undefined, manifest: BundledUpdateManifest | null): boolean {
   if (!installed || !manifest || !RELEASE.test(installed)) return false;
-  const comparison = compareVersions(manifest.release, installed);
-  // A user may have installed this release's CP file bundle over direct USB.
-  // Connecting through the Pi must still offer its native migration package.
-  return comparison > 0 || (comparison === 0 && !isNativeFirmware({ fw: installed }));
+  return compareVersions(manifest.release, installed) > 0;
 }
 
 export async function bundledUpdateManifest(): Promise<BundledUpdateManifest | null> {

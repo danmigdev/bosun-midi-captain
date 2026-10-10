@@ -58,9 +58,10 @@ interface DeviceInfoCmd {
 
 /**
  * Mirrors the App.svelte handleMessage branch for "patch_switched" (fired
- * by every app.switch_patch() call in firmware/lib/captain/app.py -
- * editor-initiated navigation, a local switch press, AND a long-press
- * captain_bank_step / bank_step()). Keep in sync with src/App.svelte.
+ * by the firmware on every patch change - editor-initiated navigation, a
+ * local switch press, MIDI input, AND a long-press captain_bank_step; see
+ * emit_ui_event in firmware-native/src/protocol.c). Keep in sync with
+ * src/App.svelte.
  */
 function handlePatchSwitched(
   msg: PatchSwitchedEvent,

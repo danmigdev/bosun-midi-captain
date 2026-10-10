@@ -126,8 +126,8 @@ pub async fn connect(
         .set_write_timeout(Duration::from_millis(500))
         .map_err(|e| format!("set write timeout: {}", e))?;
 
-    // CircuitPython USB CDC needs DTR asserted before it considers the
-    // host "open". Assert RTS too for safety on some adapters.
+    // The firmware only serves its data CDC while DTR is asserted (each DTR
+    // edge starts a fresh session). Assert RTS too for safety on some adapters.
     let _ = port_opened.set_dtr(true);
     let _ = port_opened.set_rts(true);
 
@@ -494,32 +494,26 @@ fn wait_for_ack(
     //   {"type":"ACK","id":"<probe_id>","fw":"..."}
     //
     // The previous version matched the substring "type":" which also
-    // matches the REPL's echo of our PING command ("type":"PING") on
-    // CircuitPython's primary CDC console - that made auto_connect
-    // happily attach to the REPL port and then sit on data the
-    // protocol layer can't parse. We now require BOTH the probe_id
-    // (so it's our response, not someone else's) and "ACK" / "PONG"
-    // (so it's a real protocol response, not the REPL echoing us).
+    // matches a REPL's echo of our PING command ("type":"PING"), e.g. on
+    // the console of a stock, CircuitPython-based pedal - that made
+    // auto_connect happily attach to the REPL port and then sit on data
+    // the protocol layer can't parse. We now require BOTH the probe_id
+    // (so it's our response, not someone else's) and "ACK" (so it's a
+    // real protocol response, not the REPL echoing us).
     let deadline = Instant::now() + timeout;
     let mut all = Vec::<u8>::with_capacity(1024);
-    let id_needle_a = format!("\"id\":\"{}\"", probe_id);
-    let id_needle_b = format!("\"id\": \"{}\"", probe_id);
-    let ack_needle_a = b"\"type\":\"ACK\"";
-    let ack_needle_b = b"\"type\": \"ACK\"";
+    let id_needle = format!("\"id\":\"{}\"", probe_id);
+    let ack_needle = b"\"type\":\"ACK\"";
     while Instant::now() < deadline {
         let mut chunk = [0u8; 256];
         match handle.read(&mut chunk) {
             Ok(0) => {}
             Ok(n) => {
                 all.extend_from_slice(&chunk[..n]);
-                let has_id = all.windows(id_needle_a.len())
-                                 .any(|w| w == id_needle_a.as_bytes())
-                          || all.windows(id_needle_b.len())
-                                 .any(|w| w == id_needle_b.as_bytes());
-                let has_ack = all.windows(ack_needle_a.len())
-                                  .any(|w| w == ack_needle_a)
-                           || all.windows(ack_needle_b.len())
-                                  .any(|w| w == ack_needle_b);
+                let has_id = all.windows(id_needle.len())
+                                 .any(|w| w == id_needle.as_bytes());
+                let has_ack = all.windows(ack_needle.len())
+                                  .any(|w| w == ack_needle);
                 if has_id && has_ack {
                     return Ok(());
                 }

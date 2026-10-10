@@ -1,6 +1,6 @@
 // Global test setup: registers jest-dom matchers and shims the Tauri
 // runtime so modules that import @tauri-apps/api/core (protocol.ts,
-// firmware-push.ts, ...) don't crash on load in a jsdom environment.
+// installer.ts, ...) don't crash on load in a jsdom environment.
 
 import "@testing-library/jest-dom/vitest";
 import { vi, afterEach } from "vitest";

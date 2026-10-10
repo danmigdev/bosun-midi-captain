@@ -506,7 +506,7 @@ describe("kiosk integration", () => {
     }
   });
 
-  it("falls back to GET_GLOBAL only after a legacy DEVICE_INFO response", async () => {
+  it("never fetches GLOBAL, even when DEVICE_INFO carries no preset row", async () => {
     vi.useFakeTimers();
     const view = mountKiosk();
     try {
@@ -514,29 +514,17 @@ describe("kiosk integration", () => {
       sock()._open();
       sock()._msg(JSON.stringify({ type: "HUB", link: "up" }));
       await vi.advanceTimersByTimeAsync(0);
-      expect(sentCount("GET_GLOBAL")).toBe(0);
 
       reply({
         type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
-        fw: "0.6.3", device: "midi_captain_10", current: { bank: 1, slot: 1 },
+        fw: "0.8.1", device: "midi_captain_10", current: { bank: 1, slot: 1 },
       });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(sentCount("GET_GLOBAL")).toBe(1);
-      const listIndex = sock().sent.findIndex((line) => line.includes('"type":"LIST_PATCHES"'));
-      const globalIndex = sock().sent.findIndex((line) => line.includes('"type":"GET_GLOBAL"'));
-      expect(listIndex).toBeGreaterThanOrEqual(0);
-      expect(globalIndex).toBeGreaterThan(listIndex);
-
       reply({
         type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
         patches: [{ bank: 1, slot: 1, name: "ACOUSTIC" }],
       });
-      reply({
-        type: "GLOBAL", id: lastSent("GET_GLOBAL")!.id,
-        device: { preset_navigation: { switches: { A: 1 } } },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(sw(view.container, "A")).toHaveTextContent("ACOUSTIC");
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(sentCount("GET_GLOBAL")).toBe(0);
     } finally {
       view.unmount();
       vi.useRealTimers();
@@ -626,51 +614,6 @@ describe("kiosk integration", () => {
 
       await vi.advanceTimersByTimeAsync(5_000);
       expect(sentCount("LIST_PATCHES")).toBe(2);
-    } finally {
-      view.unmount();
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps retrying when a GLOBAL response is malformed", async () => {
-    vi.useFakeTimers();
-    const view = mountKiosk();
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      sock()._open();
-      sock()._msg(JSON.stringify({ type: "HUB", link: "up" }));
-      await vi.advanceTimersByTimeAsync(0);
-
-      reply({
-        type: "DEVICE_INFO", id: lastSent("GET_DEVICE_INFO")!.id,
-        fw: "0.6.3", device: "midi_captain_10", current: { bank: 1, slot: 1 },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(sentCount("GET_GLOBAL")).toBe(1);
-      reply({
-        type: "PATCH_LIST", id: lastSent("LIST_PATCHES")!.id,
-        patches: [{ bank: 1, slot: 1, name: "ACOUSTIC" }],
-      });
-      reply({
-        type: "GLOBAL", id: lastSent("GET_GLOBAL")!.id,
-        device: ["truncated"],
-      });
-      await vi.advanceTimersByTimeAsync(0);
-
-      await vi.advanceTimersByTimeAsync(9_999);
-      expect(sentCount("GET_GLOBAL")).toBe(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(sentCount("GET_GLOBAL")).toBe(2);
-
-      reply({
-        type: "GLOBAL", id: lastSent("GET_GLOBAL")!.id,
-        device: { preset_navigation: { switches: { A: 1 } } },
-      });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(sw(view.container, "A")).toHaveTextContent("ACOUSTIC");
-
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(sentCount("GET_GLOBAL")).toBe(2);
     } finally {
       view.unmount();
       vi.useRealTimers();

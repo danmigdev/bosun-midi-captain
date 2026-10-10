@@ -252,7 +252,7 @@ impl Worker {
                 .as_array()
                 .is_some_and(|v| v.contains(&json!("bootloader")))
         {
-            return Err("Direct USB updates require existing Bosun native firmware. Use the Pi updater to migrate CircuitPython.".into());
+            return Err("Direct USB updates require Bosun native firmware that can restart into its USB bootloader.".into());
         }
         let dirty = runtime.request("GET_DIRTY", "DIRTY")?;
         if dirty["patches"].as_array().is_none_or(|v| !v.is_empty()) {
@@ -428,11 +428,8 @@ impl Worker {
                     continue;
                 }
                 if let Ok(runtime) = Runtime::open_retry(&port) {
-                    if let Ok(info) = runtime.request("GET_DEVICE_INFO", "DEVICE_INFO") {
-                        if info["fw"].as_str().is_some_and(|v| v.contains("-native")) {
-                            return Err("Bosun native is already installed. Connect and use Update firmware to preserve your profiles.".into());
-                        }
-                        return Err("Bosun is already installed. Use the migration/update procedure to preserve existing profiles.".into());
+                    if runtime.request("GET_DEVICE_INFO", "DEVICE_INFO").is_ok() {
+                        return Err("Bosun native is already installed. Connect and use Update firmware to preserve your profiles.".into());
                     }
                 }
             }
@@ -535,8 +532,9 @@ fn touch_bootloader(identity: &UsbIdentity, port: &str) {
     if UsbIdentity::from_factory_port(port).ok().as_ref() != Some(identity) {
         return;
     }
-    // Both CircuitPython and PaintAudio 5 accept the 1200-baud reset. The OEM
-    // browser helper holds its selected port open for 800 ms before closing it.
+    // Both the CircuitPython-based stock firmware and PaintAudio 5 accept the
+    // 1200-baud reset. The OEM browser helper holds its selected port open for
+    // 800 ms before closing it.
     if let Ok(handle) = serial2::SerialPort::open(port, 1200) {
         let _ = handle.set_dtr(true);
         thread::sleep(Duration::from_millis(800));

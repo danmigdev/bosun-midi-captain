@@ -67,27 +67,6 @@ pub fn write_export_file(folder: String, relative: String, content: String) -> R
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Default destination for auto-backups: `<user docs>/bosun-backups/<sub>`.
-/// Creates the directory tree so the JS side can stream files into it
-/// straight away. Falls back to the user's home directory if Documents
-/// can't be resolved (e.g. unusual locale on Windows).
-#[tauri::command]
-pub fn default_backup_folder(sub: String) -> Result<String, String> {
-    let base = dirs::document_dir()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| "no home/documents dir".to_string())?;
-    let mut path = base;
-    path.push("bosun-backups");
-    if !sub.is_empty() {
-        for component in sub.split(['/', '\\']) {
-            if component.is_empty() || component == "." || component == ".." { continue; }
-            path.push(component);
-        }
-    }
-    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().to_string())
-}
-
 #[tauri::command]
 pub fn open_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]

@@ -3,7 +3,6 @@
   import PatchEditor from "./components/PatchEditor.svelte";
   import MidiLearn, { type PatchCapture } from "./components/MidiLearn.svelte";
   import Installer from "./components/Installer.svelte";
-  import FirmwarePushOverlay from "./components/FirmwarePushOverlay.svelte";
   import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
   import NativeUsbUpdate from "./components/NativeUsbUpdate.svelte";
   import SetupWizard from "./components/SetupWizard.svelte";
@@ -28,7 +27,6 @@
   import PatchActions from "./components/PatchActions.svelte";
   import { getBankCount, getRigsPerBank } from "./lib/bank-layout";
   import Settings from "./components/Settings.svelte";
-  import PluginRecipe from "./components/PluginRecipe.svelte";
   import ProfilePicker from "./components/ProfilePicker.svelte";
   import TftLayout from "./components/TftLayout.svelte";
   import QuickSetup from "./components/QuickSetup.svelte";
@@ -42,7 +40,7 @@
     unifiedUpdateAvailable, unifiedUpdateStatus,
     type BundledUpdateManifest, type PendingUpdate,
   } from "./lib/unified-update";
-  import { isNativeFirmware, supportsFirmwareFileOta, supportsBootloader, type FirmwareIdentity } from "./lib/firmware-capabilities";
+  import { supportsBootloader, type FirmwareIdentity } from "./lib/firmware-capabilities";
   import { CAPTAIN_10, parseHardware, type HardwareLayout } from "./lib/hardware";
   import { enterBootloader } from "./lib/bootloader";
   import { onLifecycleChange, onBackButton, saveSessionState, restoreSessionState } from "./lib/android-lifecycle";
@@ -76,9 +74,8 @@
     type PortInfo,
   } from "./lib/protocol";
 
-  /** Built-in pages plus any plugin recipe ids contributed by the
-   * firmware manifest at runtime. We type as `string` so a new plugin
-   * can introduce its own page id without an editor code change. */
+  /** Built-in page ids. Typed as `string` because the page also comes back
+   * from saved session state. */
   type Page = string;
   let page = $state<Page>("home");
   // Which tab is showing inside the Editor page. "Quick setup" is a mode of the
@@ -152,31 +149,6 @@
   let _pollInFlight = false;
   let _stockSerialMisses = 0;
   const STOCK_SERIAL_RETRIES_BEFORE_PROMPT = 3;
-  // On Android, opening the USB CDC port triggers a CircuitPython soft-reset.
-  // After a failed attempt we must wait for the firmware to reboot (~3 s)
-  // before retrying, otherwise the next openDeviceFd hits a stale /dev node
-  // and crashes the serial plugin with a FATAL IOException.
-  let _androidRetryCooldownUntil = $state(0);
-  const ANDROID_RETRY_COOLDOWN_MS = 4000;
-  // Triggered by the topbar "Update firmware" button. Streams the bundled
-  // firmware tree to the connected pedal via PUT_FILE - no MSC drive
-  // dance required. The MSC-drive Installer modal is only used for the
-  // fresh-install case from the welcome screen.
-  // false = closed; true = push the bundled firmware; a string = push from
-  // that resolved firmware-root path (user-picked folder or extracted zip).
-  let showFirmwarePush = $state<string | boolean>(false);
-  // Invalidate an accepted update when its connection or firmware changes.
-  // The overlay stays mounted through its own final reboot to report completion.
-  let firmwarePushSession = 0;
-  let isFirmwarePushAllowed = $state<() => boolean>(() => false);
-  function openFirmwarePush(source?: string) {
-    if (IS_ANDROID || !connected || hubUpdateOnly || !supportsFirmwareFileOta(deviceInfo) || showFirmwarePush
-      || showUnifiedUpdate || unifiedJob?.endpoint === connectedPortName) return;
-    const session = firmwarePushSession;
-    isFirmwarePushAllowed = () => !appDestroyed && connected
-      && session === firmwarePushSession && supportsFirmwareFileOta(deviceInfo);
-    showFirmwarePush = source || true;
-  }
   // First-launch wizard. Shown until the user explicitly dismisses it
   // (the flag is persisted in localStorage so we don't pester returning
   // users). The wizard is also useful as a "reset" if the user clears
@@ -245,62 +217,12 @@
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Firmware update check - fetched on app startup + manual "Check"
-  // button. No polling.
-  let updateStatus = $state<import("./lib/firmware-update").UpdateStatus>({ kind: "idle" });
-  // Version of the firmware bundled with this editor (what the "Update
-  // firmware" push actually installs). Fetched once - it never changes at
-  // runtime. This is the offline update signal: the editor can always flash
-  // its bundled tree, so if the pedal is older we can offer the update even
-  // when GitHub is unreachable or the repo has no release yet.
-  let bundledVersion = $state<string>("");
-  async function checkForFirmwareUpdate() {
-    updateStatus = { kind: "checking" };
-    try {
-      const { fetchLatestRelease, fetchBundledVersion } = await import("./lib/firmware-update");
-      if (!bundledVersion) bundledVersion = await fetchBundledVersion();
-      const latest = await fetchLatestRelease();
-      updateStatus = {
-        kind: "ok",
-        installed: deviceInfo?.fw ?? "",
-        latest,
-        updateAvailable: false,           // recomputed reactively in $derived below
-      };
-    } catch (e) {
-      updateStatus = { kind: "error", message: String(e) };
-    }
-  }
-  const cmpVer = (a: string, b: string): number => {
-    const s = (v: string) => v.split("-")[0].split(".").map(n => parseInt(n, 10) || 0);
-    const pa = s(a), pb = s(b);
-    for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
-    return 0;
-  };
-  // The version we can install right now is the bundled one. An update is
-  // available when it is newer than what the pedal reports - this works with
-  // no network. (A GitHub release newer than the bundled tree is surfaced as
-  // an informational note below, since installing it would need a newer
-  // editor build.)
-  let updateAvailable = $derived.by<boolean>(() => {
-    if (!canUpdateFirmware || !deviceInfo?.fw || !bundledVersion) return false;
-    return cmpVer(bundledVersion, deviceInfo.fw) > 0;
-  });
-  // A published release newer than what we bundle: a hint to ship a new
-  // editor, not something the bundled-firmware push can install.
-  let onlineNewer = $derived.by<string>(() => {
-    if (updateStatus.kind !== "ok" || !updateStatus.latest?.version || !bundledVersion) return "";
-    return cmpVer(updateStatus.latest.version, bundledVersion) > 0 ? updateStatus.latest.version : "";
-  });
-  // One-shot check on mount (fire-and-forget).
-  $effect(() => { void checkForFirmwareUpdate(); });
-
   let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean; hardware: HardwareLayout }) | null>(null);
   // The connected pedal's switch layout. Kept across the transient
   // deviceInfo resets (reconnect, resync, profile switch) so a Mini 6 never
   // flashes the 10-switch layout while DEVICE_INFO is re-read.
   let hardware = $state<HardwareLayout>(CAPTAIN_10);
   let hubUpdateOnly = $state(false);
-  let canUpdateFirmware = $derived(connected && !hubUpdateOnly && supportsFirmwareFileOta(deviceInfo));
   let bundledUpdate = $state<BundledUpdateManifest | null>(null);
   let usbJob = $state<UsbUpdateJob | null>(null);
   let usbPreparing = $state(false);
@@ -308,10 +230,10 @@
   let usbUpdatePort = $state("");
   let usbInstalled = $state<string | undefined>();
   let usbLocked = $derived(usbPreparing || (!!usbJob && !usbUpdateTerminal(usbJob)));
-  let canUseUsbUpdate = $derived(!IS_ANDROID && connected && !networkSession && !busy && !usbLocked && isNativeFirmware(deviceInfo) && !!bundledUpdate);
+  let canUseUsbUpdate = $derived(!IS_ANDROID && connected && !networkSession && !busy && !usbLocked && !!deviceInfo?.fw && !!bundledUpdate);
   let hasUsbUpdate = $derived(canUseUsbUpdate && unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate));
   function openUsbUpdate() {
-    if (!canUseUsbUpdate || showFirmwarePush || showUnifiedUpdate || showUsbUpdate) return;
+    if (!canUseUsbUpdate || showUnifiedUpdate || showUsbUpdate) return;
     usbJob = null;
     installCandidate = undefined;
     usbUpdatePort = connectedPortName;
@@ -321,7 +243,6 @@
   function prepareUsbUpdate() {
     usbPreparing = true;
     connected = false;
-    firmwarePushSession++;
     learning = false;
     showInstaller = false;
   }
@@ -358,7 +279,7 @@
   let hasUnifiedUpdate = $derived(canUseUnifiedUpdate && unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate));
   let canResumeUnifiedUpdate = $derived(!IS_ANDROID && connected && networkSession && unifiedJob?.endpoint === connectedPortName);
   function openUnifiedUpdate() {
-    if ((!canUseUnifiedUpdate && !canResumeUnifiedUpdate) || showFirmwarePush || showUnifiedUpdate) return;
+    if ((!canUseUnifiedUpdate && !canResumeUnifiedUpdate) || showUnifiedUpdate) return;
     unifiedEndpoint = connectedPortName;
     showUnifiedUpdate = true;
   }
@@ -394,7 +315,7 @@
     });
     return () => { cancelled = true; };
   });
-  // Active profile's plugin kind (e.g. "ampero_ii_stage" or "kemper_player").
+  // Active profile's plugin kind (e.g. "generic_midi" or "kemper_player").
   // Drives which plugin-specific UI sections are shown.
   let activeKind = $state<string>("");
   let activeProfile = $state<import("./lib/protocol").ProfileInfo | null>(null);
@@ -462,22 +383,21 @@
     unsubMsg  = await onFirmwareMessage(handleMessage);
     unsubDisc = await onDisconnected(() => { void handleLinkLoss(); });
     // Android only: the backend I/O thread self-heals a stall by closing
-    // and reopening the port, which reboots the pedal via DTR and
-    // re-enumerates its USB device - including the Kemper<->Captain
-    // USB-MIDI interface BosunMidiBridge relays through. Android's
-    // MidiManager tears that bridge down when the interface vanishes
-    // (BosunMidiBridge.kt's DeviceCallback.onDeviceRemoved), and nothing
-    // used to bring it back - the recovery never touched `connected` (it
-    // can't: flipping it to false would route through the !connected
-    // welcome screen and away from whatever page - e.g. Stage - was on
-    // screen, and the actual serial link comes back on its own without
-    // user action). Restart the bridge explicitly once the link is back;
-    // the live CONTEXT/EVENT stream (and Stage view's subscription to it)
-    // resumes on its own as soon as data flows again. Toasts here are
-    // diagnostic (this self-heal used to be invisible) rather than routing
-    // changes, so they don't disturb whatever page is on screen.
+    // and reopening the port. A stall usually means the pedal restarted or
+    // re-enumerated its USB device - including the Kemper<->Captain
+    // USB-MIDI interface BosunMidiBridge relays through. The Kotlin bridge
+    // stops when that device detaches (BosunMidiBridge.kt's detach
+    // receiver), and nothing used to bring it back - the recovery never
+    // touched `connected` (it can't: flipping it to false would route
+    // through the !connected welcome screen and away from whatever page -
+    // e.g. Stage - was on screen, and the actual serial link comes back on
+    // its own without user action). Restart the bridge explicitly once the
+    // link is back; the live CONTEXT/EVENT stream (and Stage view's
+    // subscription to it) resumes on its own as soon as data flows again.
+    // Toasts here are diagnostic (this self-heal used to be invisible)
+    // rather than routing changes, so they don't disturb whatever page is
+    // on screen.
     unsubReconnecting = await onReconnecting(() => {
-      firmwarePushSession++;
       deviceInfo = null;
       showToast("info", "Pedal link recovering…");
     });
@@ -539,7 +459,6 @@
       _switchingProfile = true;
       busy = true; error = "";
       // Clear UI immediately so user sees the transition happening
-      firmwarePushSession++;
       deviceInfo = null; manifest = null; currentPatch = null;
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
       globalDevice = null; activeKind = "";
@@ -569,8 +488,8 @@
     }, appEventOptions);
 
     // Track concurrent "connecting" operations from any source
-    // (waitForReboot after a profile switch / reboot / firmware push,
-    // any future auto-reconnect path). Counter-based so overlapping
+    // (waitForReboot after a profile switch / reboot, any future
+    // auto-reconnect path). Counter-based so overlapping
     // ops don't end the indicator prematurely. When the count hits 0
     // we clear busy.
     let connectingDepth = 0;
@@ -584,7 +503,7 @@
 
     // Fired by waitForReboot() after it has re-established the Rust
     // side connection following a self-issued reboot (export across
-    // profiles, import-as-new-profile, manual reboot, firmware push).
+    // profiles, import-as-new-profile, manual reboot).
     // The disconnect event already flipped `connected` to false; here
     // we flip it back and refetch the world so the user lands in a
     // working state instead of a stale "disconnected" UI.
@@ -592,7 +511,6 @@
       try {
         connected = await isConnected();
         if (connected) {
-          firmwarePushSession++;
           deviceInfo = null; manifest = null; currentPatch = null;
           patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
           globalDevice = null; activeKind = "";
@@ -602,21 +520,11 @@
       } catch (e) { error = String(e); }
     }, appEventOptions);
 
-    // Maintenance page "Update firmware" buttons ask us to open the OTA
-    // push overlay (kept in App so it can survive a page switch). A
-    // `detail.source` string targets a user-picked firmware folder/zip;
-    // absent → push the bundled firmware.
-    window.addEventListener("bosun-open-firmware-push", (e: Event) => {
-      if (IS_ANDROID) return;
-      const src = (e as CustomEvent<{ source?: string }>).detail?.source;
-      openFirmwarePush(src);
-    }, appEventOptions);
-
-    // Rust-level disconnect (firmware rebooted via OTA / manual reboot /
-    // crash). USB CDC re-enumerates as the same COM port so the OS
-    // doesn't fire a disconnect, but `send_command` fails with "not
-    // connected" once the reader thread has bailed. Network sessions retry
-    // their saved endpoint; explicit disconnects stay disconnected.
+    // Rust-level disconnect (firmware rebooted / crashed). USB CDC
+    // re-enumerates as the same COM port so the OS doesn't fire a
+    // disconnect, but `send_command` fails with "not connected" once the
+    // reader thread has bailed. Network sessions retry their saved
+    // endpoint; explicit disconnects stay disconnected.
     window.addEventListener("rust-disconnected", (event: Event) => {
       if (!connected) return;
       void handleLinkLoss((event as CustomEvent).detail === "manual");
@@ -722,7 +630,6 @@
       busy = true;
     }
     connected = false; learning = false;
-    firmwarePushSession++;
     deviceInfo = null; manifest = null; currentPatch = null;
     patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
     globalDevice = null; activeKind = "";
@@ -858,17 +765,17 @@
 
   // Manifest retry watchdog. Triggers once when we're connected but no
   // manifest has arrived yet. Each tick AWAITS one GET_MANIFEST attempt
-  // (the manifest is the largest response in the protocol - 22 KB+,
-  // streamed field-by-field - so it can legitimately take well past a
-  // normal request's timeout on a busy link) and only schedules the next
-  // attempt once this one has actually settled, arrived or genuinely timed
-  // out. The previous version fired a bare setTimeout every
-  // MANIFEST_RETRY_MS with no idea whether an earlier request was still in
-  // flight: under load, each 22 KB re-stream took longer than the 4 s
-  // retry clock, so requests piled up overlapping in the firmware's queue -
-  // every one costing it a full re-stream that competed with USB-MIDI
-  // servicing for the same main-loop time, making a slow link slower and
-  // plausibly starving Kemper MIDI processing outright (2026-08-15).
+  // (the manifest is the largest response in the protocol, so it can
+  // legitimately take well past a normal request's timeout on a busy link)
+  // and only schedules the next attempt once this one has actually settled,
+  // arrived or genuinely timed out. The previous version fired a bare
+  // setTimeout every MANIFEST_RETRY_MS with no idea whether an earlier
+  // request was still in flight: under load, each manifest re-send took
+  // longer than the 4 s retry clock, so requests piled up overlapping in the
+  // firmware's queue - every one costing it a full re-send that competed
+  // with USB-MIDI servicing for the same main-loop time, making a slow link
+  // slower and plausibly starving Kemper MIDI processing outright
+  // (2026-08-15).
   $effect(() => {
     // The manifest is global (works with no profile), so retry it regardless -
     // it's needed to populate plugin kinds/fields even before a profile exists.
@@ -937,7 +844,7 @@
   // Detect a pedal that needs bosun installed and offer to install it.
   // Confirmation-gated, never silent. Covers all install-needing states:
   //   - in the RP2040 bootloader (RPI-RP2 mass storage, no serial port)
-  //   - a CIRCUITPY drive with no captain firmware, or the wrong CircuitPython
+  //   - a CIRCUITPY drive (stock or foreign firmware: native Bosun has no drive)
   //   - a stock pedal running firmware (serial USB VID, drive hidden)
   // A healthy-but-unattached bosun is told apart from a stock pedal by trying a
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
@@ -957,13 +864,11 @@
       if (usbLocked || showUsbUpdate || showSetupWizard || connectionMode !== "usb" || connected || busy || showInstaller || manualMode) return;
 
       const inBootloader = !!dev.bootloader_drive;
-      const cpNeedsFirmware = !!dev.circuitpy_drive && !dev.has_captain_firmware;
-      const cpWrongVersion = !!dev.circuitpy_drive && !dev.circuitpython_ok;
+      const stockDrive = !!dev.circuitpy_drive;
       // Stock firmware running: only a serial device, no install drive exposed.
-      const stockSerial =
-        dev.usb_pedal_present && !dev.bootloader_drive && !dev.circuitpy_drive;
+      const stockSerial = dev.usb_pedal_present && !inBootloader && !stockDrive;
 
-      const needsInstall = inBootloader || cpNeedsFirmware || cpWrongVersion || stockSerial;
+      const needsInstall = inBootloader || stockDrive || stockSerial;
       // Nothing install-worthy present: re-arm the dismissal latch AND clear the
       // serial-miss debounce so a later detection (or a replug) starts fresh.
       if (!needsInstall) { installDismissed = false; _stockSerialMisses = 0; return; }
@@ -978,20 +883,13 @@
       // of missing firmware: retry quietly across ticks and only prompt after
       // several consecutive misses. Drives/bootloader can't be probed this way.
       if (stockSerial) {
-        // Respect Android retry cooldown after a failed attempt.
-        if (_androidRetryCooldownUntil && Date.now() < _androidRetryCooldownUntil) return;
         try {
           connectedPortName = await autoConnect();
           connected = true;
           _stockSerialMisses = 0;
-          _androidRetryCooldownUntil = 0;
           await refetchAll();
           return;
-        } catch {
-          if (IS_ANDROID) {
-            _androidRetryCooldownUntil = Date.now() + ANDROID_RETRY_COOLDOWN_MS;
-          }
-        }
+        } catch { /* no Bosun answered: count the miss below */ }
         if (connected || showInstaller || showSetupWizard || showUsbUpdate || usbLocked) return;
         _stockSerialMisses += 1;
         if (_stockSerialMisses < STOCK_SERIAL_RETRIES_BEFORE_PROMPT) return;
@@ -1067,7 +965,6 @@
       await disconnect();
       // Drop the MIDI relay too - the pedal is going away.
       if (!networkSession) await stopBridge();
-      firmwarePushSession++;
       connected = false; deviceInfo = null; manifest = null;
       currentPatch = null; learning = false; captures = [];
       patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
@@ -1169,8 +1066,8 @@
   });
 
   // The PATCH_LIST response can be delayed by the MANIFEST stream (the
-  // firmware processes requests sequentially and the 22 KB manifest
-  // takes several seconds).  When the user opens Patches, always
+  // firmware processes requests sequentially and the manifest is the
+  // largest response).  When the user opens Patches, always
   // re-request so the grid fills in even if the refetchAll response
   // was lost or raced the navigation.  The effect depends only on
   // `page`/`connected`, so it fires once per navigation.
@@ -1341,14 +1238,9 @@
     switch (msg.type) {
       case "DEVICE_INFO": {
         const reported = parseHardware(msg.hardware);
-        if (deviceInfo && (deviceInfo.fw !== msg.fw || deviceInfo.device !== msg.device
-          || deviceInfo.native_experimental !== msg.native_experimental
-          || deviceInfo.firmware_ota !== msg.firmware_ota
-          || deviceInfo.hardware.model !== reported.model)) firmwarePushSession++;
         hardware = reported;
         deviceInfo = {
           fw: msg.fw, device: msg.device,
-          native_experimental: msg.native_experimental, firmware_ota: msg.firmware_ota,
           reboot_modes: msg.reboot_modes,
           bank: msg.current.bank, slot: msg.current.slot,
           profile: msg.profile ?? "",
@@ -1481,10 +1373,6 @@
     return JSON.stringify(m);
   }
 
-  // Built-in nav items + any plugin recipes injected dynamically from
-  // the manifest. A nav item can declare a `kind` to be shown only when
-  // the matching plugin is the active profile; plugin recipe items
-  // inherit their kind from the plugin id.
   // The connected pedal's physical switches, in firmware order. Passed to
   // QuickSetup so the user can assign recipe roles to switches.
   let switchNames = $derived(hardware.switches);
@@ -1536,7 +1424,7 @@
   // of one flat list. Home stands alone above the groups. "Quick setup" is NOT
   // here: it lives inside the Editor as a tab (it only makes sense on the patch
   // you have open), see `editorTab` below.
-  type NavItem = { id: Page; label: string; icon: string; kind?: string; group: NavGroup };
+  type NavItem = { id: Page; label: string; icon: string; group: NavGroup };
   type NavGroup = "" | "build" | "device" | "system";
   const CORE_NAV: NavItem[] = [
     { id: "home",     label: "Home",         icon: "⌂", group: "" },
@@ -1551,38 +1439,21 @@
     { id: "monitor",  label: "MIDI Monitor", icon: "∿", group: "system" },
     { id: "log",      label: "Log",          icon: "≡", group: "system" },
   ];
-  // Plugin recipe pages (e.g. Ampero auto-follow setup) are device setup, so
-  // they join the Device group. Active-kind filter unchanged.
-  let visibleNav = $derived.by<NavItem[]>(() => {
-    const recipes: NavItem[] = [];
-    if (manifest) {
-      for (const [pluginId, plug] of Object.entries(manifest.plugins)) {
-        const r = plug.recipe_schema;
-        if (r) {
-          recipes.push({ id: r.id, label: r.label, icon: r.icon ?? "♪", kind: pluginId, group: "device" });
-        }
-      }
-    }
-    return [...CORE_NAV, ...recipes].filter(item => !item.kind || item.kind === activeKind);
-  });
-  // Bucket the visible items into their sections for rendering, in a fixed
-  // group order, dropping any empty group. Order within a group follows
-  // insertion order (so plugin recipes land after Settings in Device).
-  let navGroups = $derived.by<Array<{ label: string; items: NavItem[] }>>(() => {
-    const order: Array<{ key: NavGroup; label: string }> = [
-      { key: "",       label: "" },
-      { key: "build",  label: "Build" },
-      { key: "device", label: "Device" },
-      { key: "system", label: "System" },
-    ];
-    return order
-      .map(g => ({ label: g.label, items: visibleNav.filter(n => n.group === g.key) }))
-      .filter(g => g.items.length > 0);
-  });
-  // If the user was on a now-hidden page after a profile switch, bounce
-  // them to Patches so they don't see a blank content area.
+  // Bucket the items into their sections for rendering, in a fixed group
+  // order, dropping any empty group. Order within a group follows CORE_NAV.
+  const NAV_ORDER: Array<{ key: NavGroup; label: string }> = [
+    { key: "",       label: "" },
+    { key: "build",  label: "Build" },
+    { key: "device", label: "Device" },
+    { key: "system", label: "System" },
+  ];
+  const navGroups = NAV_ORDER
+    .map(g => ({ label: g.label, items: CORE_NAV.filter(n => n.group === g.key) }))
+    .filter(g => g.items.length > 0);
+  // A restored session can name a page that no longer exists: bounce it
+  // Home so the user doesn't see a blank content area.
   $effect(() => {
-    if (visibleNav.length && !visibleNav.some(n => n.id === page)) page = "home";
+    if (!CORE_NAV.some(n => n.id === page)) page = "home";
   });
 
   // Mobile layout detection. We can't use window.innerWidth in $state init
@@ -1650,8 +1521,8 @@
       {/if}
       <ProfilePicker {manifest} />
 
-      <!-- Firmware update: desktop-only (needs the bundled UF2 + firmware
-           tree shipped as Tauri resources, which don't exist on Android). -->
+      <!-- Firmware update: desktop-only (needs the bundled native release
+           package shipped as a Tauri resource, which doesn't exist on Android). -->
       {#if !IS_ANDROID}
         {#if canResumeUnifiedUpdate}
           <button class="topbtn primary" onclick={openUnifiedUpdate}>Check Bosun update</button>
@@ -1662,24 +1533,10 @@
           </button>
         {:else if hasUsbUpdate}
           <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled native firmware over USB with a full recovery backup.">Update firmware (USB)</button>
-        {:else if isNativeFirmware(deviceInfo)}
-          <span class="fwstatus muted" title="Native firmware uses UF2 updates. CircuitPython file updates are unavailable.">Native firmware · v{deviceInfo?.fw}</span>
-        {:else if !canUpdateFirmware}
-          <span class="fwstatus muted" title="CircuitPython file updates are unavailable for this device.">{deviceInfo?.fw ? `Firmware v${deviceInfo.fw}` : "Reading firmware information…"}</span>
-        {:else if updateStatus.kind === "checking"}
-          <span class="fwstatus muted">Checking for updates…</span>
-        {:else if updateAvailable}
-          <button class="topbtn primary"
-                  onclick={() => openFirmwarePush()}
-                  title={onlineNewer
-                    ? `Installs the bundled firmware v${bundledVersion}. A newer release (v${onlineNewer}) is available online - update the editor to ship it.`
-                    : `Installs the bundled firmware v${bundledVersion}`}>
-            Update firmware ({deviceInfo?.fw ?? "?"} -> {bundledVersion})
-          </button>
-        {:else if updateStatus.kind === "error"}
-          <button class="topbtn ghost" onclick={checkForFirmwareUpdate} title={updateStatus.message}>Update check failed - retry</button>
         {:else if deviceInfo?.fw}
-          <span class="fwstatus muted" title="Firmware up to date">v{deviceInfo.fw} ✓</span>
+          <span class="fwstatus muted" title="Firmware installed on the pedal">Native firmware · v{deviceInfo.fw}</span>
+        {:else}
+          <span class="fwstatus muted">Reading firmware information…</span>
         {/if}
       {/if}
     {/if}
@@ -1988,15 +1845,14 @@
               <p class="muted">
                 The connected port acknowledged the PING but never returned a MANIFEST.
                 Retry to request it again, or disconnect and reconnect the pedal.
-                {#if canUpdateFirmware && !IS_ANDROID}
-                  Older CircuitPython firmware can truncate large responses. If retries
-                  fail, re-flash the firmware bundled with this editor.
+                {#if canUseUsbUpdate}
+                  If retries keep failing, reinstall the firmware bundled with this editor.
                 {/if}
               </p>
               <div class="row toolbar">
                 <button class="primary" onclick={retryManifest}>Retry</button>
-                {#if !IS_ANDROID && canUpdateFirmware}
-                  <button onclick={() => openFirmwarePush()}>Re-flash firmware</button>
+                {#if canUseUsbUpdate}
+                  <button onclick={openUsbUpdate}>Reinstall firmware (USB)</button>
                 {/if}
                 <button onclick={doDisconnect}>Disconnect</button>
               </div>
@@ -2049,13 +1905,6 @@
             />
           {/if}
 
-        {:else if manifest && Object.values(manifest.plugins).some(p => p.recipe_schema?.id === page)}
-          {#each Object.values(manifest.plugins) as plug}
-            {#if plug.recipe_schema?.id === page}
-              <PluginRecipe schema={plug.recipe_schema} {patches} />
-            {/if}
-          {/each}
-
         {:else if page === "tft"}
           <TftLayout device={globalDevice} {manifest} {activeKind} {hardware} />
 
@@ -2102,7 +1951,7 @@
                 <p class="empty-state__hint">
                   Protocol messages will appear here as the pedal sends them.
                   Useful when you're debugging bindings or watching the
-                  bidirectional sync to a supported device (Kemper, Ampero, ...).
+                  bidirectional sync to a supported device (e.g. a Kemper).
                 </p>
               </div>
             {:else}
@@ -2149,13 +1998,6 @@
     <NativeUsbUpdate port={usbUpdatePort} installed={usbInstalled} version={installCandidate ? installVersion : bundledUpdate?.firmware_version || usbJob?.version || ""}
                      candidateId={installCandidate} model={installModel} job={usbJob} canStart={() => installCandidate ? !usbLocked && !busy : canUseUsbUpdate && connectedPortName === usbUpdatePort}
                      onPreparing={prepareUsbUpdate} onJob={acceptUsbJob} onClose={closeUsbUpdate} />
-  {/if}
-
-  {#if showFirmwarePush && !IS_ANDROID}
-    <FirmwarePushOverlay
-      isUpdateAllowed={isFirmwarePushAllowed}
-      source={typeof showFirmwarePush === "string" ? showFirmwarePush : undefined}
-      onClose={() => showFirmwarePush = false} />
   {/if}
 
   {#if showSetupWizard && !usbLocked}

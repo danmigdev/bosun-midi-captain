@@ -35,11 +35,6 @@ vi.mock("../src/lib/installer", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/lib/installer")>(),
   detectPedal: mocks.detectPedal,
 }));
-vi.mock("../src/lib/firmware-update", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../src/lib/firmware-update")>(),
-  fetchBundledVersion: vi.fn(async () => "0.6.3"),
-  fetchLatestRelease: vi.fn(async () => null),
-}));
 vi.mock("../src/lib/android-lifecycle", () => ({
   onLifecycleChange: mocks.lifecycle,
   onBackButton: vi.fn(() => () => {}),
@@ -62,7 +57,7 @@ beforeEach(() => {
     if (command === "midi_bridge_status") return { active: false, kemper_port: null, pedal_port: null };
     throw new Error(`Unexpected IPC: ${command}`);
   });
-  mocks.detectPedal.mockReset().mockResolvedValue({ kind: "none" });
+  mocks.detectPedal.mockReset().mockResolvedValue({ bootloader_drive: null, circuitpy_drive: null, usb_pedal_present: false });
   mocks.lifecycle.mockReset().mockImplementation(() => () => {});
   mocks.onFirmwareMessage.mockReset().mockImplementation(async () => () => {});
   mocks.onDisconnected.mockReset().mockImplementation(async () => () => {});

@@ -27,7 +27,7 @@
   const labels: Record<string, string> = {
     review: "Update Bosun", uploading: "Sending update to Raspberry Pi", queued: "Preparing update",
     validating: "Checking update package", "backing-up": "Backing up the pedal",
-    migrating: "Preparing your profiles", flashing: "Installing Bosun", rebooting: "Restarting the pedal",
+    flashing: "Installing Bosun", rebooting: "Restarting the pedal",
     verifying: "Checking firmware and settings", done: "Bosun updated", error: "Update stopped",
     "rolled-back": "Previous firmware restored", "recovery-required": "Recovery required", aborted: "Upload cancelled",
   };
@@ -121,7 +121,7 @@
   <div class="content" aria-live="polite">
     {#if status.phase === "review" && !hasPendingHere()}
       <p>Update Bosun {installed ? `from ${installed} ` : ""}to <strong>{manifest?.release}</strong>.</p>
-      <p>Your profiles and settings are backed up and transferred automatically. The pedal will be unavailable until the update finishes.</p>
+      <p>Your profiles and settings are backed up and preserved automatically. The pedal will be unavailable until the update finishes.</p>
       <p class="muted">Keep the pedal and Raspberry Pi powered on until the update is complete.</p>
     {:else if waiting}
       <p>The Raspberry Pi may still be updating the pedal. Reconnect to <strong>{endpoint.replace(/^tcp:\/\//, "")}</strong> to check progress.</p>

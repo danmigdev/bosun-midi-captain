@@ -37,11 +37,9 @@ describe("PatchActions delete", () => {
     expect(mock.calls).toEqual(["discard 2 3", "deletePatch 2 3", "listPatches", "switchPatch 1 1"]);
   });
 
-  it("explains the deletion without CircuitPython wording", async () => {
+  it("explains that the deletion includes the patch's unsaved edits", async () => {
     render(PatchActions, { patches, currentPatchEnvelope: current });
     await fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("including its unsaved edits");
-    expect(dialog).not.toHaveTextContent("CIRCUITPY");
+    expect(screen.getByRole("dialog")).toHaveTextContent("including its unsaved edits");
   });
 });

@@ -11,13 +11,12 @@
  *  - JSON.stringify -> JSON.parse -> validateBackup roundtrip must
  *    deep-equal the input
  *  - filename sanitization for edge labels (accents, slashes, emoji)
- *  - inferKindFromDevice tolerates malformed device blobs (v1 path)
- *  - v1 backup (no `kind`) accepted, v2 accepted, unknown versions
- *    rejected
+ *  - version 2 accepted (with or without optional sections), unknown
+ *    versions rejected
  */
 import { describe, it, expect } from "vitest";
 import {
-  validateBackup, inferKindFromDevice, backupFilename, timestampedFolderName,
+  validateBackup, backupFilename, timestampedFolderName,
   type ConfigBackup,
 } from "../src/lib/config-backup";
 import type { Patch, MidiLearnTable, Action, BindingMode } from "../src/lib/protocol";
@@ -159,11 +158,12 @@ describe("Backup roundtrip: 125 patches, every aspect preserved", () => {
     expect(parsed.midi_learn).toEqual(backup.midi_learn);
   });
 
-  it("a v1-shape backup (no kind, no midi_learn) still validates", () => {
+  it("a backup without the optional midi_learn section still validates", () => {
     const backup: ConfigBackup = {
       format: "bosun-config-backup",
-      version: 1,
+      version: 2,
       generated_at: "2026-01-01T00:00:00.000Z",
+      kind: "generic_midi",
       device: { device_name: "X" },
       patches: [{ bank: 1, slot: 1, patch: { name: "p", bindings: [] } }],
     };
@@ -279,40 +279,5 @@ describe("timestampedFolderName", () => {
     const b = timestampedFolderName();
     expect(a).toMatch(/^bosun-export_/);
     expect(b).toMatch(/^bosun-export_/);
-  });
-});
-
-// -----------------------------------------------------------------------
-// inferKindFromDevice: malformed device tolerance
-// -----------------------------------------------------------------------
-
-describe("inferKindFromDevice: malformed/unusual device blobs", () => {
-  it("returns kemper_player when device.kemper is an object (any shape)", () => {
-    expect(inferKindFromDevice({ kemper: {} })).toBe("kemper_player");
-    expect(inferKindFromDevice({ kemper: { enabled: false } })).toBe("kemper_player");
-    expect(inferKindFromDevice({ kemper: { whatever: 1, more: "stuff" } })).toBe("kemper_player");
-  });
-
-  it("returns ampero_ii_stage when device.ampero is an object", () => {
-    expect(inferKindFromDevice({ ampero: {} })).toBe("ampero_ii_stage");
-  });
-
-  it("returns '' when both plugin keys are missing", () => {
-    expect(inferKindFromDevice({ device_name: "x" })).toBe("");
-    expect(inferKindFromDevice({})).toBe("");
-  });
-
-  it("ignores plugin keys that are non-object scalars (treats them as absent)", () => {
-    // A v1 backup could in principle have a stub like { kemper: true }
-    // if some external tooling produced it; the inference is "object"
-    // shaped, so a bare boolean is rejected.
-    expect(inferKindFromDevice({ kemper: true } as unknown as Record<string, unknown>)).toBe("");
-    expect(inferKindFromDevice({ kemper: 1 } as unknown as Record<string, unknown>)).toBe("");
-    expect(inferKindFromDevice({ kemper: "yes" } as unknown as Record<string, unknown>)).toBe("");
-  });
-
-  it("does NOT throw on null/undefined plugin keys", () => {
-    expect(() => inferKindFromDevice({ kemper: null } as unknown as Record<string, unknown>)).not.toThrow();
-    expect(inferKindFromDevice({ kemper: null } as unknown as Record<string, unknown>)).toBe("");
   });
 });

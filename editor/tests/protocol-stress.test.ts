@@ -149,39 +149,6 @@ afterEach(async () => {
 // ----------------------------------------------------------------------
 
 describe("sendAndAwait: concurrent request/response correlation", () => {
-  it("PUT_FILE_BEGIN carries the exact expected size used by firmware integrity checks", async () => {
-    const pending = cmd.putFileBegin("/lib/captain/app.mpy", 13_557);
-    await flushMicrotasks();
-
-    const request = JSON.parse(harness.sent[harness.sent.length - 1]);
-    expect(request).toMatchObject({
-      type: "PUT_FILE_BEGIN",
-      path: "/lib/captain/app.mpy",
-      size: 13_557,
-    });
-
-    enqueue({ type: "ACK", id: request.id });
-    await flush();
-    await expect(pending).resolves.toMatchObject({ type: "ACK" });
-
-    const chunkPending = cmd.putFileChunk(
-      "/lib/captain/app.mpy",
-      "TWFu",
-      96,
-    );
-    await flushMicrotasks();
-    const chunk = JSON.parse(harness.sent[harness.sent.length - 1]);
-    expect(chunk).toMatchObject({
-      type: "PUT_FILE_CHUNK",
-      path: "/lib/captain/app.mpy",
-      data_b64: "TWFu",
-      offset: 96,
-    });
-    enqueue({ type: "ACK", id: chunk.id });
-    await flush();
-    await expect(chunkPending).resolves.toMatchObject({ type: "ACK" });
-  });
-
   it("correlates 500 concurrent requests by id, even when responses arrive out of order", async () => {
     const N = 500;
     // Fire N requests in parallel. Use a long timeout - we don't
@@ -235,18 +202,18 @@ describe("sendAndAwait: concurrent request/response correlation", () => {
     await expect(p).resolves.toMatchObject({ type: "ACK" });
   });
 
-  it("late and duplicate OTA ACKs cannot complete the next chunk", async () => {
-    const first = sendAndAwait({ type: "PUT_FILE_CHUNK", path: "/x", offset: 0 }, 30);
+  it("late and duplicate ACKs cannot complete the next write", async () => {
+    const first = sendAndAwait({ type: "PUT_PATCH", bank: 1, slot: 1, patch: { bindings: [] } }, 30);
     await flushMicrotasks();
     const firstId = JSON.parse(harness.sent[harness.sent.length - 1]).id as string;
 
     await expect(first).rejects.toMatchObject({
       name: "FirmwareCommandTimeoutError",
-      commandType: "PUT_FILE_CHUNK",
+      commandType: "PUT_PATCH",
       commandId: firstId,
     } satisfies Partial<FirmwareCommandTimeoutError>);
 
-    const second = sendAndAwait({ type: "PUT_FILE_CHUNK", path: "/x", offset: 96 }, 5000);
+    const second = sendAndAwait({ type: "PUT_PATCH", bank: 1, slot: 2, patch: { bindings: [] } }, 5000);
     let secondSettled = false;
     void second.finally(() => { secondSettled = true; });
     await flushMicrotasks();
@@ -254,7 +221,7 @@ describe("sendAndAwait: concurrent request/response correlation", () => {
     expect(secondId).not.toBe(firstId);
 
     // Both copies are stale: the timed-out resolver was removed and ids are
-    // never reused, so neither can be mistaken for the second chunk's ACK.
+    // never reused, so neither can be mistaken for the second write's ACK.
     enqueue({ type: "ACK", id: firstId });
     enqueue({ type: "ACK", id: firstId });
     await flush();

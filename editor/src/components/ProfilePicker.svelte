@@ -50,10 +50,9 @@
 
   async function refresh() {
     busy = true; error = "";
-    // Retry once on timeout: the firmware's heap can fragment after
-    // many requests in a long session, causing the first attempt of a
-    // ~KB response to drop. A second try after gc.collect (the
-    // firmware does it on MemoryError now) usually lands.
+    // Retry once on timeout: a busy link (another large response still
+    // streaming) can push the first attempt past its deadline. A second
+    // try usually lands.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const r = await cmd.listProfiles();

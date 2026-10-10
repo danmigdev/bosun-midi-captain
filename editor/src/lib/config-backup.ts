@@ -12,21 +12,21 @@
 // By default it targets the active profile; pass `asNewProfile` to
 // create a fresh profile from the backup instead of overwriting.
 //
-// Versioning: v1 had no `kind`; v2 stores it so an import-as-new-profile
-// flow can pick the right plugin kind without asking the user (CREATE_PROFILE
-// needs it). validateBackup transparently accepts both.
+// Versioning: version 2 stores the source profile's plugin `kind`, so an
+// import-as-new-profile flow can pick the right plugin without asking the
+// user (CREATE_PROFILE needs it).
 
-import { cmd, sendAndAwait, waitForReboot } from "./protocol";
+import { cmd, sendAndAwait } from "./protocol";
 import type { Patch, MidiLearnTable, PatchSummary } from "./protocol";
 import { CAPTAIN_10, type HardwareLayout } from "./hardware";
 
 export interface ConfigBackup {
   format: "bosun-config-backup";
-  version: 1 | 2;
+  version: 2;
   generated_at: string;
   /** Human description picked at backup time (active profile name). */
   profile_label?: string;
-  /** Plugin kind of the source profile (e.g. "kemper_player"). v2+. */
+  /** Plugin kind of the source profile (e.g. "kemper_player"). */
   kind?: string;
   device: Record<string, unknown>;
   patches: Array<{ bank: number; slot: number; patch: Patch }>;
@@ -54,9 +54,6 @@ export async function exportConfig(
 
   // When profileId is set we ask the firmware to read straight from
   // disk for that specific profile - no SWITCH_PROFILE reboot needed.
-  // Requires firmware 0.3.2+; older firmware will ignore the profile
-  // field and return the active profile's data (which is correct
-  // when profileId === active anyway, so the fallback is safe).
   const profileArg = profileId ? { profile: profileId } : {};
 
   report({ phase: "device", total: 0, done: 0, current: "device.json" });
@@ -128,23 +125,10 @@ export function validateBackup(parsed: unknown): ConfigBackup {
   if (!parsed || typeof parsed !== "object") throw new Error("Not a JSON object");
   const b = parsed as Partial<ConfigBackup>;
   if (b.format !== "bosun-config-backup") throw new Error("Not a Bosun backup file");
-  if (b.version !== 1 && b.version !== 2) throw new Error(`Unsupported backup version ${b.version}`);
+  if (b.version !== 2) throw new Error(`Unsupported backup version ${b.version}`);
   if (!b.device || typeof b.device !== "object") throw new Error("Missing 'device' section");
   if (!Array.isArray(b.patches)) throw new Error("Missing or invalid 'patches' array");
   return b as ConfigBackup;
-}
-
-/** Best-effort plugin kind inference for v1 backups (no `kind` field).
- * Looks at which plugin config block is present in `device`. Returns ""
- * when nothing matches - caller should ask the user to pick a kind in
- * that case. */
-export function inferKindFromDevice(device: Record<string, unknown>): string {
-  // Heuristic: a plugin's CONFIG_SCHEMA.key is the dict key it lives
-  // under in device.json. We don't have the live plugin list here, so
-  // we lean on the two we ship: kemper -> kemper_player, ampero -> ampero_ii_stage.
-  if (device.kemper && typeof device.kemper === "object") return "kemper_player";
-  if (device.ampero && typeof device.ampero === "object") return "ampero_ii_stage";
-  return "";
 }
 
 export interface RestoreProgress {
@@ -161,39 +145,6 @@ export interface ImportOptions {
   asNewProfile?: { profile_id: string; name: string; kind: string };
 }
 
-/** Run an export over every profile on the pedal and write each one to
- *  disk under `<documents>/bosun-backups/<sub>/`. Used by the firmware
- *  install / push flow to make sure the user's customizations are
- *  preserved before we overwrite anything on the device.
- *
- *  Returns the absolute folder path the backups landed in, or `null` if
- *  the firmware reported no profiles (nothing to back up). Throws if
- *  the export itself failed - caller decides whether to proceed. */
-export async function backupAllProfiles(
-  sub: string,
-  onProgress?: (msg: string) => void,
-): Promise<string | null> {
-  const { invoke: _invoke } = await import("@tauri-apps/api/core");
-  const folder = await _invoke<string>("default_backup_folder", { sub });
-  const profilesResp = await cmd.listProfiles();
-  const profiles = profilesResp.profiles ?? [];
-  if (profiles.length === 0) return null;
-  for (const p of profiles) {
-    onProgress?.(`Backing up "${p.name}"…`);
-    // Cross-profile read (firmware 0.3.3+): we pass the profile id so
-    // the firmware reads straight from disk for that profile - no
-    // SWITCH_PROFILE reboot needed. Older firmware will return the
-    // active profile's data; that's still useful as a fallback.
-    const backup = await exportConfig(undefined, p.name || p.id, p.kind, p.id);
-    const filename = backupFilename(backup);
-    await _invoke<string>("write_export_file", {
-      folder, relative: filename, content: JSON.stringify(backup, null, 2),
-    });
-  }
-  return folder;
-}
-
-
 export async function importConfig(
   backup: ConfigBackup,
   onProgress?: (p: RestoreProgress) => void,
@@ -202,7 +153,7 @@ export async function importConfig(
   const report = (p: RestoreProgress) => onProgress?.(p);
 
   // Writing a patch/device.json to the RP2040 flash can occasionally stall
-  // past a tight deadline (FAT write + tmp-rename, with the main loop and
+  // past a tight deadline (flash erase/program, with the main loop and
   // MIDI competing). Give each write a generous window and retry once on a
   // timeout - PUT_* is idempotent, so a retry after a slow-but-successful
   // write just rewrites the same bytes.
@@ -219,8 +170,8 @@ export async function importConfig(
   }
 
   // When importing as a new profile we add `profile: <new_id>` to each
-  // PUT_* so the firmware (0.3.3+) writes straight to that profile's
-  // files on disk - no SWITCH_PROFILE, no reboot, no waitForReboot.
+  // PUT_* so the firmware writes straight to that profile's files on
+  // disk - no SWITCH_PROFILE, no reboot, no waitForReboot.
   // The active profile stays untouched for the whole flow.
   let targetProfile: string | undefined;
   if (options.asNewProfile) {
@@ -250,7 +201,7 @@ export async function importConfig(
         report({ phase: "patches", total: 0, done: 0, current: `clearing ${String(p.bank).padStart(2, "0")}/${String(p.slot).padStart(2, "0")}` });
         await delRetry({ type: "DELETE_PATCH", bank: p.bank, slot: p.slot });
       }
-    } catch { /* firmware < 0.5.2 doesn't have DELETE_PATCH */ }
+    } catch { /* best effort: the backup's patches are still written below */ }
   }
 
   report({ phase: "patches", total: backup.patches.length, done: 0, current: "" });

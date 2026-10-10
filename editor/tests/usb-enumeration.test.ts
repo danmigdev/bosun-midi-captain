@@ -1,32 +1,31 @@
 /**
  * USB enumeration + port probing tests.
  *
- * Verifies the serial-plugin JSON formats the frontend depends on,
- * drawn from real device logs captured on a Pixel 8 Pro with a
- * MIDI Captain (Raspberry Pi Pico, VID 0x239A / PID 0x80F4).
+ * Verifies the serial-plugin JSON formats the frontend depends on, for a
+ * MIDI Captain running Bosun's native firmware (VID 0x239A / PID 0x80F4,
+ * descriptors in firmware-native/platform/rp2040/usb_descriptors.c).
  */
 
 import { describe, it, expect } from "vitest";
 
-// --- Real-world payloads captured from `adb logcat -s SerialPlugin` ---
+// --- Enumerate payload in the serial plugin's format ---
 
-const REAL_ENUMERATE_JSON = JSON.stringify({
+const ENUMERATE_JSON = JSON.stringify({
   ports: {
     "/dev/bus/usb/001/002": {
       type: "Usb",
       vid: "0x239A",
       pid: "0x80F4",
-      manufacturer: "Raspberry Pi",
-      product: "Pico",
+      manufacturer: "PaintAudio",
+      product: "MIDI Captain Bosun Native",
       serial_number: "DF635C76C783412E",
       interfaces: [
-        { id: 0, class: 2, subclass: 2, protocol: 0 }, // CDC Communications (data port)
+        { id: 0, class: 2, subclass: 2, protocol: 0 }, // CDC Communications (console)
         { id: 1, class: 10, subclass: 0, protocol: 0 }, // CDC Data
-        { id: 2, class: 2, subclass: 2, protocol: 0 }, // CDC Communications (console)
+        { id: 2, class: 2, subclass: 2, protocol: 0 }, // CDC Communications (data port)
         { id: 3, class: 10, subclass: 0, protocol: 0 }, // CDC Data
-        { id: 4, class: 3, subclass: 0, protocol: 0 }, // HID
-        { id: 5, class: 1, subclass: 1, protocol: 0 }, // Audio
-        { id: 6, class: 1, subclass: 3, protocol: 0 }, // Audio
+        { id: 4, class: 1, subclass: 1, protocol: 0 }, // Audio Control
+        { id: 5, class: 1, subclass: 3, protocol: 0 }, // MIDI Streaming
       ],
     },
   },
@@ -52,9 +51,9 @@ interface PortInfo {
 }
 
 describe("USB enumeration JSON parsing", () => {
-  const parsed: SerialEnumerate = JSON.parse(REAL_ENUMERATE_JSON);
+  const parsed: SerialEnumerate = JSON.parse(ENUMERATE_JSON);
 
-  it("parses the real MIDI Captain enumerate payload without errors", () => {
+  it("parses the MIDI Captain enumerate payload without errors", () => {
     expect(parsed.ports).toBeDefined();
     const keys = Object.keys(parsed.ports);
     expect(keys.length).toBeGreaterThanOrEqual(1);
@@ -66,22 +65,21 @@ describe("USB enumeration JSON parsing", () => {
     expect(port.pid).toBe("0x80F4");
   });
 
-  it("identifies the device as Raspberry Pi Pico", () => {
+  it("identifies the device as the Bosun MIDI Captain", () => {
     const port = Object.values(parsed.ports)[0];
-    expect(port.manufacturer).toBe("Raspberry Pi");
-    expect(port.product).toBe("Pico");
+    expect(port.manufacturer).toBe("PaintAudio");
+    expect(port.product).toBe("MIDI Captain Bosun Native");
   });
 
-  it("exposes the expected 7 USB interfaces (2x CDC, 2x CDC Data, 1x HID, 2x Audio)", () => {
+  it("exposes the expected 6 USB interfaces (2x CDC, 2x CDC Data, 2x Audio)", () => {
     const port = Object.values(parsed.ports)[0];
-    expect(port.interfaces.length).toBe(7);
+    expect(port.interfaces.length).toBe(6);
 
     const classes = port.interfaces.map((i) => i.class);
     // CDC Communications (class 2): interfaces 0, 2
     // CDC Data (class 10): interfaces 1, 3
-    // HID (class 3): interface 4
-    // Audio (class 1): interfaces 5, 6
-    expect(classes).toEqual([2, 10, 2, 10, 3, 1, 1]);
+    // Audio (class 1): interfaces 4 (control), 5 (MIDI streaming)
+    expect(classes).toEqual([2, 10, 2, 10, 1, 1]);
   });
 
   it("has a serial_number present (required for stable port identification)", () => {
@@ -91,7 +89,7 @@ describe("USB enumeration JSON parsing", () => {
 });
 
 describe("port info extraction (mirrors frontend listPorts)", () => {
-  const realDevice: SerialEnumerate = JSON.parse(REAL_ENUMERATE_JSON);
+  const realDevice: SerialEnumerate = JSON.parse(ENUMERATE_JSON);
 
   function extractPorts(enumerate: SerialEnumerate): PortInfo[] {
     const out: PortInfo[] = [];
@@ -125,7 +123,7 @@ describe("port info extraction (mirrors frontend listPorts)", () => {
   it("port kind includes manufacturer and product", () => {
     const ports = extractPorts(realDevice);
     for (const p of ports) {
-      expect(p.kind).toBe("CDC Raspberry Pi Pico");
+      expect(p.kind).toBe("CDC PaintAudio MIDI Captain Bosun Native");
     }
   });
 });
@@ -146,7 +144,7 @@ describe("empty USB state (no pedal connected)", () => {
 describe("USB hotplug robustness", () => {
   it("handles a port appearing then disappearing (keys change)", () => {
     const before: SerialEnumerate = { ports: {} };
-    const after: SerialEnumerate = JSON.parse(REAL_ENUMERATE_JSON);
+    const after: SerialEnumerate = JSON.parse(ENUMERATE_JSON);
 
     expect(Object.keys(before.ports).length).toBe(0);
     expect(Object.keys(after.ports).length).toBe(1);

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adafruit / CircuitPython (VID 0x239A = 9114) - used by MIDI Captain.
-         Also Raspberry Pi Pico (VID 0x2E8A = 11914) for other RP2040 boards.
+    <!-- Adafruit (VID 0x239A = 9114) - the MIDI Captain, which Bosun's native
+         firmware reports as 239a:80f4. Also Raspberry Pi Pico (VID 0x2E8A =
+         11914) for other RP2040 boards.
          Kemper GmbH (VID 0x133E = 4926) - Profiler/Player USB MIDI + audio. -->
     <usb-device vendor-id="9114" />
     <usb-device vendor-id="11914" />

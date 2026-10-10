@@ -104,40 +104,11 @@ export interface TftFieldSchema {
   sample?: string | number;
 }
 
-export interface PluginRecipePcLayout {
-  preset_regex: string;
-  groups: Array<{ name: string; min?: number; max?: number }>;
-  index_formula: string;
-  pc_max: number;
-  bank_msb_label: string;
-  pc_label: string;
-}
-
-export interface PluginRecipeSchema {
-  /** Route id - used as the nav item id and the URL fragment. */
-  id: string;
-  label: string;
-  icon?: string;
-  target_message_type: string;
-  preset_field: string;
-  channel_field: string;
-  channel_default: number;
-  hint?: string;
-  missing_message?: string;
-  instructions?: string;
-  save_note?: string;
-  /** Optional: if set, the page also computes a MIDI table from the
-   * preset string. Plugins whose presets aren't addressable as
-   * bank_msb + PC simply omit this field. */
-  pc_layout?: PluginRecipePcLayout;
-}
-
 export interface PluginManifestEntry {
   label: string;
   version: string;
   messages: Record<string, MessageSchema>;
   config_schema?: PluginConfigSchema | null;
-  recipe_schema?: PluginRecipeSchema | null;
   tft_fields?: Record<string, TftFieldSchema>;
   default_layout?: Array<Record<string, unknown>>;
 }
@@ -160,10 +131,10 @@ export interface ExpressionConfig {
 }
 
 /** The core message types the firmware always handles, regardless of which
- * plugins are loaded. Mirrors firmware/lib/captain/messages.py CORE_MESSAGE_TYPES.
+ * plugins are loaded. Mirrors firmware-native/schemas/core.json.
  * Used as a fallback so the editor stays usable (Patches/Editor with core MIDI
- * only) when GET_MANIFEST never lands - e.g. an older firmware truncating the
- * large plugin manifest response. Keep in sync with the firmware file. */
+ * only) when GET_MANIFEST never lands - e.g. a busy link dropping the large
+ * plugin manifest response. Keep in sync with the firmware file. */
 export const CORE_MESSAGE_TYPES: Record<string, MessageSchema> = {
   cc: {
     label: "Control Change",
@@ -261,7 +232,7 @@ export function fallbackManifest(): Manifest {
 }
 
 export interface FlattenedSchema extends MessageSchema {
-  /** message type id (e.g. "cc" or "ampero_scene") */
+  /** message type id (e.g. "cc" or "kemper_rig") */
   type: string;
   /** display source: "core" or the plugin's label */
   source: string;
@@ -352,23 +323,24 @@ export interface PatchSummary {
 }
 export interface ProfileInfo { id: string; name: string; kind: string; color?: string | null; active: boolean; }
 
-export interface FirmwareFile { rel: string; dst: string; size: number; }
-
+/** STATS reply: uptime and the firmware's MIDI, protocol and storage counters. */
 export interface DeviceStats {
   uptime_ms: number;
-  mem_free: number;
-  mem_alloc: number;
-  loop_iters: number;
   midi_rx_count: number;
   midi_tx_count: number;
-  protocol_cmd_count: number;
-  last_patch_switch_ms: number;
-  current: { bank: number; slot: number };
-  /** Live expression-jack readings (firmware 0.4.x+). `raw` is the ADC value
-   * 0..65535; `value` is the calibrated 0..127 the firmware would send. Absent
-   * on firmware without expression support. `armed` is false until the input
-   * has moved (so a bare/parked jack sends nothing); `present` is false when
-   * the presence probe finds no pedal plugged - both optional for older fw. */
+  midi_tx_failed: number;
+  queue_overflows: number;
+  unsupported_messages: number;
+  invalid_messages: number;
+  protocol_errors: number;
+  storage_errors: number;
+  midi_events_dropped: number;
+  storage_ready: boolean;
+  /** Live expression-jack readings, when the firmware reports them. `raw` is
+   * the ADC value 0..65535; `value` is the calibrated 0..127 the firmware
+   * would send. `armed` is false until the input has moved (so a bare/parked
+   * jack sends nothing); `present` is false when the presence probe finds no
+   * pedal plugged - both optional. */
   expression?: Array<{ jack: number; raw: number; value: number;
                        armed?: boolean; present?: boolean }>;
 }
@@ -394,10 +366,7 @@ export interface MidiInCapturedEvent {
 }
 
 export type FirmwareMessage =
-  | { type: "ACK"; id?: string; fw?: string;
-      /** PUT_FILE_BEGIN capability echo.  Both fields are required before a
-       * host may rely on PUT_FILE_END to resolve an ambiguous chunk ACK. */
-      size_check?: boolean; size?: number }
+  | { type: "ACK"; id?: string; fw?: string }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
   | { type: "ERROR"; id?: string; error: string; of?: string; detail?: string }
   | { type: "HUB_UPDATE"; id?: string; job?: string; phase: string;
@@ -409,8 +378,8 @@ export type FirmwareMessage =
       /** Native 0.8+: the model's switch layout (see lib/hardware.ts parseHardware).
        * Absent on every earlier firmware, which only ran on the 10-switch Captain. */
       hardware?: unknown;
-      /** Native firmware uses a separate release line and does not accept Python file OTA. */
-      native_experimental?: boolean; firmware_ota?: boolean; reboot_modes?: string[];
+      /** REBOOT modes the firmware accepts, e.g. "bootloader". */
+      reboot_modes?: string[];
       /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
       stage_input?: boolean;
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
@@ -527,8 +496,8 @@ export async function isConnected(): Promise<boolean> {
  * to keep talking to the pedal afterwards (export-across-profiles,
  * import-as-new-profile). The host-side disconnect/reconnect dance is
  * what the editor's UI uses too - the budget defaults are tuned to a
- * CircuitPython Pico cold boot (~3s for USB re-enumeration plus a
- * second for firmware init). */
+ * Captain cold boot (USB re-enumeration plus firmware init take a few
+ * seconds). */
 export async function waitForReboot(budgetMs = 15000): Promise<boolean> {
   // Signal "connecting" to the editor shell so the topbar connection
   // pill shows the pulsing "Connecting…" indicator while we retry.
@@ -537,7 +506,7 @@ export async function waitForReboot(budgetMs = 15000): Promise<boolean> {
   try { window.dispatchEvent(new CustomEvent("bosun-connecting", { detail: { active: true } })); } catch {}
   try {
     const deadline = Date.now() + budgetMs;
-    // Initial wait so the Pico has time to actually drop the USB CDC -
+    // Initial wait so the pedal has time to actually drop the USB CDC -
     // attempting autoConnect immediately just races the still-alive
     // handle.
     await new Promise(r => setTimeout(r, 1500));
@@ -624,11 +593,10 @@ export function isInternallyRetriedFirmwareError(message: FirmwareMessage): bool
 }
 
 /** A request reached the transport but no correlated response arrived before
- * its deadline.  For append-only OTA chunks this is materially different
- * from an explicit firmware ERROR: the bytes may already have been appended
- * and only the ACK may have been lost.  Keep that distinction structured so
- * callers never have to parse an error string to decide whether resending is
- * safe. */
+ * its deadline.  For a write this is materially different from an explicit
+ * firmware ERROR: the firmware may already have applied it and only the ACK
+ * may have been lost.  Keep that distinction structured so callers never have
+ * to parse an error string to decide whether resending is safe. */
 export class FirmwareCommandTimeoutError extends Error {
   readonly commandType: string;
   readonly commandId: string;
@@ -799,8 +767,8 @@ export async function onDisconnected(handler: () => void): Promise<UnlistenFn> {
 }
 
 /** Android only: the I/O thread entered stall-recovery (closing and
- *  reopening the port, which reboots the pedal via DTR and re-enumerates
- *  its USB device - see serial/android.rs). The link is briefly down but
+ *  reopening the port, waiting for the pedal to re-enumerate if its USB
+ *  device went away - see serial/android.rs). The link is briefly down but
  *  the backend is healing itself; unlike onDisconnected, nothing here
  *  should call disconnect() (that would race the recovery thread). Fires
  *  on desktop too but never triggers there - desktop.rs never emits it. */
@@ -812,12 +780,6 @@ export async function onReconnecting(handler: () => void): Promise<UnlistenFn> {
  *  finished and the sentinel sync succeeded again. */
 export async function onReconnected(handler: () => void): Promise<UnlistenFn> {
   return listen("firmware-reconnected", handler);
-}
-
-function unsupportedAndroidFirmwareOta(): Promise<never> {
-  return Promise.reject(new Error(
-    "firmware OTA is not supported by the Android serial backend",
-  ));
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
@@ -925,16 +887,14 @@ export const cmd = {
   putGlobal,
   getManifest:    () => send({ type: "GET_MANIFEST",    id: nextId() }),
   // Awaited variant for the retry watchdog (App.svelte): the manifest is by
-  // far the largest response in the protocol (22 KB+, streamed field-by-
-  // field on the firmware to stay under its heap limit - see
-  // protocol._get_manifest), so a busy/contended link can legitimately take
-  // well past the default 5 s. The watchdog needs to know when THIS
-  // specific attempt actually settles (arrived or genuinely timed out)
-  // before firing another - the fire-and-forget `getManifest` above gives
-  // no such signal, which is what let the naive fixed-4s-clock retry loop
-  // pile up overlapping GET_MANIFEST requests under load (2026-08-15): each
-  // one costs the firmware a full 22 KB re-stream, competing for the same
-  // main-loop time as USB-MIDI servicing, so retrying blind made a slow
+  // far the largest response in the protocol, so a busy/contended link can
+  // legitimately take well past the default 5 s. The watchdog needs to know
+  // when THIS specific attempt actually settles (arrived or genuinely timed
+  // out) before firing another - the fire-and-forget `getManifest` above
+  // gives no such signal, which is what let the naive fixed-4s-clock retry
+  // loop pile up overlapping GET_MANIFEST requests under load (2026-08-15):
+  // each one costs the firmware a full manifest re-send, competing for the
+  // same main-loop time as USB-MIDI servicing, so retrying blind made a slow
   // link slower and could plausibly starve MIDI processing outright.
   getManifestAwait: () => sendAndAwait<{ type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }>(
                     { type: "GET_MANIFEST" }, 10000),
@@ -972,9 +932,6 @@ export const cmd = {
                     sendAndAwait<{ type: "ACK"; model?: string; reboot?: boolean }>(
                       { type: "SET_HARDWARE", model }, 4000),
   getStats:       () => sendAndAwait<{ type: "STATS" } & DeviceStats>({ type: "STATS" }, 6000),
-  putFileBegin:   (path: string, size: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_BEGIN", path, size }, 5000),
-  putFileChunk:   (path: string, data_b64: string, offset: number) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_CHUNK", path, data_b64, offset }, 5000),
-  putFileEnd:     (path: string) => IS_ANDROID ? unsupportedAndroidFirmwareOta() : sendAndAwait({ type: "PUT_FILE_END", path }, 5000),
 
   // ----- profiles -----
   listProfiles:   () => sendAndAwait<{ type: "PROFILE_LIST"; profiles: ProfileInfo[]; active: string }>(

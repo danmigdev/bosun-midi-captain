@@ -1825,11 +1825,12 @@ describe("StageView", () => {
   });
 
   describe("preset navigation row", () => {
-    // device.preset_navigation is a device-level overlay (mirrors firmware's
-    // _paint_preset_nav_leds in captain/app.py): it is NOT a patch binding,
-    // so a nav switch never appears in fullPatch.bindings. Regression for
-    // "bottom row shows no rig names" (2026-08-14) - StageView used to only
-    // ever read bindings, so these switches rendered "-" forever.
+    // device.preset_navigation is a device-level overlay (mirrors the
+    // firmware's render_leds in firmware-native/src/application.c): it is
+    // NOT a patch binding, so a nav switch never appears in
+    // fullPatch.bindings. Regression for "bottom row shows no rig names"
+    // (2026-08-14) - StageView used to only ever read bindings, so these
+    // switches rendered "-" forever.
     function navDevice(switches: Record<string, number>, bankColors: Record<string, string> = {}) {
       return { preset_navigation: { switches, bank_colors: bankColors } };
     }
@@ -1844,11 +1845,11 @@ describe("StageView", () => {
     });
 
     it("falls through to unbound when no patch exists at the target slot", () => {
-      // Mirrors the firmware's available_slots gate (_paint_preset_nav_leds /
-      // bindings.py): a switch mapped to an empty slot is fully inert on the
-      // real pedal (LED off, no navigation), so Stage must not claim a name
-      // for it either - "RIG 4" would describe a switch that does nothing
-      // when pressed.
+      // Mirrors the firmware's saved-slot gate (bosun_runtime_config_changed
+      // in firmware-native/src/runtime.c): a switch mapped to an empty slot
+      // is fully inert on the real pedal (LED off, no navigation), so Stage
+      // must not claim a name for it either - "RIG 4" would describe a
+      // switch that does nothing when pressed.
       const { container } = renderStage({
         deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
         device: navDevice({ A: 4 }),
@@ -1913,8 +1914,8 @@ describe("StageView", () => {
 
   describe("bank/patch change while mounted (long-press bank-step)", () => {
     // App.svelte updates the `deviceInfo` prop on an inbound EVENT
-    // "patch_switched" (fired by any switch_patch() call in app.py,
-    // including bank_step() from a long-press captain_bank_step binding -
+    // "patch_switched" (fired by the firmware on every patch change,
+    // including a bank step from a long-press captain_bank_step binding -
     // not just editor-initiated navigation). Regression for "long-press
     // DOWN to bank 2, Stage keeps showing the previous bank's patch"
     // (2026-08-14): reproduces the prop change in isolation, without

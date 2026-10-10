@@ -263,10 +263,11 @@
   }
 
   // ---- marquee preview ----
-  // Mirrors the firmware (display.py): left inset, bounce with a dwell at each
-  // end, px/second travel. Keyed by entry index; a positive span means the
-  // label overflows and is actively scrolling, which the layout below uses to
-  // re-anchor it to the left (like the device does).
+  // Mirrors the firmware (scroll_offset in firmware-native/src/display.c):
+  // left inset, bounce with a dwell at each end, px/second travel. Keyed by
+  // entry index; a positive span means the label overflows and is actively
+  // scrolling, which the layout below uses to re-anchor it to the left (like
+  // the device does).
   const PREV_MARGIN = 6;
   const SCROLL_DEFAULT_SPEED = 40;
   const SCROLL_PAUSE_MS = 800;
@@ -331,7 +332,7 @@
 
   <p class="hint">
     Each entry below is a label drawn on the 240×240 TFT. <code>field</code>
-    pulls a live value (patch name, bank, scene…); <code>text</code> is a
+    pulls a live value (patch name, bank, rig name…); <code>text</code> is a
     static literal. <code>prefix</code>/<code>suffix</code> wrap the value
     (e.g. prefix <code>BANK </code>).
   </p>
@@ -442,8 +443,8 @@
           </div>
         {/each}
       </div>
-      <p class="prevhint">Preview uses sample data - patch name "Heavy",
-        Ampero preset "P01-4", scene 3.</p>
+      <p class="prevhint">Preview uses sample data - patch name "Heavy" and
+        each plugin's sample values.</p>
     </div>
   </div>
 </div>

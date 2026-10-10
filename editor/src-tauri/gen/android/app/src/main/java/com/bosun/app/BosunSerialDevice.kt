@@ -28,10 +28,10 @@ import android.util.Log
  * Android's official SYNCHRONOUS transfer call with real SDK-level timeout
  * enforcement - a different, better-trodden code path.
  *
- * Interface discovery: the Captain's firmware calls
- * usb_cdc.enable(console=True, data=True) in boot.py, and CircuitPython
- * enumerates `console` first (lower interface numbers) and `data` second
- * (higher interface numbers) - matching the existing sort_ports_desc
+ * Interface discovery: the Captain's firmware exposes its `console`
+ * CDC-ACM function first (interfaces 0/1) and its `data` function second
+ * (interfaces 2/3), followed by USB MIDI (see firmware-native/platform/
+ * rp2040/usb_descriptors.c) - matching the existing sort_ports_desc
  * heuristic in android_helpers.rs ("data CDC index 1+ tried before console
  * CDC index 0"). Each CDC-ACM function is a Communications interface
  * (class 0x02) immediately followed by its paired Data interface (class
@@ -92,7 +92,7 @@ class BosunSerialDevice private constructor(
                 )
                 return null
             }
-            // Highest interface number = enabled second in boot.py = "data".
+            // Highest interface number = the second CDC function = "data".
             val dataIface = dataCandidates.last()
             val commIface = allIfaces.firstOrNull {
                 it.interfaceClass == USB_CLASS_COMM && it.id == dataIface.id - 1
@@ -131,10 +131,11 @@ class BosunSerialDevice private constructor(
             Log.i(TAG, "opened: comm iface=${commIface.id} data iface=${dataIface.id}")
             val dev = BosunSerialDevice(connection, commIface, dataIface, inEp, outEp)
             // Match the desktop/plugin behavior every part of this codebase
-            // already assumes: DTR asserted on open triggers the RP2040's
-            // CP soft-reset, and 115200 8N1 line coding (CircuitPython's
-            // CDC ACM ignores the actual baud value but some hosts/drivers
-            // expect a well-formed SET_LINE_CODING regardless).
+            // already assumes: DTR asserted on open (the firmware serves its
+            // data CDC only while DTR is set, starting a fresh session on
+            // each edge), and 115200 8N1 line coding (the firmware's CDC ACM
+            // ignores the actual baud value but some hosts/drivers expect a
+            // well-formed SET_LINE_CODING regardless).
             dev.setLineCoding(115200)
             dev.setDtr(true)
             return dev
@@ -142,7 +143,7 @@ class BosunSerialDevice private constructor(
     }
 
     /** CDC SET_LINE_CODING: 7 bytes, little-endian baud rate + 1 stop bit +
-     * no parity + 8 data bits. CircuitPython's CDC ACM does not act on this
+     * no parity + 8 data bits. The firmware's CDC ACM does not act on this
      * (it is not a real UART), but sending a well-formed request matches
      * what every other host driver does and avoids surprising the RP2040's
      * TinyUSB CDC class implementation with an unexpected wLength. */
@@ -167,8 +168,8 @@ class BosunSerialDevice private constructor(
     /** CDC SET_CONTROL_LINE_STATE: bit 0 = DTR, bit 1 = RTS. Both asserted
      * together to match how every other client in this codebase (the
      * desktop serial2 path, the old plugin-based Android path) opens the
-     * port - the RP2040 resets on the DTR edge either way, and CircuitPython
-     * does not distinguish DTR from RTS for its own "connected" state. */
+     * port; the firmware only looks at DTR, and each DTR edge starts a fresh
+     * data session. */
     fun setDtr(on: Boolean): Boolean {
         val value = if (on) (CDC_CTRL_DTR or CDC_CTRL_RTS) else 0
         val n = connection.controlTransfer(

@@ -27,10 +27,10 @@ package com.bosun.app
 object BridgeHealthPolicy {
     /** Once a direction has had its fair chance to prove itself (past the
      *  startup grace period), this is how long it may go with no message
-     *  before being judged stale. Matches kemper.py's own
-     *  _SENSING_TIMEOUT_MS, since it's the same underlying judgment call
-     *  ("is this Kemper subscription still alive") from the other end of
-     *  the same link. */
+     *  before being judged stale. Matches the firmware's own 15 s Kemper
+     *  sensing timeout (bosun_kemper_tick in firmware-native/src/kemper.c),
+     *  since it's the same underlying judgment call ("is this Kemper
+     *  subscription still alive") from the other end of the same link. */
     const val STALE_AFTER_MS = 15_000L
 
     /** How long after a (re)start a direction is given before it's even

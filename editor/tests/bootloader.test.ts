@@ -8,10 +8,10 @@ const send = vi.mocked(sendAndAwait);
 beforeEach(() => send.mockReset());
 
 describe("manual bootloader entry", () => {
-  it("requires an explicit native bootloader capability", () => {
+  it("requires an explicit bootloader capability", () => {
     expect(supportsBootloader(null)).toBe(false);
     expect(supportsBootloader({ fw: "0.6.10-native" })).toBe(false);
-    expect(supportsBootloader({ fw: "legacy", reboot_modes: ["bootloader"] })).toBe(false);
+    expect(supportsBootloader({ fw: "0.6.10-native", reboot_modes: ["normal"] })).toBe(false);
     expect(supportsBootloader({ fw: "0.6.10-native", reboot_modes: ["normal", "bootloader"] })).toBe(true);
   });
   it("checks drafts before requesting the ROM bootloader", async () => {

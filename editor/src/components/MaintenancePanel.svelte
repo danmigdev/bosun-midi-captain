@@ -4,13 +4,12 @@
   import { cmd, waitForReboot, type DeviceStats, type ProfileInfo } from "../lib/protocol";
   import {
     exportConfig, backupFilename, timestampedFolderName,
-    validateBackup, importConfig, inferKindFromDevice, backupHardwareNotice,
+    validateBackup, importConfig, backupHardwareNotice,
     type BackupProgress, type RestoreProgress, type ConfigBackup,
   } from "../lib/config-backup";
-  import { pickFirmwareSource, prepareFirmwareSource } from "../lib/installer";
   import { IS_ANDROID } from "../lib/platform";
 
-  import { isNativeFirmware, supportsFirmwareFileOta, type FirmwareIdentity } from "../lib/firmware-capabilities";
+  import type { FirmwareIdentity } from "../lib/firmware-capabilities";
   import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
   import HardwareModelPicker from "./HardwareModelPicker.svelte";
 
@@ -24,7 +23,6 @@
   let { connected, activeProfile = null, firmwareInfo = null,
     unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate,
     usbRelease = null, onUsbUpdate, onBootloader, hardware = CAPTAIN_10 }: Props = $props();
-  let canUpdateFirmware = $derived(connected && supportsFirmwareFileOta(firmwareInfo));
 
   let stats = $state<DeviceStats | null>(null);
   // A model change restarts the pedal: pause the stats poll meanwhile.
@@ -32,33 +30,6 @@
   let statsErr = $state<string>("");
   let rebooting = $state(false);
   let rebootMsg = $state<string>("");
-
-  // Firmware update source picking (folder or zip). The actual push UI is
-  // the shared FirmwarePushOverlay, opened via a window event so it lives in
-  // App and survives a page switch.
-  let fwSrcBusy = $state(false);
-  let fwSrcMsg = $state<string>("");
-
-  function openPush(source?: string) {
-    if (IS_ANDROID || !canUpdateFirmware) return;
-    window.dispatchEvent(new CustomEvent("bosun-open-firmware-push",
-      source ? { detail: { source } } : undefined));
-  }
-
-  async function pickAndPush(zip: boolean) {
-    if (IS_ANDROID || !canUpdateFirmware) return;
-    fwSrcMsg = ""; fwSrcBusy = true;
-    try {
-      const src = await pickFirmwareSource(zip);
-      if (!src || !canUpdateFirmware) return; // cancelled or device changed
-      const root = await prepareFirmwareSource(src);
-      openPush(root);
-    } catch (e) {
-      fwSrcMsg = String(e);
-    } finally {
-      fwSrcBusy = false;
-    }
-  }
 
   // Backup state
   let showExportDialog = $state(false);
@@ -143,7 +114,7 @@
         // Cross-profile read: pass `profile_id` to exportConfig and the
         // firmware reads straight from disk for that profile - no
         // SWITCH_PROFILE / reboot cycle. The active profile stays put,
-        // so multi-profile export is zero-reconnect on firmware 0.3.2+.
+        // so multi-profile export needs no reconnect.
         // For the active profile we omit profileId so the firmware
         // serves the in-memory state (slightly faster, no disk hit).
         const backup = await exportConfig(
@@ -254,7 +225,7 @@
       const { backup, suggestedName, file } = batch[i];
       batchProgress = { current: suggestedName, done: i, total: batch.length };
       try {
-        const kind = backup.kind || inferKindFromDevice(backup.device);
+        const kind = backup.kind;
         if (!kind) throw new Error("unknown plugin kind in backup");
         const profile_id = slugify(suggestedName) + "_" + Math.random().toString(36).slice(2, 6);
         await importConfig(backup, p => (restoreProgress = p), {
@@ -316,9 +287,9 @@
     try {
       if (importMode === "new") {
         const name = newProfileName.trim() || "Imported profile";
-        const kind = backup.kind || inferKindFromDevice(backup.device);
+        const kind = backup.kind;
         if (!kind) {
-          throw new Error("Couldn't infer plugin kind from backup. Update the backup or overwrite the active profile instead.");
+          throw new Error("The backup does not record its plugin kind. Overwrite the active profile instead.");
         }
         const profile_id = slugify(name) + "_" + Math.random().toString(36).slice(2, 6);
         await importConfig(backup, p => (restoreProgress = p), {
@@ -334,7 +305,7 @@
         try { await cmd.saveNow(); } catch {}
         // Let the firmware drain its flash-write queue before the editor
         // refetches the patch list.  Without this pause a LIST_PATCHES sent
-        // immediately after SAVE_NOW can race the FAT writes and return a
+        // immediately after SAVE_NOW can race the flash writes and return a
         // stale (or empty) list, making the user click Refresh manually.
         await new Promise(r => setTimeout(r, 400));
         restoreMsg = `Overwrote active profile with ${backup.patches.length} patches.`;
@@ -418,7 +389,7 @@
   }
 
   async function doBootloader() {
-    if (!onBootloader || rebooting || backupBusy || restoreBusy || fwSrcBusy) return;
+    if (!onBootloader || rebooting || backupBusy || restoreBusy) return;
     rebooting = true;
     stopStatsPoll();
     try { await onBootloader(); }
@@ -437,11 +408,6 @@
     setTimeout(() => rebootMsg = "", 3000);
   }
 
-  function humanBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / 1024 / 1024).toFixed(2)} MB`;
-  }
   function humanMs(ms: number): string {
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -460,13 +426,13 @@
     {#if stats}
       <div class="stats">
         <div><span>uptime</span><b>{humanMs(stats.uptime_ms)}</b></div>
-        <div><span>mem free</span><b>{humanBytes(stats.mem_free)}</b></div>
-        <div><span>mem alloc</span><b>{humanBytes(stats.mem_alloc)}</b></div>
-        <div><span>loop iters</span><b>{stats.loop_iters.toLocaleString()}</b></div>
+        <div><span>storage</span><b>{stats.storage_ready ? "ready" : "unavailable"}</b></div>
         <div><span>MIDI rx</span><b>{stats.midi_rx_count}</b></div>
         <div><span>MIDI tx</span><b>{stats.midi_tx_count}</b></div>
-        <div><span>cmds handled</span><b>{stats.protocol_cmd_count}</b></div>
-        <div><span>current patch</span><b>{stats.current.bank}/{stats.current.slot}</b></div>
+        <div><span>MIDI tx failed</span><b>{stats.midi_tx_failed}</b></div>
+        <div><span>queue overflows</span><b>{stats.queue_overflows}</b></div>
+        <div><span>protocol errors</span><b>{stats.protocol_errors}</b></div>
+        <div><span>storage errors</span><b>{stats.storage_errors}</b></div>
       </div>
     {:else if statsErr}
       <p class="err">{statsErr}</p>
@@ -657,63 +623,34 @@
     {#if unifiedRelease || resumeUnifiedUpdate}
       <section class="block">
         <h3>Update Bosun</h3>
-        <p class="muted small">The Raspberry Pi installs the update and backs up and transfers your profiles automatically.</p>
+        <p class="muted small">The Raspberry Pi installs the update and backs up and preserves your profiles automatically.</p>
         <button class="primary" disabled={!connected} onclick={onUnifiedUpdate}>
           {resumeUnifiedUpdate ? "Check Bosun update" : `Update Bosun to ${unifiedRelease}`}
         </button>
       </section>
     {/if}
     <section class="block">
-      {#if canUpdateFirmware}
-      <h3>Update firmware (OTA)</h3>
+      <h3>Firmware</h3>
       <p class="muted small">
-        Pushes a firmware tree to the pedal over USB - no bootloader, no drive,
-        works in performance mode. Use the editor's bundled firmware, or point
-        it at your own firmware folder or a <code>.zip</code>. The pedal reboots
-        and reconnects when done.
-      </p>
-      <div class="row">
-        {#if !unifiedRelease}
-        <button class="primary" disabled={!connected || fwSrcBusy}
-                onclick={() => openPush()}>
-          Update from bundled
-        </button>
-        {/if}
-        <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(false)}>
-          From folder…
-        </button>
-        <button disabled={!connected || fwSrcBusy} onclick={() => pickAndPush(true)}>
-          From .zip…
-        </button>
-      </div>
-      {#if !connected}<p class="muted small">Connect the pedal first.</p>{/if}
-      {#if fwSrcBusy}<p class="curr">Reading the selected firmware…</p>{/if}
-      {#if fwSrcMsg}<p class="curr err">{fwSrcMsg}</p>{/if}
-      {:else}
-        <h3>Firmware</h3>
-        <p class="muted small">
-          {#if isNativeFirmware(firmwareInfo)}
-            {#if usbRelease}
-              Use Install firmware (USB) above to install or reinstall the bundled release and preserve your profiles.
-            {:else if unifiedRelease || resumeUnifiedUpdate}
-              Use Update Bosun above to install the release and preserve your profiles.
-            {:else}
-              Connect by Desktop USB or through a Raspberry Pi with update support to install a bundled native release.
-            {/if}
-          {:else if firmwareInfo?.fw}
-            This device does not support CircuitPython firmware updates.
+        {#if firmwareInfo?.fw}
+          {#if usbRelease}
+            Use Install firmware (USB) above to install or reinstall the bundled release and preserve your profiles.
+          {:else if unifiedRelease || resumeUnifiedUpdate}
+            Use Update Bosun above to install the release and preserve your profiles.
           {:else}
-            Waiting for firmware information from the pedal.
+            Connect by Desktop USB or through a Raspberry Pi with update support to install a bundled native release.
           {/if}
-        </p>
-      {/if}
+        {:else}
+          Waiting for firmware information from the pedal.
+        {/if}
+      </p>
     </section>
   {/if}
 
-  {#if isNativeFirmware(firmwareInfo)}
+  {#if firmwareInfo?.fw}
     <section class="block">
       <h3>Pedal model</h3>
-      <HardwareModelPicker {hardware} disabled={rebooting || backupBusy || restoreBusy || fwSrcBusy}
+      <HardwareModelPicker {hardware} disabled={rebooting || backupBusy || restoreBusy}
         onBusy={(busy) => { modelBusy = busy; }} />
     </section>
   {/if}
@@ -721,15 +658,15 @@
   <section class="block">
     <h3>Reboot</h3>
     <p class="muted small">
-      Sends the firmware a REBOOT command. Useful after manual edits to
-      <code>firmware/config/</code> or to recover from a stuck state.
+      Sends the firmware a REBOOT command. Useful to recover from a stuck
+      state.
     </p>
     <div class="row">
       <button onclick={doReboot} disabled={rebooting || modelBusy}>
         {rebooting ? "Rebooting…" : "Reboot pedal"}
       </button>
       {#if onBootloader}
-        <button onclick={doBootloader} disabled={rebooting || backupBusy || restoreBusy || fwSrcBusy}>
+        <button onclick={doBootloader} disabled={rebooting || backupBusy || restoreBusy}>
           Enter bootloader
         </button>
       {/if}
@@ -756,7 +693,6 @@
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .curr { color: var(--text-muted); font-size: 0.8rem; margin: 0.5rem 0 0; }
   .hardware-notice { color: var(--warn-text); margin: 0 0 0.6rem; }
-  code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 3px; color: var(--warn-text); font-family: ui-monospace, Consolas, monospace; }
   .dialog {
     background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
     padding: 0.75rem 0.95rem; margin: 0.75rem 0 0;
