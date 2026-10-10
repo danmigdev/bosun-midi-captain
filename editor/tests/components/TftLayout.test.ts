@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import TftLayout from "../../src/components/TftLayout.svelte";
-import { MINI_6 } from "../../src/lib/hardware";
 import type { Manifest } from "../../src/lib/protocol";
 
 const commands = vi.hoisted(() => ({
@@ -34,10 +33,17 @@ function kemperManifest(): Manifest {
     plugins: {
       kemper_player: {
         label: "Kemper Player", version: "1", messages: {},
-        tft_fields: { expression_mode: { label: "Expression pedal mode (VOL/WAH)", sample: "VOL" } },
+        tft_fields: { expression_mode: { label: "Wah pedal (WAH/VOL/OFF)", sample: "VOL" } },
         default_layout: [structuredClone(title), structuredClone(pedal)],
       },
     },
+  };
+}
+
+function genericManifest(): Manifest {
+  return {
+    core_messages: {},
+    plugins: { generic_midi: { label: "Generic MIDI", version: "1", messages: {} } },
   };
 }
 
@@ -99,7 +105,7 @@ describe("TftLayout expression indicator", () => {
     expect(original).toEqual(before);
   });
 
-  it("offers the field with an older manifest and previews VOL, WAH and unknown without saving", async () => {
+  it("offers the field without a manifest and previews WAH, VOL, OFF and unknown without saving", async () => {
     const { container } = render(TftLayout, { device: deviceWith([title]), manifest: null });
     const field = await screen.findByLabelText("Field");
     await fireEvent.change(field, { target: { value: "expression_mode" } });
@@ -109,6 +115,8 @@ describe("TftLayout expression indicator", () => {
     await fireEvent.change(mode, { target: { value: "WAH" } });
     expect(container.querySelector(".preview")?.textContent).toContain("WAH");
     expect(container.querySelector(".preview svg")).toBeNull();
+    await fireEvent.change(mode, { target: { value: "OFF" } });
+    expect(container.querySelector(".preview")?.textContent).toContain("OFF");
     await fireEvent.change(mode, { target: { value: "" } });
     expect(container.querySelector(".preview")?.textContent).toContain("---");
     expect(container.querySelector(".preview")?.textContent).not.toContain("WAH");
@@ -168,12 +176,16 @@ describe("TftLayout expression indicator", () => {
   });
 });
 
-describe("TftLayout on a pedal without expression jacks", () => {
-  it.each([
-    ["the core fields", null, ""],
-    ["the plugin's tft_fields", kemperManifest(), "kemper_player"],
-  ] as const)("hides the pedal indicator affordances offered by %s", async (_source, manifest, activeKind) => {
-    render(TftLayout, { device: deviceWith([title]), manifest, activeKind, hardware: MINI_6 });
+describe("TftLayout pedal indicator per profile", () => {
+  it("offers the indicator on a Kemper profile, whatever the pedal model", async () => {
+    render(TftLayout, { device: deviceWith([title]), manifest: kemperManifest(), activeKind: "kemper_player" });
+    const field = await screen.findByLabelText("Field");
+    expect(field.querySelectorAll('option[value="expression_mode"]')).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "+ Add pedal indicator" })).toBeInTheDocument();
+  });
+
+  it("hides the indicator affordances on a profile whose plugin has no indicator", async () => {
+    render(TftLayout, { device: deviceWith([title]), manifest: genericManifest(), activeKind: "generic_midi" });
     const field = await screen.findByLabelText("Field");
     expect(field.querySelector('option[value="patch_name"]')).not.toBeNull();
     expect(field.querySelector('option[value="expression_mode"]')).toBeNull();
@@ -182,19 +194,17 @@ describe("TftLayout on a pedal without expression jacks", () => {
     expect(screen.queryByLabelText("Pedal preview")).not.toBeInTheDocument();
   });
 
-  it("still renders, saves and removes an existing pedal indicator", async () => {
+  it("still renders, saves and removes an existing indicator on such a profile", async () => {
     const original = deviceWith([title, pedal]);
     const before = structuredClone(original);
     const { container } = render(TftLayout, {
-      device: original, manifest: kemperManifest(), activeKind: "kemper_player", hardware: MINI_6,
+      device: original, manifest: genericManifest(), activeKind: "generic_midi",
     });
     await waitFor(() => expect(container.querySelectorAll(".entry")).toHaveLength(2));
     const [titleField, pedalField] = screen.getAllByLabelText("Field") as HTMLSelectElement[];
     expect(pedalField).toHaveValue("expression_mode");
-    expect(pedalField.selectedOptions[0]).toHaveTextContent("Kemper Player · Expression pedal mode (VOL/WAH)");
     expect(pedalField.querySelectorAll('option[value="expression_mode"]')).toHaveLength(1);
     expect(titleField.querySelector('option[value="expression_mode"]')).toBeNull();
-    expect(container.querySelectorAll(".prevlabel")[1]).toHaveTextContent("VOL");
     expect(screen.queryByLabelText("Pedal preview")).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));

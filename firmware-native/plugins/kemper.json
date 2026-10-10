@@ -1,7 +1,10 @@
 {
   "kemper_player": {
     "product_id": 2,
-    "fixed_effects": true
+    "fixed_effects": true,
+    "config_fields": {
+      "wah_pedal_volume": {"type": "bool", "default": true, "label": "Wah pedal controls volume when no wah is on (Kemper: WahPedal > Volume)"}
+    }
   },
   "kemper_head": {
     "extends": "kemper_player",

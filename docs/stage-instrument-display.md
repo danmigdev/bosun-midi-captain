@@ -31,6 +31,26 @@ beside VOL/WAH. These display controls do not change rigs or mute settings.
 The view adapts to the Pi's wide panel and to portrait/landscape phones. The
 **Tuner** appearance settings control its note font, colour and size.
 
+## Wah pedal indicator
+
+On Kemper profiles the header shows what the wah pedal controls right now,
+wherever the pedal is plugged in: a Captain expression jack set to Kemper wah,
+or a Kemper pedal input set to Wah Pedal.
+
+- **WAH**: a wah is on in the current rig, either the fixed Wah of the Player
+  or PROFILER MK2, or a wah effect in any effect slot.
+- **VOL**: no wah is on and the Kemper's **WahPedal > Volume** option is on, so
+  the same pedal controls volume. This is the Player's default.
+- **OFF**: no wah is on and **WahPedal > Volume** is off, for example when
+  volume has its own pedal.
+- **---**: not known yet, while a rig loads or the Kemper is disconnected.
+
+The Kemper does not report **WahPedal > Volume** over MIDI. Match it with
+**Wah pedal controls volume when no wah is on** in Bosun's Settings (on by
+default). The indicator appears on every Kemper profile, including the Mini 6,
+and the pedal screen shows the same text when its layout includes the **Wah
+pedal** field.
+
 ## Appearance
 
 The settings button beside VOL/WAH opens the appearance panel. Change fonts,

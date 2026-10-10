@@ -1908,7 +1908,7 @@
           {/if}
 
         {:else if page === "tft"}
-          <TftLayout device={globalDevice} {manifest} {activeKind} {hardware} />
+          <TftLayout device={globalDevice} {manifest} {activeKind} />
 
         {:else if page === "settings"}
           <header class="pageHead">

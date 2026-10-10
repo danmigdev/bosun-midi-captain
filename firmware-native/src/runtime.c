@@ -382,6 +382,7 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
         rt->kemper.channel = channel;
         bosun_kemper_set_bound_blocks(&rt->kemper, bound);
     }
+    bosun_kemper_set_wah_volume(&rt->kemper, bosun_config_bool(device, kemper_config, "wah_pedal_volume", true));
     rt->kemper_enabled = enabled;
     rt->initialized = true;
     configure_expression(rt);

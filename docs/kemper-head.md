@@ -89,6 +89,10 @@ running entry actions; unmapped programs leave the Bosun patch unchanged.
 - **Fixed FX** is available for MK2 when supported by its installed Kemper OS.
   MK1 hides and rejects Fixed FX commands and skips fixed-wah queries. Choosing
   MK2 changes capabilities; it does not install Kemper features or firmware.
+- **Wah pedal indicator** follows the same rule as on the Player: WAH while a
+  wah is on, otherwise VOL or OFF depending on the Kemper's **WahPedal >
+  Volume** option, mirrored in Settings. On MK1 only wah effects in the slots
+  count. See [Stage instrument display](stage-instrument-display.md#wah-pedal-indicator).
 - **Looper** uses NRPN page 125, parameters 88–94 for Record/Play, Stop/Erase,
   Trigger, Reverse, Half Speed, Cancel Overdub and Erase. **Tap** is the default
   and sends press then release. Use **Press** and **Release** in matching

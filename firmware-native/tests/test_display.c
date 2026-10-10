@@ -75,9 +75,9 @@ static void expression_labels_are_text_only(void) {
     const char *layout = "{\"tft\":{\"layout\":[{\"field\":\"expression_mode\","
         "\"x\":-6,\"y\":-6,\"halign\":\"right\",\"valign\":\"bottom\",\"size\":2,\"color\":\"#ffffff\"}]}}";
     load(layout, "{}");
-    const bosun_expression_mode modes[] = {BOSUN_EXPRESSION_VOL, BOSUN_EXPRESSION_WAH};
-    const char *texts[] = {"VOL", "WAH"};
-    for (unsigned i = 0; i < 2; ++i) {
+    const bosun_expression_mode modes[] = {BOSUN_EXPRESSION_VOL, BOSUN_EXPRESSION_WAH, BOSUN_EXPRESSION_OFF};
+    const char *texts[] = {"VOL", "WAH", "OFF"};
+    for (unsigned i = 0; i < 3; ++i) {
         kemper.expression_mode = modes[i]; ++kemper.revision;
         assert(frame(i) == BOSUN_DISPLAY_OK);
         assert(display.labels[0].x == 198 && display.labels[0].y == 210);
@@ -89,7 +89,7 @@ static void expression_labels_are_text_only(void) {
             for (unsigned x = 162; x < 198; ++x) assert(pixels[y][x] == 0);
     }
     kemper.expression_mode = BOSUN_EXPRESSION_UNKNOWN; ++kemper.revision;
-    assert(frame(2) == BOSUN_DISPLAY_OK);
+    assert(frame(3) == BOSUN_DISPLAY_OK);
     assert(display.labels[0].length == 0 && colored(0xffff) == 0);
     load("{\"tft\":{\"layout\":[{\"field\":\"expression_mode\",\"prefix\":\"WAH \",\"size\":1}]}}", "{}");
     kemper.expression_mode = BOSUN_EXPRESSION_VOL;

@@ -381,7 +381,7 @@
       "sample": "SET 65%"
     },
     "expression_mode": {
-      "label": "Expression pedal mode (VOL/WAH)",
+      "label": "Wah pedal (WAH/VOL/OFF)",
       "sample": "VOL"
     },
     "kemper_rig": {

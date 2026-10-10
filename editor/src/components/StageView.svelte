@@ -626,8 +626,14 @@
       if (showBankPicker) dismissBankPicker(true);
     }
   });
+  // What the Kemper wah pedal drives now: WAH, VOL, or OFF (no wah on and
+  // the Kemper's "WahPedal > Volume" link off). Only Kemper profiles report
+  // kemper_mode; the pedal may be on the Captain or on the Kemper itself.
+  // Remembered across the context reset of a patch switch, so the badge does
+  // not flicker; the next full CONTEXT settles it.
+  let kemperProfile = $state(false);
   let expressionMode = $derived(connected
-    && (context.expression_mode === "VOL" || context.expression_mode === "WAH")
+    && (context.expression_mode === "WAH" || context.expression_mode === "VOL" || context.expression_mode === "OFF")
     ? context.expression_mode : "---");
   let screenLabels = $derived.by(() => {
     const tft = device?.tft;
@@ -965,6 +971,7 @@
             }
           }
           const isPartial = (msg as Record<string, unknown>).partial === true;
+          if (!isPartial || "kemper_mode" in incoming) kemperProfile = typeof incoming.kemper_mode === "string";
           context = isPartial
             ? { ...context, ...accepted }
             : { ...accepted, ...preservedOptimistic };
@@ -1065,7 +1072,7 @@
     {/each}
   </span>
   {#if showThemeEditor}
-    <StageThemeEditor theme={stageTheme} showExpression={pedalLayout.expression_jacks > 0}
+    <StageThemeEditor theme={stageTheme} showExpression={kemperProfile}
       onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
   {/if}
   {#if showBankPicker}
@@ -1079,7 +1086,7 @@
       onclose={() => (tunerDismissed = true)} />
   {/if}
 
-  <!-- header: rig name + bank/rig + BPM + expression (pedals with a jack) -->
+  <!-- header: rig name + bank/rig + BPM + wah pedal indicator (Kemper profiles) -->
   <div class="stage__header" use:measureStageHeader>
     <div class="stage__rig-name" style:color={screenColors.title} use:marquee={rigName}><span class="stage__marquee-track">{rigName}</span></div>
     <div class="stage__bank-controls" role="group" aria-label="Bank navigation" aria-busy={bankChangePending}>
@@ -1111,7 +1118,7 @@
         <span class="stage__navigation-error" role="status">Update Captain firmware to control switches from Stage.</span>
       {/if}
     </div>
-    {#if pedalLayout.expression_jacks > 0}
+    {#if kemperProfile}
       <span class="stage__expression" style:color={stageTheme.sections.expression?.color ?? screenColors.expression} aria-label={`Expression pedal: ${expressionMode}`}>
         <span class="stage__expression-label"><span>{expressionMode}</span></span>
       </span>

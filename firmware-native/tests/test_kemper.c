@@ -215,74 +215,80 @@ static void generation_and_live_cc_fences(void) {
 
 static void crunch_wah_and_discovery(void) {
     static const uint8_t pages[] = {50,51,52,53,56,58,60,61};
-    static const uint8_t on_pages[] = {50,51,52,53,56,58,60,61};
-    static const uint8_t addresses[] = {3,3,3,3,3,3,3,3};
     static const uint8_t controllers[] = {17,18,19,20,22,24,27,29};
-    /* Every physical slot uses its current effect-module address for type
-     * and on/off queries. Fixed Wah OFF alone cannot establish VOL. */
+    /* One burst asks for the fixed Wah and every slot type; an unbound wah
+     * slot then gets one on/off query. Fixed Wah OFF alone cannot establish VOL. */
     for (unsigned slot = 0; slot < 8; ++slot) {
         bosun_kemper k; wire w;
         ready(&k, &w);
+        for (unsigned i = 0; i < 8; ++i) assert(queries(&w, pages[i], 0) == 1);
         param(&k, 5, 21, 0, 601);
         assert(k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
-        uint32_t now = 621;
         for (unsigned i = 0; i < 8; ++i) {
-            bosun_kemper_tick(&k, now);
-            assert(queries(&w, pages[i], 0) == 1);
-            param(&k, pages[i], 0, i == slot ? 1 : 0, now + 1);
-            now += 21;
-            if (i == slot) {
-                bosun_kemper_tick(&k, now);
-                assert(queries(&w, on_pages[i], addresses[i]) == 1);
-                param(&k, on_pages[i], addresses[i], 1, now + 1);
-                assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
-                now += 21;
-            }
+            param(&k, pages[i], 0, i == slot ? 1 : 0, 602 + i);
+            assert(queries(&w, pages[i], 3) == (i == slot ? 1u : 0u));
         }
-        assert(k.wah_types == 255 && k.state.expression_mode == BOSUN_EXPRESSION_WAH);
-        cc(&k, controllers[slot], 0, now);
+        assert(k.wah_types == 255 && k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
+        param(&k, pages[slot], 3, 1, 620);
+        assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
+        cc(&k, controllers[slot], 0, 630);
         assert(k.state.expression_mode == BOSUN_EXPRESSION_VOL);
-        cc(&k, controllers[slot], 127, now + 1);
+        /* Without the Kemper's WahPedal > Volume link the pedal idles. */
+        bosun_kemper_set_wah_volume(&k, false);
+        assert(k.state.expression_mode == BOSUN_EXPRESSION_OFF);
+        assert(!strcmp(bosun_kemper_expression_label(k.state.expression_mode), "OFF"));
+        bosun_kemper_set_wah_volume(&k, true);
+        assert(k.state.expression_mode == BOSUN_EXPRESSION_VOL);
+        cc(&k, controllers[slot], 127, 631);
         assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
         assert(!strcmp(bosun_kemper_expression_label(k.state.expression_mode), "WAH"));
     }
+    /* A bound slot's state comes from reconciliation, with no extra query. */
+    bosun_kemper k; wire w;
+    memset(&w, 0, sizeof(w));
+    bosun_kemper_init(&k, 1, 1, send_packet, &w);
+    sense(&k, 100); pc(&k, 2, 100); name(&k, "Crunch", 120);
+    bosun_kemper_tick(&k, 600);
+    param(&k, 50, 3, 1, 601);
+    assert(k.state.rig_name_fresh && queries(&w, 50, 3) == 1);
+    bosun_kemper_tick(&k, 602);
+    param(&k, 5, 21, 0, 603);
+    for (unsigned i = 0; i < 8; ++i) param(&k, pages[i], 0, i == 0 ? 1 : 0, 604 + i);
+    assert(queries(&w, 50, 3) == 1 && k.state.expression_mode == BOSUN_EXPRESSION_WAH);
 }
 
-static void wah_timeout_generation_and_slot_fence(void) {
+static void wah_generation_refresh_and_slot_fence(void) {
     bosun_kemper k; wire w;
     ready(&k, &w);
     param(&k, 5, 21, 1, 601);
     assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
     assert(bosun_kemper_begin_rig(&k, 4, 610));
     assert(k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
+    param(&k, 5, 21, 1, 620); /* answers belong to the previous rig */
+    param(&k, 50, 0, 1, 621);
+    assert(k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN && !k.wah_types);
     name(&k, "Lead", 650);
     bosun_kemper_tick(&k, 1110);
-    param(&k, 5, 21, 1, 1120);
-    assert(k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
-    assert(queries(&w, 5, 21) == 1);
-    bosun_kemper_tick(&k, 1800);
+    assert(queries(&w, 5, 21) == 2 && queries(&w, 50, 0) == 2);
+    bosun_kemper_tick(&k, 2109);
     assert(queries(&w, 5, 21) == 2);
-    param(&k, 5, 21, 1, 1801);
+    bosun_kemper_tick(&k, 2110); /* unanswered: asked again a second later */
+    assert(queries(&w, 5, 21) == 3 && queries(&w, 50, 0) == 3);
+    param(&k, 5, 21, 1, 2111);
     assert(k.state.expression_mode == BOSUN_EXPRESSION_WAH);
-    bosun_kemper_tick(&k, 1821); /* type poll never answered */
-    bosun_kemper_tick(&k, 3021);
-    assert(k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
-    bosun_kemper_tick(&k, 4221); bosun_kemper_tick(&k, 5421);
-    assert(queries(&w, 50, 0) == 3);
-    assert(k.wah_next_ms == 10421 && !k.wah_pending);
+    /* A slot state query that outlives its rig is quarantined. */
     ready(&k, &w);
     param(&k, 5, 21, 0, 601);
-    bosun_kemper_tick(&k, 621); param(&k, 50, 0, 1, 622);
-    bosun_kemper_tick(&k, 642); /* slot A on/off is in flight */
+    param(&k, 50, 0, 1, 602); /* slot A holds a wah; its on/off is in flight */
     assert(queries(&w, 50, 3) == 1);
     bosun_kemper_set_bound_blocks(&k, 1);
     assert(bosun_kemper_begin_rig(&k, 5, 650));
     bosun_kemper_tick(&k, 1150);
     param(&k, 50, 3, 1, 1151);
     assert(!k.state.effect_known && k.state.expression_mode == BOSUN_EXPRESSION_UNKNOWN);
-    bosun_kemper_tick(&k, 1842);
+    bosun_kemper_tick(&k, 1802);
     assert(queries(&w, 50, 3) == 2);
-    param(&k, 50, 3, 0, 1843);
+    param(&k, 50, 3, 0, 1803);
     assert(k.state.effect_known == 1 && !k.state.effects[0]);
 }
 
@@ -833,7 +839,7 @@ int main(void) {
     morph_commands_are_not_feedback();
     codecs_and_beacon(); tuner_and_defensive_input(); pc_echo_and_rig_names();
     generation_and_live_cc_fences(); crunch_wah_and_discovery();
-    wah_timeout_generation_and_slot_fence(); names_bounded_and_pc_wrap();
+    wah_generation_refresh_and_slot_fence(); names_bounded_and_pc_wrap();
     boot_name_and_live_cc_deadline();
     message_channel_overrides();
     reinitialize_wah_after_long_uptime();
@@ -844,6 +850,6 @@ int main(void) {
     bank_snapshot_intermediate_and_final_pc();
     bank_snapshot_fallback_is_bounded_and_scoped();
     bank_snapshot_late_final_and_supersession();
-    printf("Kemper: codecs, lease, tuner, PC echo, generations, names, 8-slot WAH, retries passed (%zu bytes state)\n", sizeof(bosun_kemper));
+    printf("Kemper: codecs, lease, tuner, PC echo, generations, names, VOL/WAH, retries passed (%zu bytes state)\n", sizeof(bosun_kemper));
     return 0;
 }

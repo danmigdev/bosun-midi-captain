@@ -1,6 +1,5 @@
 <script lang="ts">
   import { cmd, type Manifest } from "../lib/protocol";
-  import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
   import ColorField from "./ColorField.svelte";
 
   type LayoutEntry = {
@@ -27,13 +26,8 @@
     device: Record<string, unknown> | null;
     manifest: Manifest | null;
     activeKind?: string;
-    /** Connected model; omitted means the 10-switch Captain. */
-    hardware?: HardwareLayout;
   };
-  let { device, manifest, activeKind = "", hardware = CAPTAIN_10 }: Props = $props();
-  // Without expression jacks there is no way to add a pedal indicator; a
-  // layout that already has one keeps rendering it and can remove it.
-  let hasJacks = $derived(hardware.expression_jacks > 0);
+  let { device, manifest, activeKind = "" }: Props = $props();
 
   // Working copy of the layout. Initialized from device.tft.layout and
   // pushed back via cmd.putGlobal on Save.
@@ -64,7 +58,6 @@
     { id: "bank",        label: "Captain bank",     source: "core" },
     { id: "slot",        label: "Captain slot",     source: "core" },
     { id: "hold_effect", label: "Held effect",      source: "core" },
-    { id: "expression_mode", label: "Expression pedal mode (VOL/WAH)", source: "core" },
   ];
   let pluginFields = $derived.by<FieldOpt[]>(() => {
     if (!manifest) return [];
@@ -86,11 +79,15 @@
   });
   let knownFields = $derived<FieldOpt[]>([
     ...CORE_FIELDS.filter(core => !pluginFields.some(field => field.id === core.id)),
+    // Without a manifest the profile's own fields are unknown, so the wah
+    // pedal indicator stays addable.
+    ...(manifest ? [] : [{ id: "expression_mode", label: "Wah pedal (WAH/VOL/OFF)", source: "core" }]),
     ...pluginFields,
   ]);
-  // Addable fields. The pedal indicator is dropped on a pedal without jacks
-  // whether the core list or the plugin's tft_fields provides it.
-  let allFields = $derived(knownFields.filter(field => hasJacks || field.id !== "expression_mode"));
+  // The wah pedal indicator comes from the Kemper plugin's tft_fields. It is
+  // offered on every Kemper profile, jacks or not: the pedal may be plugged
+  // into the Kemper. Other profiles keep an existing indicator row editable.
+  let offersIndicator = $derived(knownFields.some(field => field.id === "expression_mode"));
 
   function addEntry() {
     layout = [...layout, {
@@ -333,11 +330,10 @@
               <select value={e.field ?? ""}
                       onchange={(ev) => e.field = (ev.target as HTMLSelectElement).value}>
                 <option value="">- literal text -</option>
-                {#if e.field && !allFields.some(f => f.id === e.field)}
-                  {@const known = knownFields.find(f => f.id === e.field)}
-                  <option value={e.field}>{known ? `${known.source} · ${known.label}` : e.field}</option>
+                {#if e.field && !knownFields.some(f => f.id === e.field)}
+                  <option value={e.field}>{e.field}</option>
                 {/if}
-                {#each allFields as f}
+                {#each knownFields as f}
                   <option value={f.id}>{f.source} · {f.label}</option>
                 {/each}
               </select>
@@ -385,18 +381,19 @@
         </div>
       {/each}
       <button class="addbtn" onclick={addEntry}>+ Add label</button>
-      {#if hasJacks}
+      {#if offersIndicator}
         <button class="addbtn" onclick={addExpressionEntry}>+ Add pedal indicator</button>
       {/if}
     </div>
 
     <div class="previewWrap">
       <h3>Preview (240×240)</h3>
-      {#if hasExpressionEntry && hasJacks}
+      {#if hasExpressionEntry && offersIndicator}
         <label class="pedalPreview">Pedal preview
           <select bind:value={expressionPreviewMode}>
-            <option value="VOL">VOL</option>
             <option value="WAH">WAH</option>
+            <option value="VOL">VOL</option>
+            <option value="OFF">OFF</option>
             <option value="">Unknown (---)</option>
           </select>
         </label>

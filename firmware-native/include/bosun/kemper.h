@@ -11,8 +11,11 @@ typedef enum {
     BOSUN_KEMPER_A, BOSUN_KEMPER_B, BOSUN_KEMPER_C, BOSUN_KEMPER_D,
     BOSUN_KEMPER_X, BOSUN_KEMPER_MOD, BOSUN_KEMPER_DELAY, BOSUN_KEMPER_REVERB
 } bosun_kemper_block;
+/* What the Kemper wah pedal drives now: WAH while a wah is on, otherwise VOL
+ * when the Kemper's "WahPedal > Volume" link is on, else OFF. */
 typedef enum {
-    BOSUN_EXPRESSION_UNKNOWN, BOSUN_EXPRESSION_VOL, BOSUN_EXPRESSION_WAH
+    BOSUN_EXPRESSION_UNKNOWN, BOSUN_EXPRESSION_VOL, BOSUN_EXPRESSION_WAH,
+    BOSUN_EXPRESSION_OFF
 } bosun_expression_mode;
 typedef enum {
     BOSUN_KEMPER_EFFECT, BOSUN_KEMPER_FIXED, BOSUN_KEMPER_TUNER,
@@ -71,8 +74,7 @@ typedef struct {
     uint32_t bank_snapshot_deadline_ms;
     uint32_t block_generation[BOSUN_KEMPER_BLOCKS];
     uint32_t guard_until_ms[BOSUN_KEMPER_BLOCKS];
-    uint32_t wah_query_generation, wah_retire_ms, wah_next_ms;
-    uint32_t wah_slots_retire_ms, scheduled_pc_ms;
+    uint32_t wah_generation, wah_refresh_ms, scheduled_pc_ms;
     char last_name[BOSUN_KEMPER_NAME_CAPACITY];
     char pending_name[BOSUN_KEMPER_NAME_CAPACITY];
     bosun_kemper_pc_token local_pc, orphan_pc[BOSUN_KEMPER_PC_ORPHANS];
@@ -81,15 +83,14 @@ typedef struct {
     uint8_t orphan_blocks, orphan_pc_count;
     uint16_t last_name_rig;
     uint8_t guard_budget[BOSUN_KEMPER_BLOCKS], guard_on;
-    uint8_t wah_attempts, wah_types, wah_slots, wah_states, wah_on;
-    uint8_t wah_target, wah_cursor, wah_queried_slots;
+    uint8_t wah_types, wah_slots; /* Slots with a known effect type / a wah type. */
     uint16_t scheduled_pc_rig;
     uint8_t scheduled_pc_channel;
     uint16_t deferred_bank_pc;
     uint8_t bank_lsb;
-    int8_t wah_fixed;
-    bool init_sent, settle_active, wah_pending, wah_query_valid, scheduled_pc;
-    bool wah_retire_active;
+    int8_t wah_fixed; /* Fixed input Wah: -1 unknown, 0 off or absent, 1 on. */
+    bool init_sent, settle_active, scheduled_pc;
+    bool wah_volume; /* Mirrors the Kemper's "WahPedal > Volume" link. */
     bool rig_identity_known, bootstrap_name_pending;
     bool name_query_active, name_query_retire_active, pending_name_requested;
     bool bank_snapshot_active, bank_snapshot_seen, bank_snapshot_fallback;
@@ -103,6 +104,8 @@ void bosun_kemper_init(bosun_kemper *kemper, uint8_t channel,
 void bosun_kemper_init_model(bosun_kemper *kemper, const bosun_kemper_model *model,
     uint8_t channel, uint8_t bound_blocks, bosun_midi_send_fn send, void *context);
 void bosun_kemper_set_bound_blocks(bosun_kemper *kemper, uint8_t mask);
+/* The link is not readable over MIDI; settings mirror it (default on). */
+void bosun_kemper_set_wah_volume(bosun_kemper *kemper, bool on);
 void bosun_kemper_tick(bosun_kemper *kemper, uint32_t now_ms);
 void bosun_kemper_handle(bosun_kemper *kemper, uint8_t channel, uint8_t status,
     const uint8_t *data, size_t length, uint32_t now_ms);

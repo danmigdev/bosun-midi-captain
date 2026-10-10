@@ -1326,9 +1326,11 @@ describe("StageView", () => {
   });
 
   describe("expression pedal indicator", () => {
+    const KEMPER = { kemper_mode: "performance" };
+
     it("shows only the confirmed mode text inside the title bar", async () => {
       const { container } = renderStage();
-      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER, expression_mode: "WAH" } });
       const badge = container.querySelector(".stage__header .stage__expression");
       expect(badge).toHaveTextContent("WAH");
       expect(badge?.querySelector("svg")).toBeNull();
@@ -1337,21 +1339,25 @@ describe("StageView", () => {
       expect(badge).toHaveTextContent("VOL");
       expect(badge?.querySelector("svg")).toBeNull();
       expect(badge).toHaveAttribute("aria-label", "Expression pedal: VOL");
+      await pushFirmwareMessage({ type: "CONTEXT", partial: true, context: { expression_mode: "OFF" } });
+      expect(badge).toHaveTextContent("OFF");
+      expect(badge).toHaveAttribute("aria-label", "Expression pedal: OFF");
     });
 
     it("never guesses VOL when the state is missing, invalid, disconnected or changing rig", async () => {
       const { container, rerender } = renderStage();
       const badge = () => container.querySelector(".stage__expression");
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER } });
       expect(badge()).toHaveTextContent("---");
       expect(badge()?.querySelector("svg")).toBeNull();
-      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "invalid" } });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER, expression_mode: "invalid" } });
       expect(badge()).toHaveTextContent("---");
-      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER, expression_mode: "WAH" } });
       await pushFirmwareMessage({ type: "CONTEXT", partial: true, context: { kemper_bpm: 120 } });
       expect(badge()).toHaveTextContent("WAH");
       await pushFirmwareMessage({ type: "EVENT", event: "patch_switched", bank: 1, slot: 3 });
       expect(badge()).toHaveTextContent("---");
-      await pushFirmwareMessage({ type: "CONTEXT", context: { bank: 1, slot: 3, expression_mode: "WAH" } });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER, bank: 1, slot: 3, expression_mode: "WAH" } });
       expect(badge()).toHaveTextContent("WAH");
       await rerender({ connected: false });
       expect(badge()).toHaveTextContent("---");
@@ -1359,17 +1365,17 @@ describe("StageView", () => {
       expect(badge()).toHaveTextContent("---");
     });
 
-    it("is absent on a Mini 6, which has no expression jack, even when CONTEXT reports a mode", async () => {
+    it("shows on a Mini 6, whose pedal can be plugged into the Kemper", async () => {
       const { container } = renderStage({ hardware: MINI_6 });
-      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "WAH" } });
-      expect(container.querySelector(".stage__expression")).toBeNull();
-      expect(screen.queryByLabelText(/^Expression pedal/)).not.toBeInTheDocument();
+      await pushFirmwareMessage({ type: "CONTEXT", context: { ...KEMPER, expression_mode: "WAH" } });
+      expect(container.querySelector(".stage__header .stage__expression")).toHaveTextContent("WAH");
     });
 
-    it("is present on a 10-switch Captain", async () => {
+    it("is absent for a profile that is not a Kemper profile, even on a 10-switch Captain", async () => {
       const { container } = renderStage({ hardware: CAPTAIN_10 });
-      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "VOL" } });
-      expect(container.querySelector(".stage__header .stage__expression")).toHaveTextContent("VOL");
+      await pushFirmwareMessage({ type: "CONTEXT", context: { expression_mode: "" } });
+      expect(container.querySelector(".stage__expression")).toBeNull();
+      expect(screen.queryByLabelText(/^Expression pedal/)).not.toBeInTheDocument();
     });
   });
 
@@ -1389,6 +1395,7 @@ describe("StageView", () => {
           field, color, x: 123, y: 170, size: 9, font: "custom.bdf",
         })) } },
       });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       for (const [field, color] of Object.entries(colors)) {
         const element = container.querySelector<HTMLElement>(selectors[field]);
         expect(element).toHaveStyle({ color });
@@ -1404,7 +1411,7 @@ describe("StageView", () => {
       expect(container.querySelector<HTMLElement>(".stage__rig-number")?.style.color).toBe("");
     });
 
-    it("accepts compact kiosk colors and core/live field aliases, preferring the desktop layout", () => {
+    it("accepts compact kiosk colors and core/live field aliases, preferring the desktop layout", async () => {
       const { container } = renderStage({
         deviceInfo: { ...DEVICE, bank: 1, slot: 1 },
         device: {
@@ -1415,6 +1422,7 @@ describe("StageView", () => {
       expect(container.querySelector(".stage__rig-name")).toHaveStyle({ color: "#123456" });
       expect(container.querySelector(".stage__bank-number")).toHaveStyle({ color: "#fedcba" });
       expect(container.querySelector(".stage__rig-number")).toHaveStyle({ color: "#12ab34" });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       expect(container.querySelector(".stage__expression")).toHaveStyle({ color: "#f0ab12" });
     });
 
@@ -1426,6 +1434,7 @@ describe("StageView", () => {
           { field: "kemper_rig", color: "#6fd99b" }, { field: "expression_mode", color: "#ffffff" },
         ] } },
       });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       expect(container.querySelector(".stage__bank-number")).toHaveStyle({ color: "#9aa1ad" });
       expect(container.querySelector(".stage__rig-number")).toHaveStyle({ color: "#6fd99b" });
       await rerender({ device: { tft: { layout: [
@@ -1512,7 +1521,6 @@ describe("StageView", () => {
     it("falls back to the deviceInfo hardware descriptor when no hardware prop is passed", () => {
       const { container } = renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1, hardware: MINI_6_DESCRIPTOR } });
       expect(rowIds(container)).toEqual(MINI_6_ROWS);
-      expect(container.querySelector(".stage__expression")).toBeNull();
     });
 
     it("prefers the hardware prop over the deviceInfo descriptor", () => {
@@ -1520,7 +1528,6 @@ describe("StageView", () => {
         hardware: CAPTAIN_10, deviceInfo: { ...DEVICE, bank: 1, slot: 1, hardware: MINI_6_DESCRIPTOR },
       });
       expect(switchEls(container)).toHaveLength(10);
-      expect(container.querySelector(".stage__expression")).not.toBeNull();
     });
 
     it("follows a hardware change while mounted", async () => {
@@ -1528,10 +1535,8 @@ describe("StageView", () => {
       expect(switchEls(container)).toHaveLength(10);
       await rerender({ hardware: MINI_6 });
       expect(rowIds(container)).toEqual(MINI_6_ROWS);
-      expect(container.querySelector(".stage__expression")).toBeNull();
       await rerender({ hardware: CAPTAIN_10 });
       expect(switchEls(container)).toHaveLength(10);
-      expect(container.querySelector(".stage__expression")).not.toBeNull();
     });
 
     it("labels Mini 6 switches from bindings and preset navigation, ignoring switches it lacks", async () => {
@@ -2067,6 +2072,7 @@ describe("StageView", () => {
 
     it("persists global and section fonts selected from the touch menus", async () => {
       const { container } = renderStage();
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
       expect(screen.getAllByRole("combobox")).toHaveLength(8);
       expect(container.querySelector(".theme-panel select")).toBeNull();
@@ -2153,9 +2159,9 @@ describe("StageView", () => {
       expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("");
     });
 
-    it("hides only the VOL / WAH row on a Mini 6 and keeps that section's saved style", async () => {
+    it("hides only the VOL / WAH row outside a Kemper profile and keeps that section's saved style", async () => {
       localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({ version: 2, sections: { expression: { color: "#abcdef" } } }));
-      const { container } = renderStage({ hardware: MINI_6 });
+      const { container } = renderStage({ hardware: CAPTAIN_10 });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
       expect(screen.queryByRole("group", { name: "VOL / WAH appearance" })).not.toBeInTheDocument();
       expect(screen.getByRole("group", { name: "Switch ID appearance" })).toBeInTheDocument();
@@ -2169,8 +2175,9 @@ describe("StageView", () => {
       });
     });
 
-    it("lists the VOL / WAH row on a 10-switch Captain", async () => {
-      renderStage({ hardware: CAPTAIN_10 });
+    it("lists the VOL / WAH row on a Kemper profile, also on a Mini 6", async () => {
+      renderStage({ hardware: MINI_6 });
+      await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
       expect(screen.getByRole("group", { name: "VOL / WAH appearance" })).toBeInTheDocument();
       expect(screen.getAllByRole("combobox")).toHaveLength(8);

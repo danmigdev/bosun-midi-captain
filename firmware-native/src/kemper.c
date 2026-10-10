@@ -87,6 +87,7 @@ bool bosun_kemper_transition_active(const bosun_kemper *k) {
 const char *bosun_kemper_expression_label(bosun_expression_mode mode) {
     if (mode == BOSUN_EXPRESSION_WAH) return "WAH";
     if (mode == BOSUN_EXPRESSION_VOL) return "VOL";
+    if (mode == BOSUN_EXPRESSION_OFF) return "OFF";
     return "";
 }
 
@@ -97,24 +98,32 @@ static void expression(bosun_kemper *k, bosun_expression_mode mode) {
     }
 }
 
-static void invalidate_wah(bosun_kemper *k, uint32_t now) {
-    k->wah_query_valid = k->wah_pending = false;
-    k->wah_attempts = k->wah_types = k->wah_slots = k->wah_states = k->wah_on = 0;
-    k->wah_fixed = k->fixed_effects ? -1 : 0;
-    k->wah_cursor = 0;
-    /* An absent deadline is not timestamp zero: after 2^31 ms, modular
-     * comparison would mistake that zero for a future quarantine deadline. */
-    if (k->wah_retire_active && due(now, k->wah_retire_ms)) k->wah_retire_active = false;
-    k->wah_next_ms = k->wah_retire_active ? k->wah_retire_ms : now;
-    expression(k, BOSUN_EXPRESSION_UNKNOWN);
+/* VOL/WAH. A wah is on when the fixed input Wah (Player, PROFILER MK2) or a
+ * wah-type effect in any of the 8 slots is on. Slot on/off comes from the
+ * block cache that also drives the switch LEDs; only the slot types and the
+ * fixed Wah are asked for, once per settled rig and then every second, so a
+ * lost reply or an edit made on the Kemper is picked up without retries. */
+static uint8_t current_blocks(const bosun_kemper *k) {
+    uint8_t known = 0;
+    for (unsigned i = 0; i < 8; ++i)
+        if ((k->cache_known & (1u << i)) && k->block_generation[i] == k->generation)
+            known |= (uint8_t)(1u << i);
+    return known;
 }
 
 static void publish_wah(bosun_kemper *k) {
-    bool active = (k->wah_on & k->wah_slots & k->wah_states & k->wah_types) != 0;
-    bool known = k->wah_fixed == 0 && k->wah_types == 255 &&
-        (k->wah_states & k->wah_slots) == k->wah_slots;
-    expression(k, k->wah_fixed == 1 || active ? BOSUN_EXPRESSION_WAH :
-        known ? BOSUN_EXPRESSION_VOL : BOSUN_EXPRESSION_UNKNOWN);
+    uint8_t known = current_blocks(k);
+    bool wah = k->wah_fixed == 1 || (k->wah_slots & known & k->cache_on);
+    bool none = k->wah_fixed == 0 && k->wah_types == 0xff && !(k->wah_slots & ~known);
+    expression(k, wah ? BOSUN_EXPRESSION_WAH : !none ? BOSUN_EXPRESSION_UNKNOWN :
+        k->wah_volume ? BOSUN_EXPRESSION_VOL : BOSUN_EXPRESSION_OFF);
+}
+
+static void invalidate_wah(bosun_kemper *k, uint32_t now) {
+    k->wah_types = k->wah_slots = 0;
+    k->wah_fixed = k->fixed_effects ? -1 : 0;
+    k->wah_refresh_ms = now;
+    expression(k, BOSUN_EXPRESSION_UNKNOWN);
 }
 
 static bool wah_type(uint16_t value) {
@@ -123,83 +132,44 @@ static bool wah_type(uint16_t value) {
         value == 10 || value == 12;
 }
 
-static void receive_wah(bosun_kemper *k, uint16_t value, uint8_t target,
-                        bool live, uint32_t now) {
-    if ((target < 16 && value > 1) || bosun_kemper_transition_active(k) ||
-        !k->wah_query_valid || k->wah_query_generation != k->generation) return;
-    if (target == 8) k->wah_fixed = (int8_t)value;
+static bool wah_current(const bosun_kemper *k) {
+    return k->wah_generation == k->generation && !bosun_kemper_transition_active(k);
+}
+
+static void receive_wah_fixed(bosun_kemper *k, uint16_t value) {
+    if (!k->fixed_effects || value > 1 || !wah_current(k)) return;
+    k->wah_fixed = (int8_t)value;
+    publish_wah(k);
+}
+
+static void receive_wah_type(bosun_kemper *k, unsigned slot, uint16_t value, uint32_t now) {
+    if (!wah_current(k)) return;
+    uint8_t bit = (uint8_t)(1u << slot);
+    k->wah_types |= bit;
+    if (!wah_type(value)) k->wah_slots &= (uint8_t)~bit;
     else {
-        uint8_t bit = (uint8_t)(1u << (target >= 16 ? target - 16 : target));
-        if (target >= 16) {
-            k->wah_types |= bit;
-            if (wah_type(value)) {
-                if (!(k->wah_slots & bit)) k->wah_states &= (uint8_t)~bit;
-                k->wah_slots |= bit;
-            } else {
-                k->wah_slots &= (uint8_t)~bit;
-                k->wah_states &= (uint8_t)~bit;
-            }
-        } else {
-            k->wah_states |= bit;
-            if (value) k->wah_on |= bit;
-            else k->wah_on &= (uint8_t)~bit;
+        k->wah_slots |= bit;
+        if (!(current_blocks(k) & bit)) {
+            /* An unbound slot: ask for its state like a reconciliation query,
+             * so a reply that outlives this rig is quarantined and a live
+             * update wins over a stale reply. */
+            k->query_retire_ms = k->reconcile_queried ?
+                later(k->query_retire_ms, now + 1200) : now + 1200;
+            k->reconcile_queried |= bit;
+            (void)request(k, effect_page[slot], 3);
         }
     }
     publish_wah(k);
-    if (!live && target == k->wah_target) {
-        k->wah_pending = false;
-        k->wah_attempts = 0;
-        if (target < 16) k->wah_cursor = target == 8 ? 0 : target + 1;
-        k->wah_next_ms = now + (target == 8 && k->wah_types == 255 ? 500u : 20u);
-    }
 }
 
 static void query_wah(bosun_kemper *k, uint32_t now) {
     if (!k->state.connected || bosun_kemper_transition_active(k) ||
         !k->state.rig_name_fresh || k->last_name_rig != k->state.rig) return;
-    if (k->wah_pending) {
-        if (!due(now, k->wah_retire_ms)) return;
-        k->wah_fixed = k->fixed_effects ? -1 : 0;
-        k->wah_states = 0;
-        publish_wah(k);
-        k->wah_pending = false;
-        if (k->wah_attempts >= 3) {
-            k->wah_attempts = 0;
-            k->wah_next_ms = now + 5000;
-        }
-    }
-    if (!due(now, k->wah_next_ms)) return;
-    uint8_t target = k->wah_attempts ? k->wah_target : 8;
-    if (!k->wah_attempts && k->wah_fixed >= 0) {
-        bool missing = false;
-        for (unsigned i = 0; i < 8; ++i) {
-            uint8_t bit = (uint8_t)(1u << i);
-            if (!(k->wah_types & bit)) { target = (uint8_t)(i + 16); missing = true; break; }
-            if ((k->wah_slots & bit) && !(k->wah_states & bit)) {
-                target = (uint8_t)i; missing = true; break;
-            }
-        }
-        if (!missing) {
-            for (unsigned i = k->wah_cursor; i < 8; ++i)
-                if (k->wah_slots & (1u << i)) { target = (uint8_t)i; break; }
-        }
-    }
-    if (target == 8 && !k->fixed_effects) return;
-    uint8_t page = target == 8 ? 5 :
-        effect_page[target >= 16 ? target - 16 : target];
-    uint8_t address = target == 8 ? 21 : target >= 16 ? 0 : 3;
-    k->wah_query_generation = k->generation;
-    k->wah_query_valid = k->wah_pending = true;
-    k->wah_target = target;
-    ++k->wah_attempts;
-    k->wah_retire_ms = now + 1200;
-    k->wah_retire_active = true;
-    if (target < 8) {
-        if (due(now, k->wah_slots_retire_ms)) k->wah_queried_slots = 0;
-        k->wah_queried_slots |= (uint8_t)(1u << target);
-        k->wah_slots_retire_ms = k->wah_retire_ms;
-    }
-    (void)request(k, page, address);
+    if (k->wah_generation == k->generation && !due(now, k->wah_refresh_ms)) return;
+    k->wah_generation = k->generation;
+    k->wah_refresh_ms = now + 1000;
+    if (k->fixed_effects) (void)request(k, 5, 21);
+    for (unsigned i = 0; i < 8; ++i) (void)request(k, effect_page[i], 0);
 }
 
 static void expire_orphans(bosun_kemper *k, uint32_t now) {
@@ -232,11 +202,6 @@ static void quarantine(bosun_kemper *k, uint32_t now) {
         k->orphan_until_ms = k->orphan_blocks ?
             later(k->orphan_until_ms, k->query_retire_ms) : k->query_retire_ms;
         k->orphan_blocks |= k->reconcile_queried;
-    }
-    if (k->wah_queried_slots && !due(now, k->wah_slots_retire_ms)) {
-        k->orphan_until_ms = k->orphan_blocks ?
-            later(k->orphan_until_ms, k->wah_slots_retire_ms) : k->wah_slots_retire_ms;
-        k->orphan_blocks |= k->wah_queried_slots;
     }
 }
 
@@ -312,11 +277,18 @@ void bosun_kemper_init_model(bosun_kemper *k, const bosun_kemper_model *model,
     k->state.tuner_deviance = 8192;
     k->state.morph_value = -1;
     k->wah_fixed = k->fixed_effects ? -1 : 0;
+    k->wah_volume = true;
     k->bootstrap_name_pending = true;
 }
 
 void bosun_kemper_set_bound_blocks(bosun_kemper *k, uint8_t mask) {
     if (k) k->bound_blocks = mask;
+}
+
+void bosun_kemper_set_wah_volume(bosun_kemper *k, bool on) {
+    if (!k || k->wah_volume == on) return;
+    k->wah_volume = on;
+    publish_wah(k);
 }
 
 bool bosun_kemper_select_rig(bosun_kemper *k, uint8_t bank, uint8_t slot, uint32_t now) {
@@ -458,21 +430,19 @@ static void tuner(bosun_kemper *k, bool active) {
 static void receive_live_block(bosun_kemper *k, unsigned i, bool on, uint32_t now) {
     uint8_t bit = (uint8_t)(1u << i);
     bool queried = (k->reconcile_queried & bit) && !due(now, k->query_retire_ms);
-    bool wah_pending = k->wah_pending && k->wah_target == i;
     cache_block(k, i, on);
     /* MIDI input is drained before tick; a live update at the deadline is
      * current even if tick has not cleared settle_active yet. */
     if (!k->settle_active || due(now, k->settle_until_ms)) publish_block(k, i, on);
     k->reconcile_pending &= (uint8_t)~bit;
     if (!k->reconcile_pending) commit_name(k, now);
-    if (queried || wah_pending) {
+    if (queried) {
         k->guard_until_ms[i] = now + 1200;
-        k->guard_budget[i] = (uint8_t)((queried ?
-            (k->reconcile_attempt ? k->reconcile_attempt : 1) : 0) + (wah_pending ? 1 : 0));
+        k->guard_budget[i] = k->reconcile_attempt ? k->reconcile_attempt : 1;
         if (on) k->guard_on |= bit;
         else k->guard_on &= (uint8_t)~bit;
     }
-    receive_wah(k, on, (uint8_t)i, true, now);
+    publish_wah(k);
 }
 
 bool bosun_kemper_request_identity(bosun_kemper *k, uint32_t now) {
@@ -529,13 +499,13 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
          * a reason to retire our command, never as confirmed Morph progress. */
         bosun_kemper_morph_clear(k); return;
     }
-    if (page == 5 && address == 21) { receive_wah(k, value, 8, false, now); return; }
+    if (page == 5 && address == 21) { receive_wah_fixed(k, value); return; }
     if (address == 0) {
         for (unsigned i = 0; i < 8; ++i)
-            if (page == effect_page[i]) { receive_wah(k, value, (uint8_t)(i + 16), false, now); return; }
+            if (page == effect_page[i]) { receive_wah_type(k, i, value, now); return; }
     }
     if (page == 4 && address == 0) {
-        /* Python round uses ties-to-even, including raw .5 BPM values. */
+        /* Round half to even, including raw .5 BPM values. */
         uint16_t bpm = value / 64;
         if (value % 64 > 32 || (value % 64 == 32 && (bpm & 1))) ++bpm;
         if (k->state.bpm != bpm) { k->state.bpm = bpm; ++k->state.revision; }
@@ -571,15 +541,14 @@ static void receive_sysex(bosun_kemper *k, const uint8_t *data, size_t length,
             if (!due(now, k->guard_until_ms[i])) {
                 --k->guard_budget[i];
                 bool expected = (k->guard_on & bit) != 0;
-                if (on != expected) { receive_wah(k, expected, (uint8_t)i, false, now); return; }
+                if (on != expected) return;
             } else k->guard_budget[i] = 0;
         }
         cache_block(k, i, on);
         bool pending = (k->reconcile_pending & bit) && k->reconcile_attempt > 0;
-        if (!k->settle_active && (pending || !bosun_kemper_transition_active(k))) {
+        if (!k->settle_active && (pending || !bosun_kemper_transition_active(k)))
             publish_block(k, i, on);
-            receive_wah(k, value, (uint8_t)i, false, now);
-        }
+        publish_wah(k);
         if (pending) {
             k->reconcile_pending &= (uint8_t)~bit;
             if (!k->reconcile_pending) commit_name(k, now);

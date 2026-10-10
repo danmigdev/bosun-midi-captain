@@ -282,6 +282,8 @@ describe("kiosk integration", () => {
       expect(view.container.querySelector(".stage__rig-name")).toHaveStyle({ color: "#abcdef" });
       expect(view.container.querySelector(".stage__bank-number")).toHaveStyle({ color: "#fedcba" });
       expect(view.container.querySelector(".stage__rig-number")).toHaveStyle({ color: "#12ab34" });
+      reply({ type: "CONTEXT", context: { kemper_mode: "performance" } });
+      await vi.advanceTimersByTimeAsync(0);
       expect(view.container.querySelector(".stage__expression")).toHaveStyle({ color: "#f0ab12" });
       expect(view.container.querySelector(".stage__bank-number")).toHaveTextContent("Bank 1 Tour");
       expect(view.container.querySelector(".stage__rig-number")).toHaveTextContent("Preset 3!");
@@ -367,7 +369,6 @@ describe("kiosk integration", () => {
     // Firmware that predates hardware reporting only ran on the 10-switch Captain.
     reply(deviceInfo());
     await waitFor(() => expect(tileIds(container)).toEqual(CAPTAIN_10_TILES));
-    expect(container.querySelector(".stage__expression")).not.toBeNull();
   });
 
   it("shows 'Waiting for the pedal' until the hub link is up", async () => {
