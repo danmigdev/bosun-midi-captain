@@ -259,7 +259,7 @@ describe("StageView", () => {
       await replyTo(command, { type: "ACK" });
     });
 
-    it.each([undefined, false])("requires stage_input:true even on a native firmware, capability=%s", async stage_input => {
+    it.each([undefined, false])("requires stage_input:true even on Bosun firmware, capability=%s", async stage_input => {
       const { container } = await loadInput({ deviceInfo: { ...info, fw: "0.6.5-native", stage_input } });
       const tile = switchById(container, "1")!;
       expect(tile).toBeDisabled();
@@ -1830,7 +1830,7 @@ describe("StageView", () => {
 
   describe("preset navigation row", () => {
     // device.preset_navigation is a device-level overlay (mirrors the
-    // firmware's render_leds in firmware-native/src/application.c): it is
+    // firmware's render_leds in firmware/src/application.c): it is
     // NOT a patch binding, so a nav switch never appears in
     // fullPatch.bindings. Regression for "bottom row shows no rig names"
     // (2026-08-14) - StageView used to only ever read bindings, so these
@@ -1850,7 +1850,7 @@ describe("StageView", () => {
 
     it("falls through to unbound when no patch exists at the target slot", () => {
       // Mirrors the firmware's saved-slot gate (bosun_runtime_config_changed
-      // in firmware-native/src/runtime.c): a switch mapped to an empty slot
+      // in firmware/src/runtime.c): a switch mapped to an empty slot
       // is fully inert on the real pedal (LED off, no navigation), so Stage
       // must not claim a name for it either - "RIG 4" would describe a
       // switch that does nothing when pressed.

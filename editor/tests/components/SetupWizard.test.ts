@@ -40,7 +40,7 @@ it("adapts Android instructions without offering a Pi card setup or flashing in 
   expect(screen.getByText(/Simultaneous charging/)).toBeInTheDocument();
   expect(screen.queryByText("1. Write the microSD card")).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole("button",{ name:"2. Prepare the Captain" }));
-  expect(screen.queryByRole("button",{ name:"Install native firmware" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{ name:"Install Bosun firmware" })).not.toBeInTheDocument();
 });
 it("exports a Pi package only on request and generates a quoted Windows command", async () => {
   mocks.invoke.mockResolvedValue("C:\\Users\\A B\\bosun-pi-setup.tar.gz");

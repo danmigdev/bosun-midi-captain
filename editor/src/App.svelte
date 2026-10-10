@@ -846,7 +846,7 @@
   // Detect a pedal that needs bosun installed and offer to install it.
   // Confirmation-gated, never silent. Covers all install-needing states:
   //   - in the RP2040 bootloader (RPI-RP2 mass storage, no serial port)
-  //   - a CIRCUITPY drive (stock or foreign firmware: native Bosun has no drive)
+  //   - a CIRCUITPY drive (stock or foreign firmware: Bosun has no drive)
   //   - a stock pedal running firmware (serial USB VID, drive hidden)
   // A healthy-but-unattached bosun is told apart from a stock pedal by trying a
   // real protocol connect first: bosun ACKs and attaches (no prompt); a stock
@@ -1523,7 +1523,7 @@
       {/if}
       <ProfilePicker {manifest} />
 
-      <!-- Firmware update: desktop-only (needs the bundled native release
+      <!-- Firmware update: desktop-only (needs the bundled firmware release
            package shipped as a Tauri resource, which doesn't exist on Android). -->
       {#if !IS_ANDROID}
         {#if canResumeUnifiedUpdate}
@@ -1534,9 +1534,9 @@
             Update Bosun ({deviceInfo?.fw} -> {bundledUpdate?.release})
           </button>
         {:else if hasUsbUpdate}
-          <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled native firmware over USB with a full recovery backup.">Update firmware (USB)</button>
+          <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled Bosun firmware over USB with a full recovery backup.">Update firmware (USB)</button>
         {:else if deviceInfo?.fw}
-          <span class="fwstatus muted" title="Firmware installed on the pedal">Native firmware · v{deviceInfo.fw}</span>
+          <span class="fwstatus muted" title="Firmware installed on the pedal">Bosun firmware · v{deviceInfo.fw}</span>
         {:else}
           <span class="fwstatus muted">Reading firmware information…</span>
         {/if}
@@ -1620,7 +1620,7 @@
         {#if error}<p class="err" role="alert">{error}</p>{/if}
 
         <!-- Fresh pedal with no firmware? The installer walks you through
-             selecting the Captain and installing native Bosun with a verified backup. Desktop-only: firmware installation via USB
+             selecting the Captain and installing Bosun with a verified backup. Desktop-only: firmware installation via USB
              mass storage / UF2 bootloader is not available on Android. -->
         {#if !IS_ANDROID && connectionMode === "usb"}
           <hr class="divider" />

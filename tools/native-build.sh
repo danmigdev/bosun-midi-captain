@@ -16,7 +16,7 @@ case "$platform" in host|rp2040|all) ;; *) printf 'Usage: %s [host|rp2040|all] [
 
 sdk_commit=98a542c1a62fb549ffb5d66a3e5892b06276b670
 tinyusb_commit=86ad6e56c1700e85f1c5678607a762cfe3aa2f47
-export PICO_SDK_PATH="${PICO_SDK_PATH:-$repo_root/firmware-native/.deps/pico-sdk}"
+export PICO_SDK_PATH="${PICO_SDK_PATH:-$repo_root/firmware/.deps/pico-sdk}"
 if "$fetch_sdk" && [[ ! -e "$PICO_SDK_PATH" ]]; then
     mkdir -p -- "$(dirname -- "$PICO_SDK_PATH")"
     git clone --branch 2.3.0 --depth 1 https://github.com/raspberrypi/pico-sdk.git "$PICO_SDK_PATH"
@@ -30,20 +30,20 @@ elif [[ "$platform" != host ]]; then
     exit 1
 fi
 
-build_root="${BOSUN_BUILD_ROOT:-$repo_root/firmware-native/build}"
+build_root="${BOSUN_BUILD_ROOT:-$repo_root/firmware/build}"
 jobs="${CMAKE_BUILD_PARALLEL_LEVEL:-8}"
 if [[ "$platform" == host || "$platform" == all ]]; then
-    cmake -S "$repo_root/firmware-native" -B "$build_root-host" -G Ninja \
+    cmake -S "$repo_root/firmware" -B "$build_root-host" -G Ninja \
         -DBOSUN_PLATFORM=host -DCMAKE_BUILD_TYPE=Debug \
         -DBOSUN_SANITIZERS="${BOSUN_SANITIZERS:-ON}" -DPICO_SDK_PATH="$PICO_SDK_PATH"
     cmake --build "$build_root-host" --parallel "$jobs"
     ctest --test-dir "$build_root-host" --output-on-failure
 fi
 if [[ "$platform" == rp2040 || "$platform" == all ]]; then
-    cmake -S "$repo_root/firmware-native" -B "$build_root-rp2040" -G Ninja \
+    cmake -S "$repo_root/firmware" -B "$build_root-rp2040" -G Ninja \
         -DBOSUN_PLATFORM=rp2040 -DCMAKE_BUILD_TYPE=Release \
         -DPICO_SDK_PATH="$PICO_SDK_PATH" -DPICO_NO_PICOTOOL=OFF \
-        -DPICOTOOL_FETCH_FROM_GIT_PATH="$repo_root/firmware-native/.deps/picotool" \
+        -DPICOTOOL_FETCH_FROM_GIT_PATH="$repo_root/firmware/.deps/picotool" \
         -DPICO_FLASH_SIZE_BYTES="${BOSUN_FLASH_BYTES:-8388608}"
     cmake --build "$build_root-rp2040" --target bosun_native --parallel "$jobs"
     test -s "$build_root-rp2040/bosun_native.uf2"

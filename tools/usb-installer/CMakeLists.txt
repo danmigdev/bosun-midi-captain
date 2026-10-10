@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-include(../../firmware-native/cmake/pico_sdk.cmake)
+include(../../firmware/cmake/pico_sdk.cmake)
 project(BosunUsbInstaller LANGUAGES C CXX ASM)
 pico_sdk_init()
 add_executable(bosun_usb_installer main.c protocol.c usb_descriptors.c)

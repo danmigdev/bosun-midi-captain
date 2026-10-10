@@ -377,7 +377,7 @@
   ],
   "tft_fields": {
     "kemper_morph": {
-      "label": "Morph last commanded position (native)",
+      "label": "Morph last commanded position",
       "sample": "SET 65%"
     },
     "expression_mode": {

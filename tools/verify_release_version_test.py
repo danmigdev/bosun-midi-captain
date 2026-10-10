@@ -26,9 +26,9 @@ class ReleaseVersionTests(unittest.TestCase):
             "editor/package.json": '{"version":"1.2.3"}',
             "editor/src-tauri/tauri.conf.json": '{"version":"1.2.3"}',
             "editor/src-tauri/Cargo.toml": '[package]\nversion = "1.2.3"\n',
-            "firmware-native/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native"\n',
-            "firmware-native/CMakeLists.txt": 'project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nproject(BosunNative VERSION 1.2.3 LANGUAGES C)\n',
-            "firmware-native/platform/rp2040/CMakeLists.txt": 'pico_set_program_version(${target} "1.2.3-native")\n',
+            "firmware/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native"\n',
+            "firmware/CMakeLists.txt": 'project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nproject(BosunNative VERSION 1.2.3 LANGUAGES C)\n',
+            "firmware/platform/rp2040/CMakeLists.txt": 'pico_set_program_version(${target} "1.2.3-native")\n',
         }
         for path, contents in self.sources.items():
             destination = self.root / path
@@ -94,7 +94,7 @@ class ReleaseVersionTests(unittest.TestCase):
         for tag in ("v1.2.4", "main", "v1.2.3\nrelease=untrusted"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 gate.verify(self.root, tag=tag)
-        (self.root / "firmware-native/CMakeLists.txt").write_text(
+        (self.root / "firmware/CMakeLists.txt").write_text(
             "project(BosunNative VERSION 1.2.3 LANGUAGES C)\n", encoding="utf-8")
         with self.assertRaises(ValueError):
             gate.verify(self.root)
@@ -124,9 +124,9 @@ class BumpVersionSmokeTests(unittest.TestCase):
             "editor/src-tauri/Cargo.toml": '[package]\nname = "bosun-editor"\nversion = "1.2.3"\n[dependencies]\nkeep = { version = "4.5.6" }\n',
             "editor/src-tauri/Cargo.lock": '[[package]]\nname = "bosun-editor"\nversion = "1.2.3"\n[[package]]\nname = "keep"\nversion = "4.5.6"\n',
             "editor/src-tauri/android-version-code.txt": '31',
-            "firmware-native/CMakeLists.txt": 'cmake_minimum_required(VERSION 3.20)\nif(BOSUN_PLATFORM STREQUAL "rp2040")\n    project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nelse()\n    project(BosunNative VERSION 1.2.3 LANGUAGES C)\nendif()\n',
-            "firmware-native/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native-experimental"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
-            "firmware-native/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun Native MIDI Captain")\n    pico_set_program_version(${target} "1.2.3-native-experimental")\n',
+            "firmware/CMakeLists.txt": 'cmake_minimum_required(VERSION 3.20)\nif(BOSUN_PLATFORM STREQUAL "rp2040")\n    project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nelse()\n    project(BosunNative VERSION 1.2.3 LANGUAGES C)\nendif()\n',
+            "firmware/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native-experimental"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
+            "firmware/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun Native MIDI Captain")\n    pico_set_program_version(${target} "1.2.3-native-experimental")\n',
         }
         for name, contents in fixtures.items():
             path = self.root / name
@@ -143,13 +143,13 @@ class BumpVersionSmokeTests(unittest.TestCase):
         )
 
     def assert_versions(self, version):
-        native = (self.root / "firmware-native/CMakeLists.txt").read_text()
+        native = (self.root / "firmware/CMakeLists.txt").read_text()
         self.assertEqual(re.findall(r"project\(BosunNative VERSION (\d+\.\d+\.\d+) LANGUAGES", native), [version, version])
         self.assertIn("cmake_minimum_required(VERSION 3.20)", native)
         self.assertIn(f'#define BOSUN_NATIVE_VERSION "{version}-native"',
-                      (self.root / "firmware-native/include/bosun/protocol.h").read_text())
+                      (self.root / "firmware/include/bosun/protocol.h").read_text())
         self.assertIn(f'pico_set_program_version(${{target}} "{version}-native")',
-                      (self.root / "firmware-native/platform/rp2040/CMakeLists.txt").read_text())
+                      (self.root / "firmware/platform/rp2040/CMakeLists.txt").read_text())
         for name in ("editor/package.json", "editor/src-tauri/tauri.conf.json"):
             self.assertEqual(json.loads((self.root / name).read_text())["version"], version)
         lock = json.loads((self.root / "editor/package-lock.json").read_text())
@@ -176,7 +176,7 @@ class BumpVersionSmokeTests(unittest.TestCase):
             self.assert_versions("1.2.3")
 
     def test_missing_one_native_platform_version_cannot_silently_succeed(self):
-        path = self.root / "firmware-native/CMakeLists.txt"
+        path = self.root / "firmware/CMakeLists.txt"
         contents = path.read_text().replace("    project(BosunNative VERSION 1.2.3 LANGUAGES C)\n", "")
         path.write_text(contents)
         result = self.run_bump("9.8.7")

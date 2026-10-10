@@ -1,5 +1,5 @@
-// Scenarios follow the firmware FSM (firmware-native/src/switch_fsm.c, tested
-// by firmware-native/tests/test_switch_fsm.c) - keep the two in sync.
+// Scenarios follow the firmware FSM (firmware/src/switch_fsm.c, tested
+// by firmware/tests/test_switch_fsm.c) - keep the two in sync.
 //
 // The firmware debounces a hardware pin: a press/release only "settles" once
 // the raw level has held for 5 ms, so press_start is registered at that

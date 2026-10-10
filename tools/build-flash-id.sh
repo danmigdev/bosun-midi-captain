@@ -17,7 +17,7 @@ for argument in "$@"; do
     esac
 done
 
-export PICO_SDK_PATH="${PICO_SDK_PATH:-$repo_root/firmware-native/.deps/pico-sdk}"
+export PICO_SDK_PATH="${PICO_SDK_PATH:-$repo_root/firmware/.deps/pico-sdk}"
 if "$fetch_sdk" && [[ ! -e "$PICO_SDK_PATH" ]]; then
     mkdir -p -- "$(dirname -- "$PICO_SDK_PATH")"
     git clone --branch 2.3.0 --depth 1 https://github.com/raspberrypi/pico-sdk.git "$PICO_SDK_PATH"

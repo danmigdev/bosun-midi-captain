@@ -24,7 +24,7 @@
   onDestroy(() => { alive = false; clearTimeout(poll); });
 </script>
 <dialog bind:this={dialog} aria-labelledby="install-title" oncancel={event => { event.preventDefault(); onClose(); }}>
-  <h2 id="install-title">Install native Bosun</h2>
+  <h2 id="install-title">Install Bosun</h2>
   <p>Connect your MIDI Captain directly to the computer with a USB data cable. Bosun will install version <strong>{discovery?.version || "checking..."}</strong> in place of the factory firmware.</p>
   {#if discovery?.problem}<p role="alert">Installer package unavailable: {discovery.problem}</p><p>Download and extract the complete latest Bosun Desktop release.</p>{/if}
   {#if discovery?.devices.length}

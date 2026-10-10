@@ -2,8 +2,8 @@
  * USB enumeration + port probing tests.
  *
  * Verifies the serial-plugin JSON formats the frontend depends on, for a
- * MIDI Captain running Bosun's native firmware (VID 0x239A / PID 0x80F4,
- * descriptors in firmware-native/platform/rp2040/usb_descriptors.c).
+ * MIDI Captain running Bosun firmware (VID 0x239A / PID 0x80F4,
+ * descriptors in firmware/platform/rp2040/usb_descriptors.c).
  */
 
 import { describe, it, expect } from "vitest";

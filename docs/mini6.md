@@ -1,6 +1,6 @@
 # MIDI Captain Mini 6
 
-From Bosun 0.8 the native firmware also runs on the 6-switch **PaintAudio MIDI
+From Bosun 0.8 the firmware also runs on the 6-switch **PaintAudio MIDI
 Captain Mini 6**. Support is **experimental and untested on real hardware**: it
 follows the community pin map published by
 [PySwitch](https://github.com/Tunetown/PySwitch/blob/main/content/lib/pyswitch/hardware/devices/pa_midicaptain_mini_6.py).
@@ -27,7 +27,7 @@ Raspberry Pi display) draws the matching layout.
 
 ## Install Bosun on a Mini 6
 
-Follow the normal [first installation](first-setup.md#2-install-native-firmware-on-the-captain)
+Follow the normal [first installation](first-setup.md#2-install-bosun-firmware-on-the-captain)
 and choose **MIDI Captain Mini 6** in the installer. Before writing anything,
 the installer saves and verifies a complete backup and checks the flash chip:
 on a pedal without 8 MiB of flash it stops with "does not report the 8 MiB

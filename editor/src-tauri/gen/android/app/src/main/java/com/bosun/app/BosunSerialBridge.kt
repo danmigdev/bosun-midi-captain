@@ -34,7 +34,7 @@ object BosunSerialBridge {
     const val PORT_NAME = "usb-data"
 
     /** Same vendor IDs BosunMidiBridge already matches the Captain against
-     * (Adafruit, which Bosun's native firmware reports, + Raspberry Pi
+     * (Adafruit, which Bosun's firmware reports, + Raspberry Pi
      * RP2040 boards). */
     private val CAPTAIN_VENDOR_IDS = setOf(0x239A, 0x2E8A)
 

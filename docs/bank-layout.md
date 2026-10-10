@@ -49,6 +49,6 @@ the limit through the firmware's compact device information. Changing only the
 rigs-per-bank layout does not require a firmware update. Desktop and Android
 share the same editor components.
 
-Native firmware supports up to 625 configured patches across banks 1–125.
+Bosun firmware supports up to 625 configured patches across banks 1–125.
 This is a catalog limit, not a promise of 125 banks of ten patches. Save in
 batches when editing large setups: at most 128 unsaved drafts are supported.

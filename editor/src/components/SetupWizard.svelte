@@ -52,13 +52,13 @@
       <div class="choices">{#each setups as item}<button class:selected={selected === item.id} aria-pressed={selected === item.id} onclick={() => choose(item.id)}><strong>{item.title}</strong><span>{item.outcome}</span></button>{/each}</div>
       {#if setup}<SetupDiagram id={setup.id} target={kemper.target} connection={kemper.connection} /><h2>What you need</h2><ul>{#each setup.needs as item}<li>{item}</li>{/each}</ul>{/if}
     {:else if step === 1}
-      <h2>Start directly with native firmware</h2>
+      <h2>Start directly with Bosun firmware</h2>
       <ol><li>Download the {kemper.target === "player" ? "latest" : "matching experimental"} <a href={"https://github.com/danmigdev/bosun-midi-captain/releases/" + (kemper.target === "player" ? "latest" : `tag/v${packageInfo.version}`)} target="_blank" rel="noreferrer">Bosun Desktop release</a>. On Windows, extract the whole folder and open Bosun.exe.</li>
         <li>Connect <strong>Captain USB-B to your computer</strong> with a data cable. This temporary connection is needed even if you will later use Android or Raspberry Pi.</li>
-        <li>Choose <strong>Install native firmware</strong> and check the model, device and version. Bosun saves and verifies the original backup, installs the firmware and checks startup.</li>
-        <li>Connect the Captain in the editor and create a <strong>{kemper.target === "player" ? "Kemper Player" : "Kemper PROFILER"}</strong> profile. Assign the footswitches and save. If native Bosun is already installed, use the firmware update action to preserve your profiles.</li></ol>
+        <li>Choose <strong>Install Bosun firmware</strong> and check the model, device and version. Bosun saves and verifies the original backup, installs the firmware and checks startup.</li>
+        <li>Connect the Captain in the editor and create a <strong>{kemper.target === "player" ? "Kemper Player" : "Kemper PROFILER"}</strong> profile. Assign the footswitches and save. If Bosun is already installed, use the firmware update action to preserve your profiles.</li></ol>
       <div class="actions">
-        {#if !standalone && !IS_ANDROID}<button class="primary" onclick={onInstall}>Install native firmware</button>{:else}<p>To install Captain firmware, open this guide in Bosun Desktop on a computer.</p>{/if}
+        {#if !standalone && !IS_ANDROID}<button class="primary" onclick={onInstall}>Install Bosun firmware</button>{:else}<p>To install Captain firmware, open this guide in Bosun Desktop on a computer.</p>{/if}
         {#if connected && onConfigure}<button onclick={onConfigure}>{hasProfile ? "Open configuration" : `Create ${targetLabel} profile`}</button>{/if}
       </div>
       <p class="note">The backup preserves original firmware and files; factory settings are not automatically converted into Bosun profiles. Keep USB and power connected throughout backup and writing.</p>

@@ -14,7 +14,7 @@
 
 /* Only this executable emulates board I/O. It never discovers serial/MIDI
  * devices and binds TCP exclusively to IPv4 loopback. Storage remains the
- * same non-symlink-following POSIX backend used by native host tests. */
+ * same non-symlink-following POSIX backend used by the host tests. */
 static bosun_application_t application;
 static int listener = -1, client = -1;
 static int midi_listener = -1, midi_client = -1;

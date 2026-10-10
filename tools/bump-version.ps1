@@ -3,10 +3,10 @@
   Bump the project version everywhere it needs to match, in one call.
 
 .DESCRIPTION
-  Bosun keeps the native C firmware and the editor on the same semver.
+  Bosun keeps the C firmware and the editor on the same semver.
 
   This script:
-    1. Aligns the editor and native firmware version fields,
+    1. Aligns the editor and firmware version fields,
        including the npm/Cargo lockfiles and RP2040 program metadata.
     2. Advances the tracked Android versionCode.
     3. Prints each file it changed so you can eyeball what moved.
@@ -37,7 +37,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$native     = Join-Path $repoRoot "firmware-native"
+$native     = Join-Path $repoRoot "firmware"
 $editor     = Join-Path $repoRoot "editor"
 $tauriDir   = Join-Path $editor "src-tauri"
 
@@ -62,7 +62,7 @@ function Set-VersionLine {
     Write-Host "[ok  ] $Path" -ForegroundColor Green
 }
 
-Write-Host "Writing version $Version into the native and editor version fields" -ForegroundColor Yellow
+Write-Host "Writing version $Version into the firmware and editor version fields" -ForegroundColor Yellow
 
 Set-VersionLine `
     -Path (Join-Path $editor "package.json") `
@@ -103,7 +103,7 @@ Set-VersionLine `
     -Pattern '("name": "bosun-editor",\r?\n\s*"version": )"\d+\.\d+\.\d+"' `
     -Replacement "`${1}`"$Version`""
 
-# Native firmware shares the Bosun release number. Keep both CMake platform
+# The firmware shares the Bosun release number. Keep both CMake platform
 # branches, the runtime protocol version and picotool's program metadata aligned.
 # Require both project() declarations so a missing branch cannot silently ship
 # a different version from the host build or from the desktop update manifest.
@@ -176,6 +176,6 @@ if (Test-Path $tauriPropsPath) {
 
 Write-Host "`nVersion bump complete: $Version" -ForegroundColor Green
 Write-Host "Next: run the build(s) that actually need it -" -ForegroundColor Cyan
-Write-Host "  tools\native-build.ps1 -Platform rp2040   (then regenerate the native update package for $Version)" -ForegroundColor Cyan
+Write-Host "  tools\native-build.ps1 -Platform rp2040   (then regenerate the firmware update package for $Version)" -ForegroundColor Cyan
 Write-Host "  npm run package:portable   (from editor/, desktop dist)" -ForegroundColor Cyan
 Write-Host "  tools\build-android.ps1 -Deploy   (Android APK)" -ForegroundColor Cyan

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install RP2040 ROM access for hub-owned native firmware updates.
+# Install RP2040 ROM access for hub-owned firmware updates.
 # Run from a Bosun checkout on the Pi. This never opens or flashes a Captain.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"

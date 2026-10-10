@@ -60,7 +60,7 @@ def retryable_read_busy(kind, exc):
 def require_native(info):
     version = str(info.get("fw", ""))
     if info.get("native_experimental") is not True and not re.match(r"^0\.1(?:\.\d+)?-native(?:\b|-)", version):
-        raise AcceptanceError("native firmware required; refusing writes/reboots for fw=%r" % version)
+        raise AcceptanceError("Bosun firmware required; refusing writes/reboots for fw=%r" % version)
 
 
 def load_snapshot(path):

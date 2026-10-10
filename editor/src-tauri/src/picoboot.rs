@@ -320,7 +320,7 @@ impl Picoboot {
         }
         let jedec = self.flash_query(0x9f, 4)?;
         if jedec[3] != 23 {
-            return Err("Direct native updates require an 8 MiB flash chip".into());
+            return Err("Direct firmware updates require an 8 MiB flash chip".into());
         }
         Ok(())
     }

@@ -447,7 +447,7 @@ describe("App unified update entry points", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("to 0.6.5");
     expect(commands("HUB_UPDATE_BEGIN")).toHaveLength(0);
   });
-  it("offers the unified update from Maintenance on native firmware", async () => {
+  it("offers the unified update from Maintenance on Bosun firmware", async () => {
     await renderConnectedApp("0.1.0-native-experimental");
     await fireEvent.click(screen.getByRole("button", { name: "Menu", exact: true }));
     await fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: /Maintenance$/ }));

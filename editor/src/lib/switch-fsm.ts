@@ -1,8 +1,8 @@
 // Pure TypeScript port of the firmware switch FSM from
-// firmware-native/src/switch_fsm.c. This is the offline simulator variant:
+// firmware/src/switch_fsm.c. This is the offline simulator variant:
 // it drives CLEAN edges (no debounce, no pins) and ports ONLY the mode logic,
 // with an injected clock. Keep the transitions in sync with switch_fsm.c and
-// its tests in firmware-native/tests/test_switch_fsm.c.
+// its tests in firmware/tests/test_switch_fsm.c.
 
 export type ActionKey =
   | "press"

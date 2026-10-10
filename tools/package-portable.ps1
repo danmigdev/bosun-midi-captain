@@ -3,7 +3,7 @@
   Build the Bosun editor as a portable (no-install) ZIP.
 
 .DESCRIPTION
-  Produces a self-contained folder - Bosun.exe plus the native resources it
+  Produces a self-contained folder - Bosun.exe plus the bundled resources it
   uses (update\, installer\, pi\) and the offline setup guide - and zips it.
   The recipient extracts the ZIP anywhere and double-clicks Bosun.exe. No
   installer, no admin rights, no registry writes.
@@ -210,14 +210,14 @@ Keep the complete extracted folder together, including installer\, update\ and p
 Open Setup guide in the app, or Setup-guide.html in your browser, for wiring
 diagrams, step-by-step setup and FAQs.
 
-First installation from factory firmware goes directly to the bundled native
+First installation from factory firmware goes directly to the bundled Bosun
 release, with a verified full backup and standard USB drivers. A Raspberry Pi
 is optional. The wizard can also export the Pi setup package after you prepare
 its microSD using Raspberry Pi Imager.
 
-Native firmware can be updated via Maintenance > Install firmware (USB),
+Bosun firmware can be updated via Maintenance > Install firmware (USB),
 or through a configured Raspberry Pi. Direct USB requires the Captain's
-PICOBOOT interface to use WinUSB for native-to-native updates. Bosun keeps its recovery backup in the
+PICOBOOT interface to use WinUSB for firmware updates. Bosun keeps its recovery backup in the
 application data directory and shows its location in the update window.
 
 macOS and Linux applications have not been tested.

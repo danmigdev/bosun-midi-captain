@@ -1,6 +1,6 @@
 # Update Captain firmware
 
-Bosun Desktop updates existing native firmware directly over USB or through a
+Bosun Desktop updates existing Bosun firmware directly over USB or through a
 Raspberry Pi. It supports the RP2040 MIDI Captain with **8 MiB flash** (the
 10-switch model and, experimentally, the [Mini 6](mini6.md)), using Kemper
 Player, Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper
@@ -19,7 +19,7 @@ updating Desktop alone.
 
 - **Bosun Desktop:** connect the Captain directly to the computer by USB, open
   **Maintenance**, and click **Enter bootloader**. Save or discard any unsaved
-  patch edits first. The button appears when the connected native firmware
+  patch edits first. The button appears when the connected Bosun firmware
   advertises bootloader support.
 - **Without Desktop:** disconnect all power sources. Hold **switch 1 (top-left)**,
   reconnect USB to the computer, and keep holding that switch alone for
@@ -36,17 +36,17 @@ up and restoring the previous system is the user's responsibility.
 ## First installation from factory firmware
 
 Open **Setup guide** in Desktop and select your configuration, then **Install
-native firmware**. This installs the native version bundled with the current
+Bosun firmware**. This installs the Bosun version bundled with the current
 Desktop release directly on a supported 8 MiB RP2040 Captain: choose the
 10-switch model or the [Mini 6](mini6.md) in the installer.
 No older Bosun release or Pi is needed. Follow the
-[illustrated first-installation guide](first-setup.md#2-install-native-firmware-on-the-captain).
+[illustrated first-installation guide](first-setup.md#2-install-bosun-firmware-on-the-captain).
 
 This experimental path loads a temporary installer into RAM through the
 `RPI-RP2` drive and uses standard USB serial drivers. Loading the helper does
 not write flash. The app verifies the physical flash identity and capacity,
 reads the complete original flash twice, and durably saves a verified backup
-before writing. The new native installation starts with empty Bosun profiles;
+before writing. The new Bosun installation starts with empty Bosun profiles;
 factory settings remain in the backup and are not converted.
 
 Keep the complete backup directory, including the recovery helper and manifest.
@@ -58,12 +58,12 @@ Use Desktop **0.6.8 or later**, which includes the stock USB detection fix;
 0.6.7 cannot discover that stock firmware. See the
 [hardware test and release status](stock-installation-test.md).
 
-Already-native Captains use the USB update below, which preserves native
+Captains already running Bosun use the USB update below, which preserves their
 configuration.
 
 ## Pedal model
 
-The native firmware stores the pedal model (10-switch or Mini 6) in its
+The firmware stores the pedal model (10-switch or Mini 6) in its
 configuration storage, outside every profile. Updates through Desktop or the Pi
 keep it, and both check that the pedal reports the same model after the update.
 To change it, open **Maintenance → Pedal model**; the pedal restarts and keeps
@@ -73,8 +73,8 @@ which is the state of every installation made before 0.8. See the
 
 ## Direct Desktop USB
 
-This path updates an existing native installation on an **8 MiB RP2040 Captain**.
-It uses the native package bundled with Bosun Desktop, including when reinstalling
+This path updates an existing Bosun installation on an **8 MiB RP2040 Captain**.
+It uses the firmware package bundled with Bosun Desktop, including when reinstalling
 the same version. A Captain still running factory firmware uses the
 [first installation](#first-installation-from-factory-firmware) above instead.
 
@@ -129,9 +129,9 @@ Pi, Android, internet connection, Python or a separate picotool executable.
 
 ## Raspberry Pi requirements
 
-- A Captain already running native Bosun firmware, connected by USB to the Pi.
+- A Captain already running Bosun firmware, connected by USB to the Pi.
 - The [complete Pi installation](../tools/rpi-hub/README.md#install-on-the-pi).
-- Bosun Desktop with its matching bundled native update package.
+- Bosun Desktop with its matching bundled firmware update package.
 
 Use the desktop's network connection to the Pi for this path. Android does not
 perform firmware updates. For a factory pedal, follow
@@ -170,7 +170,7 @@ physical bootloader access and restoration of its verified full backup.
 ## Local application builds
 
 Follow the [desktop build guide](../editor/SETUP.md) to generate the matching
-native update archive, RAM installer and empty native storage image before
+firmware update archive, RAM installer and empty storage image before
 packaging. These resources are verified together; the factory installer cannot
-use assets built for another native firmware version. Use the verified Bosun
+use assets built for another firmware version. Use the verified Bosun
 release package rather than an arbitrary UF2.

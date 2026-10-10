@@ -170,7 +170,7 @@ class UsbMidiDevice private constructor(
      * A write failure is logged and swallowed - matches the "a missed CC
      * beats a stuck pedal" philosophy of the firmware itself, which drops an
      * outgoing message rather than block when its MIDI output queue is full
-     * (bosun_application_send_midi in firmware-native/src/application.c).
+     * (bosun_application_send_midi in firmware/src/application.c).
      */
     @Synchronized
     fun send(message: ByteArray): Boolean {

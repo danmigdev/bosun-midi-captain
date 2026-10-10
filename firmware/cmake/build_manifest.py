@@ -1,4 +1,4 @@
-"""Build the native manifest from firmware-native/schemas and the Kemper models.
+"""Build the firmware manifest from firmware/schemas and the Kemper models.
 
 The same resolved model definitions generate the editor manifest and C runtime
 capabilities. Existing Player message IDs and device.kemper settings stay valid.
@@ -11,16 +11,16 @@ from pathlib import Path
 
 
 def load_schema(root, name):
-    return json.loads((root / "firmware-native/schemas" / f"{name}.json").read_text(encoding="utf-8"))
+    return json.loads((root / "firmware/schemas" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def manifest_values(root):
     core = load_schema(root, "core")
     plugins = {name: load_schema(root, name) for name in ("generic_midi", "kemper_player")}
-    runtime = (root / "firmware-native/src/runtime.c").read_text(encoding="utf-8")
+    runtime = (root / "firmware/src/runtime.c").read_text(encoding="utf-8")
     supported = set(re.findall(r'"([a-z_]+)"', runtime.split("supported[] = {", 1)[1].split("};", 1)[0]))
     selected = {"generic_midi": plugins["generic_midi"]}
-    definitions = json.loads((root / "firmware-native/plugins/kemper.json").read_text(encoding="utf-8"))
+    definitions = json.loads((root / "firmware/plugins/kemper.json").read_text(encoding="utf-8"))
     models = {}
     for kind, overrides in definitions.items():
         parent = overrides.get("extends")
@@ -62,16 +62,16 @@ def manifest_values(root):
     for plugin in selected.values():
         declared.update(plugin["messages"])
     if declared != supported:
-        raise ValueError(f"Native manifest/runtime mismatch: {declared ^ supported}")
-    check_plugin_kinds((root / "firmware-native/include/bosun/plugin_kinds.h").read_text(encoding="utf-8"), selected)
+        raise ValueError(f"Manifest/runtime mismatch: {declared ^ supported}")
+    check_plugin_kinds((root / "firmware/include/bosun/plugin_kinds.h").read_text(encoding="utf-8"), selected)
     return core, selected, models
 
 
 def check_plugin_kinds(header, plugins):
-    """The checked-in kinds list must name exactly the native plugins, in order."""
+    """The checked-in kinds list must name exactly the firmware plugins, in order."""
     listed = re.findall(r'"([a-z_]+)"', header.split("bosun_plugin_kinds[] = {", 1)[1].split("};", 1)[0])
     if listed != list(plugins):
-        raise ValueError(f"include/bosun/plugin_kinds.h lists {listed}; the native manifest has {list(plugins)}")
+        raise ValueError(f"include/bosun/plugin_kinds.h lists {listed}; the manifest has {list(plugins)}")
 
 
 def generate(root):
@@ -81,7 +81,7 @@ def generate(root):
     value = "," + fields
     # Adjacent C literals preserve escape sequences without long source lines.
     chunks = [json.dumps(value[i:i + 120]) for i in range(0, len(value), 120)]
-    return "/* Generated from shared schemas and native plugins; do not edit. */\n" + \
+    return "/* Generated from shared schemas and plugins; do not edit. */\n" + \
         "static const char BOSUN_MANIFEST_FIELDS[] =\n" + "\n".join(chunks) + ";\n"
 
 

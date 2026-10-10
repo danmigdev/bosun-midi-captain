@@ -120,8 +120,8 @@ pub fn midi_bridge_start(
         Some(s) => vec![s],
         None => vec!["profiler", "kemper"],
     };
-    // Native firmware names its USB device "MIDI Captain Bosun Native" and its
-    // MIDI interface "Bosun MIDI" (firmware-native/platform/rp2040/usb_descriptors.c).
+    // Bosun firmware names its USB device "MIDI Captain Bosun Native" and its
+    // MIDI interface "Bosun MIDI" (firmware/platform/rp2040/usb_descriptors.c).
     let pedal_needles: Vec<&str> = match pedal.as_deref() {
         Some(s) => vec![s],
         None => vec!["bosun", "captain"],

@@ -1,6 +1,6 @@
 // Hardware layouts of the supported PaintAudio MIDI Captain models.
 //
-// Native firmware 0.8 and later reports its model in DEVICE_INFO.hardware.
+// Firmware 0.8 and later reports its model in DEVICE_INFO.hardware.
 // Every earlier release only ran on the 10-switch Captain, so a missing
 // descriptor means CAPTAIN_10. Switch order is the NeoPixel chain order;
 // rows are the physical rows, top row first.

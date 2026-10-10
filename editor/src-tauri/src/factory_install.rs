@@ -122,7 +122,7 @@ pub fn read_assets(root: &Path, package: &NativePackage) -> Result<Assets, Strin
         || storage.len() != FLASH_BYTES - STORAGE_OFFSET
         || !storage[firmware_package::STORAGE_HEADER_OFFSET..firmware_package::STORAGE_HEADER_OFFSET + 8192].windows(8).any(|v| v == b"littlefs")
     {
-        return Err("Incomplete or mismatched native installer. Download the complete latest Bosun Desktop release.".into());
+        return Err("Incomplete or mismatched firmware installer. Download the complete latest Bosun Desktop release.".into());
     }
     validate_loader(&loader)?;
     Ok(Assets { loader, storage })

@@ -14,7 +14,7 @@ The thread:
 
   - walks a list of candidate targets (auto-discovered ``/dev/ttyACM*``
     in descending order, or a single ``tcp://host:port`` address for
-    development against the native firmware emulator) and runs a
+    development against the firmware emulator) and runs a
     PING/ACK sentinel handshake on each until one answers as the
     protocol port. The console CDC only prints status lines and never
     returns ``{"type":"ACK"}``, so it is skipped automatically.

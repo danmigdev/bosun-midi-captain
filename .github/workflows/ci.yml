@@ -1,5 +1,5 @@
 # Continuous integration for the editor, hub and Android app.
-# Native firmware builds and tests run in native.yml.
+# Firmware builds and tests run in native.yml.
 name: CI
 
 on:

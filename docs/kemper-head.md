@@ -9,7 +9,7 @@ experimental release, not a claim that every model/OS combination is verified.
 
 ## Setup
 
-1. Use matching native Captain firmware, editor and Pi/Stage assets from the
+1. Use matching Captain firmware, editor and Pi/Stage assets from the
    same release.
 2. Create a profile targeting **Kemper PROFILER - Head / Rack / Stage**.
 3. In Settings, choose the MIDI channel used by the PROFILER.
@@ -42,7 +42,7 @@ unrelated Bosun patch. Put a Browse selection in each Bosun patch's **On enter**
 action when you want that patch to select a particular assigned program.
 **Step Rig / Performance** steps according to the mode selected on the Kemper.
 
-Bosun bank coordinates now support **1–125** throughout native storage, editor,
+Bosun bank coordinates now support **1–125** throughout firmware storage, editor,
 Stage and hub snapshots. Existing two-digit paths are preserved; banks 100-125
 use three digits. Catalogs and active navigation now support **625 configured
 patches**. Editor, Stage and update backups assemble
@@ -102,20 +102,20 @@ running entry actions; unmapped programs leave the Bosun patch unchanged.
   Enable rig tempo on the Kemper when using tempo-synchronised effects.
 - **Tap Tempo** sends a single CC30 value 0 event, avoiding a held tap button.
 
-Looper, Rotary, Set BPM and Tap corrections apply to the common native engine,
+Looper, Rotary, Set BPM and Tap corrections apply to the common firmware engine,
 including existing Player command IDs. A command being offered does not add a
 feature absent from the connected Kemper or its OS. Morph displays the last
 commanded position, not measured progress of the Kemper's Morph ramp.
 
 Changing mode or generation cancels queued commands and resets the target
 session. Commands inappropriate for the selected configuration are hidden in
-new-action menus and rejected by the native runtime. Saved actions remain in
+new-action menus and rejected by the firmware runtime. Saved actions remain in
 the configuration so the user can review or replace them.
 
 ## Shared implementation
 
-[Model definitions](../firmware-native/plugins/kemper.json) hold model differences
-and extra settings. The native build derives both plugins from shared schemas
+[Model definitions](../firmware/plugins/kemper.json) hold model differences
+and extra settings. The firmware build derives both plugins from shared schemas
 and generates C model descriptors from the same definitions. MIDI transmission,
 rig-change reconciliation, tuner, Morph and effect discovery are implemented
 once. No Stage-specific engine or copied configuration is needed.
@@ -131,7 +131,7 @@ refers to the Bosun patch and `kemper_rig` is the one-based program identity.
 ## Validation still needed on hardware
 
 The [PySwitch integration suite](kemper-emulator-tests.md) connects the compiled
-native application to a pinned virtual Kemper for automated MIDI round trips.
+host firmware to a pinned virtual Kemper for automated MIDI round trips.
 Its coverage and simulation limits are listed separately from hardware validation.
 
 Software tests cover model isolation, MK1/MK2 command gates, MIDI packet

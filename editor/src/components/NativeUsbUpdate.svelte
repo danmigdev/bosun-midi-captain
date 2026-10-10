@@ -71,7 +71,7 @@
   <div class="content">
     {#if !job}
       {#if candidateId}
-      <p>Install <strong>{version}</strong>. Bosun saves and verifies the original firmware, installs native firmware and prepares storage for new profiles.</p>
+      <p>Install <strong>{version}</strong>. Bosun saves and verifies the original firmware, installs Bosun firmware and prepares storage for new profiles.</p>
       <p>Press Install to start. Keep the Captain on the same USB port and keep the computer powered on.</p>
       {:else}
       <p>Install <strong>{version}</strong> on the Captain connected to <strong>{port}</strong>{installed ? ` (currently ${installed})` : ""}.</p>

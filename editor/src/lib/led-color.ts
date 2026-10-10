@@ -1,6 +1,6 @@
 import type { Binding } from "../lib/protocol";
 
-// Port of the switch LED colour logic in firmware-native/src/application.c
+// Port of the switch LED colour logic in firmware/src/application.c
 // (render_leds and its color()/scale() helpers) so the editor can preview
 // exactly what colour the pedal will light for a given binding and latched
 // state. Keep this in lockstep with the firmware.

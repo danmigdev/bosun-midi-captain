@@ -1,5 +1,5 @@
 // Regression tests for firmware response shapes, pinned to the replies the
-// native firmware writes (firmware-native/src/protocol.c).
+// firmware writes (firmware/src/protocol.c).
 //
 // These pin the contracts the frontend depends on:
 //  - The firmware serializes compact JSON ("id":"..."), the form the Rust

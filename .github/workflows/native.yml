@@ -1,10 +1,10 @@
-name: Native firmware (offline)
+name: Firmware (offline)
 
 on:
   push:
     branches: ["**"]
     paths:
-      - firmware-native/**
+      - firmware/**
       - tools/native-build.*
       - tools/package-native-update.py
       - tools/verify-release-version.py
@@ -19,7 +19,7 @@ on:
       - .gitattributes
   pull_request:
     paths:
-      - firmware-native/**
+      - firmware/**
       - tools/native-build.*
       - tools/package-native-update.py
       - tools/verify-release-version.py
@@ -62,7 +62,7 @@ jobs:
       - name: Install hub integration dependencies
         run: python -m pip install -r tools/rpi-hub/requirements.txt
       - name: Exercise real native application through production TCP and WebSocket hub
-        run: python firmware-native/tests/test_hub_interop.py --emulator firmware-native/build-host/bosun_emulator
+        run: python firmware/tests/test_hub_interop.py --emulator firmware/build-host/bosun_emulator
 
   rp2040:
     name: RP2040 SDK 2.3.0 (UF2 + verified update package)
@@ -96,7 +96,7 @@ jobs:
           BOSUN_FIRMWARE_VERSION: ${{ steps.version.outputs.firmware_version }}
         run: |
           python tools/package-native-update.py \
-            --uf2 firmware-native/build-rp2040/bosun_native.uf2 \
+            --uf2 firmware/build-rp2040/bosun_native.uf2 \
             --output editor/src-tauri/resources/update/bosun-update.zip \
             --release "$BOSUN_RELEASE" --firmware-version "$BOSUN_FIRMWARE_VERSION"
           python tools/verify-release-version.py \
@@ -106,10 +106,10 @@ jobs:
         with:
           name: bosun-native-experimental-rp2040
           path: |
-            firmware-native/build-rp2040/bosun_native.uf2
-            firmware-native/build-rp2040/bosun_native.elf
-            firmware-native/build-rp2040/bosun_native.elf.map
-            firmware-native/build-rp2040/bosun_native-memory.json
+            firmware/build-rp2040/bosun_native.uf2
+            firmware/build-rp2040/bosun_native.elf
+            firmware/build-rp2040/bosun_native.elf.map
+            firmware/build-rp2040/bosun_native-memory.json
           if-no-files-found: error
       - name: Preserve the validated update package
         uses: actions/upload-artifact@v4

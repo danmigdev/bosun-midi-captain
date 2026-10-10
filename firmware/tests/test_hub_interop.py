@@ -139,7 +139,7 @@ async def exercise(emulator):
             assert stats["midi_tx_count"] == 1 and stats["midi_tx_failed"] == 0, stats
 
             # Three-digit banks cross every layer: editor write, hub cache,
-            # native storage, Stage selection, and a saved-profile read.
+            # firmware storage, Stage selection, and a saved-profile read.
             last = {"name": "Performance 125", "bindings": []}
             await tcp_request("last-put", "PUT_PATCH", "ACK", bank=125, slot=5, patch=last)
             await tcp_request("last-save", "SAVE_NOW", "SAVED", bank=125, slot=5)

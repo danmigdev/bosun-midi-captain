@@ -1,6 +1,6 @@
-//! The desktop sends the bundled native release package to the Pi. Missing
+//! The desktop sends the bundled firmware release package to the Pi. Missing
 //! optional assets disable the unified update offer (for development and
-//! builds without a native release).
+//! builds without a firmware release).
 use std::io::Read;
 use std::path::Path;
 use base64::{engine::general_purpose::STANDARD, Engine};

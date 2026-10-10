@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface DeviceState {
   bootloader_drive: string | null;
-  /** A CIRCUITPY drive. Native Bosun exposes no drive, so this always means
+  /** A CIRCUITPY drive. Bosun exposes no drive, so this always means
    * stock (factory) or other foreign firmware. */
   circuitpy_drive: string | null;
   /** A pedal-class USB serial device is plugged in (MIDI Captain / RP2

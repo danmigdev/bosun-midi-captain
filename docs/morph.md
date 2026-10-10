@@ -1,6 +1,6 @@
 # Morph controls and display
 
-Use Bosun **0.6.9 or later** and matching native Captain firmware. Update the Pi
+Use Bosun **0.6.9 or later** and matching Captain firmware. Update the Pi
 hub and Stage too if your setup uses a Pi. Prepare the Base and Morph sounds,
 rise/fall times and optional Momentary setting on the Kemper or in Rig Manager.
 Bosun controls the Morph position/button; it does not edit those sound parameters.
@@ -8,7 +8,7 @@ Bosun controls the Morph position/button; it does not edit those sound parameter
 ## Stage
 
 A thin **BASE → MORPH** bar appears below the header for a Kemper profile on
-supported native firmware. It stays separate from the VOL/WAH indicator.
+supported firmware. It stays separate from the VOL/WAH indicator.
 Click or tap the bar to show its optional controls:
 
 - **Base:** send position 0%.
@@ -69,7 +69,7 @@ use Morph footswitches there.) Heel is Base and toe is Morph; inversion and curv
 remain available. Move the pedal to activate it. Patch-specific expression
 overrides also support this message. Stage follows the positions sent by Captain.
 
-In the Captain's **Screen** editor, add **Morph last commanded position (native)**
+In the Captain's **Screen** editor, add **Morph last commanded position**
 to your layout. It shows `SET 65%` or `?`. Existing screen layouts are preserved.
 
 ## Validation

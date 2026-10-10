@@ -64,12 +64,12 @@ discovery is unavailable. Stage opens in a browser at
 ### First installation from factory firmware
 
 Connect the Captain directly to the computer and open **Setup guide → Prepare
-the Captain → Install native firmware**, then choose your model (10-switch or
-[Mini 6](docs/mini6.md)). Desktop installs the bundled native release and saves
+the Captain → Install Bosun firmware**, then choose your model (10-switch or
+[Mini 6](docs/mini6.md)). Desktop installs the bundled Bosun release and saves
 a verified full factory backup first. Create and save a
 profile for your Kemper model or a Generic MIDI profile after installation.
 
-Follow the [installation steps](docs/first-setup.md#2-install-native-firmware-on-the-captain)
+Follow the [installation steps](docs/first-setup.md#2-install-bosun-firmware-on-the-captain)
 for model checks, USB bootloader instructions and backup handling. The
 [Windows stock-installation test](docs/stock-installation-test.md) records the
 tested PaintAudio version and limitations.
@@ -139,13 +139,13 @@ been checked in CAD; physical fit and load testing remain to be completed.
 
 ## Update firmware
 
-Use **Bosun Desktop** with its matching bundled native release. Export a
+Use **Bosun Desktop** with its matching bundled firmware release. Export a
 configuration backup and save pending edits before starting.
 
 | Current installation | Supported path |
 | --- | --- |
-| Native Bosun connected directly to Desktop | **Update firmware (USB)**, or **Maintenance → Install firmware (USB)** for reinstallation. |
-| Native Bosun connected to a Pi | Connect Desktop to the Pi and choose **Update Bosun**. |
+| Bosun connected directly to Desktop | **Update firmware (USB)**, or **Maintenance → Install firmware (USB)** for reinstallation. |
+| Bosun connected to a Pi | Connect Desktop to the Pi and choose **Update Bosun**. |
 | Factory firmware | Follow [first installation](#first-installation-from-factory-firmware). |
 
 The [firmware update and recovery guide](docs/firmware-updates.md) is the
@@ -162,7 +162,7 @@ For missing devices, bridge connections, backups and Pi installation, use the
 | --- | --- |
 | Build Desktop and manage the source checkout | [Desktop build guide](editor/SETUP.md) |
 | Build Android | [Android build guide](editor/src-tauri/android-config.md) |
-| Build native Captain firmware | [Native firmware](firmware-native/README.md) |
+| Build the Captain firmware | [Firmware](firmware/README.md) |
 | Install or maintain the Pi services | [Raspberry Pi hub](tools/rpi-hub/README.md) |
 | Maintain reproducible Android builds and F-Droid metadata | [Android reproducibility](docs/android-reproducible-builds.md) |
 

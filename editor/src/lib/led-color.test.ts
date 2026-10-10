@@ -4,7 +4,7 @@ import type { Binding } from "./protocol";
 import { parseHex, rgbToHex, ledColorFor } from "./led-color";
 
 // These tests pin the editor's LED preview to the firmware's render_leds
-// (firmware-native/src/application.c). The load-bearing behaviour: a latched-off
+// (firmware/src/application.c). The load-bearing behaviour: a latched-off
 // switch must NEVER go black - it scales the on colour by dim/255 (integer
 // floor) whenever led.off is absent or explicitly black. The default dim is 64,
 // which is ~/4 (64/255 == 0.251), matching the historical 25%.

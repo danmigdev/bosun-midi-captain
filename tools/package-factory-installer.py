@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the RAM helper and empty storage with the exact bundled native release."""
+"""Package the RAM helper and empty storage with the exact bundled firmware release."""
 import argparse
 import hashlib
 import json

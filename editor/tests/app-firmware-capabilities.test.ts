@@ -161,7 +161,7 @@ describe("App direct USB firmware update", () => {
     if (available) expect(button).toBeEnabled();
     else {
       expect(button).not.toBeInTheDocument();
-      expect(screen.getByText(`Native firmware · v${installed}`)).toBeInTheDocument();
+      expect(screen.getByText(`Bosun firmware · v${installed}`)).toBeInTheDocument();
     }
     expect(mocks.invoke.mock.calls.filter(([c]) => c === "usb_update_start")).toHaveLength(0);
   });
@@ -224,7 +224,7 @@ describe("App firmware capabilities", () => {
     expect(screen.queryByRole("button", { name: "Enter bootloader" })).not.toBeInTheDocument();
   });
 
-  it("shows the native firmware's live counters in Maintenance", async () => {
+  it("shows the firmware's live counters in Maintenance", async () => {
     mocks.cmd.getStats.mockResolvedValue({
       uptime_ms: 65_000, midi_rx_count: 12, midi_tx_count: 34, midi_tx_failed: 1,
       queue_overflows: 2, unsupported_messages: 0, invalid_messages: 0,
@@ -262,7 +262,7 @@ describe("App install prompt", () => {
   it.each([
     ["a CIRCUITPY drive", CIRCUITPY],
     ["an RPI-RP2 bootloader drive", BOOTLOADER],
-  ])("offers the native install for %s", async (_name, state) => {
+  ])("offers the Bosun install for %s", async (_name, state) => {
     pedal = state;
     render(App);
     await waitFor(() => expect(guide()).toBeInTheDocument());

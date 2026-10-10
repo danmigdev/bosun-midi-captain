@@ -1,22 +1,22 @@
 # Kemper integration tests with PySwitch
 
-Bosun's native host application can exchange MIDI with PySwitch's virtual
+Bosun's host firmware build can exchange MIDI with PySwitch's virtual
 Kemper without a Captain or a physical Kemper. The adapter is test tooling;
 it is not included in the RP2040 firmware or the released apps.
 
 ```mermaid
 flowchart LR
-  Test["Automated test: editor commands and switch activation"] <-->|"Bosun JSON over loopback TCP"| Bosun["Compiled native application"]
+  Test["Automated test: editor commands and switch activation"] <-->|"Bosun JSON over loopback TCP"| Bosun["Compiled host firmware"]
   Bosun <-->|"Raw USB MIDI bytes over a separate loopback TCP socket"| Adapter["MIDI framing and delayed-reply injection"]
   Adapter <--> PySwitch["Pinned PySwitch Virtual Kemper"]
 ```
 
 ## Run
 
-Install Node.js 22 in the Linux/WSL environment used for native builds, along
-with the [native build dependencies](../firmware-native/README.md#build-requirements).
+Install Node.js 22 in the Linux/WSL environment used for firmware builds, along
+with the [firmware build dependencies](../firmware/README.md#build-requirements).
 Instead of installing it system-wide, you can unpack the official Linux x64
-archive under `firmware-native/.deps/`; CMake uses it when PATH has no `node`.
+archive under `firmware/.deps/`; CMake uses it when PATH has no `node`.
 No npm packages, browser, virtual MIDI driver or network download is needed
 for these tests. The reviewed upstream JavaScript subset is stored in the repo.
 
@@ -27,10 +27,10 @@ bash tools/native-build.sh host --fetch-sdk
 To rerun just this integration after building:
 
 ```bash
-ctest --test-dir firmware-native/build-host -R pyswitch --output-on-failure
+ctest --test-dir firmware/build-host -R pyswitch --output-on-failure
 ```
 
-The native CI and release package jobs run the suite too. Every run creates
+The firmware CI and release package jobs run the suite too. Every run creates
 temporary profile data, starts the actual compiled application, checks its
 exit status and sanitizer diagnostics, then removes the temporary data.
 It never enumerates physical USB/MIDI devices or flashes hardware.
@@ -50,7 +50,7 @@ It never enumerates physical USB/MIDI devices or flashes hardware.
   to Stage; it does not render or visually inspect the Stage UI.
 
 The adapter handles fragmented SysEx, running status and interleaved realtime
-bytes. The native application is also exercised with one-byte I/O chunks.
+bytes. The host firmware is also exercised with one-byte I/O chunks.
 
 ## Limits
 
@@ -80,7 +80,7 @@ the command or modify upstream behavior to conceal this limitation.
 
 ## Upstream source
 
-The unmodified files in `firmware-native/tests/pyswitch/upstream/` come from
+The unmodified files in `firmware/tests/pyswitch/upstream/` come from
 [Tunetown/PySwitch](https://github.com/Tunetown/PySwitch/tree/30e923f17d31714038ec21f6245337a71711bc6f/web/htdocs/clients/kemper/virtual),
 commit `30e923f17d31714038ec21f6245337a71711bc6f`. Their paths and SHA-256 hashes
 are recorded in `manifest.json` and verified before the model is loaded.

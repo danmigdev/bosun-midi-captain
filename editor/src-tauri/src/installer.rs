@@ -7,11 +7,11 @@ use sysinfo::Disks;
 #[derive(Debug, Serialize, Default)]
 pub struct DeviceState {
     pub bootloader_drive: Option<String>,
-    // Native Bosun exposes no USB drive, so a CIRCUITPY drive always means
+    // Bosun exposes no USB drive, so a CIRCUITPY drive always means
     // stock (factory) or other foreign firmware.
     pub circuitpy_drive: Option<String>,
     // True when a pedal-class USB serial device is plugged in (VID 239A, which
-    // both the stock firmware and native Bosun report, or the RP2 ROM-bootloader
+    // both the stock firmware and Bosun report, or the RP2 ROM-bootloader
     // VID 2E8A), regardless of whether it speaks the bosun protocol. The
     // frontend combines this with "not connected" to spot an unflashed pedal
     // and offer to install. Confirmation-gated, because this can't tell a MIDI

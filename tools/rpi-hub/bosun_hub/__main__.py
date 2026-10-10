@@ -5,10 +5,10 @@ Typical Pi usage (from the systemd unit):
 
     python -m bosun_hub --stage-dir /opt/bosun-hub/stage
 
-Local development against the native firmware emulator (no pedal, no Pi);
+Local development against the firmware emulator (no pedal, no Pi);
 build it with ``tools/native-build.sh host``:
 
-    firmware-native/build-host/bosun_emulator --root CONFIG_DIR   # terminal 1
+    firmware/build-host/bosun_emulator --root CONFIG_DIR   # terminal 1
     python -m bosun_hub --target tcp://127.0.0.1:9877 \\          # terminal 2
         --tcp-port 9899 --ws-port 8081 --http-port 8080
 """

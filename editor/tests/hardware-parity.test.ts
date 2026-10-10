@@ -1,4 +1,4 @@
-// Cross-checks the editor's model table against the native firmware source.
+// Cross-checks the editor's model table against the firmware source.
 // Lives under tests/ (outside the type-checked src tree) because it reads a
 // repository file with Node APIs.
 import { describe, it, expect } from "vitest";
@@ -7,11 +7,11 @@ import { resolve } from "node:path";
 import { KNOWN_HARDWARE, knownHardware } from "../src/lib/hardware";
 
 describe("firmware parity", () => {
-  it("matches the native firmware's model table", () => {
+  it("matches the firmware's model table", () => {
     // The installer, onboarding and fallbacks use this table before the
     // pedal reports its own descriptor, so it must never drift from it.
     // Vitest runs from editor/ (jsdom gives this module no file URL).
-    const source = readFileSync(resolve(process.cwd(), "../firmware-native/src/hardware.c"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "../firmware/src/hardware.c"), "utf8");
     const names = new Map([...source.matchAll(/static const char \*const (\w+)_names\[\] = \{([^}]*)\};/g)]
       .map((m) => [m[1], [...m[2].matchAll(/"([^"]+)"/g)].map((n) => n[1])]));
     const models = [...source.matchAll(

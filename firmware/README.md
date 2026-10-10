@@ -1,4 +1,4 @@
-# Native firmware: build and installation
+# Firmware: build and installation
 
 Bosun's MIDI Captain firmware is written in C. Supported profile kinds are
 Kemper Player, Kemper PROFILER (Head/Rack/Stage), and Generic MIDI. Kemper
@@ -56,12 +56,12 @@ sudo apt-get install -y git cmake ninja-build gcc g++ python3 \
 Host tests also require Node.js 22 in the same Linux/WSL environment. It runs
 the pinned [PySwitch virtual Kemper integration tests](../docs/kemper-emulator-tests.md);
 no npm install is needed for those tests. A `node` on PATH is used first;
-otherwise CMake uses a Linux build unpacked under `firmware-native/.deps`
-(for example `firmware-native/.deps/node-v22.23.2-linux-x64`).
+otherwise CMake uses a Linux build unpacked under `firmware/.deps`
+(for example `firmware/.deps/node-v22.23.2-linux-x64`).
 
 The build helper fetches and verifies the pinned Pico SDK 2.3.0 and TinyUSB when
 `--fetch-sdk` is supplied. The message schemas the editor's forms are built from
-live in `firmware-native/schemas/`; `plugins/kemper.json` holds the differences
+live in `firmware/schemas/`; `plugins/kemper.json` holds the differences
 between the Kemper models. `cmake/build_manifest.py` turns both into the
 manifest the firmware serves and checks them against the runtime's supported
 messages.
@@ -75,7 +75,7 @@ python3 tools/verify-release-version.py
 bash tools/native-build.sh all --fetch-sdk
 release=$(python3 -c 'import json; print(json.load(open("editor/package.json"))["version"])')
 python3 tools/package-native-update.py \
-  --uf2 firmware-native/build-rp2040/bosun_native.uf2 \
+  --uf2 firmware/build-rp2040/bosun_native.uf2 \
   --output editor/src-tauri/resources/update/bosun-update.zip \
   --release "$release" --firmware-version "${release}-native"
 python3 tools/verify-release-version.py \
@@ -83,7 +83,7 @@ python3 tools/verify-release-version.py \
 ```
 
 `all` builds the host tools, runs their tests and compiles the RP2040 firmware.
-The UF2 is written to `firmware-native/build-rp2040/bosun_native.uf2`; the verified
+The UF2 is written to `firmware/build-rp2040/bosun_native.uf2`; the verified
 update archive is ready for the desktop/Android packaging scripts. None of these
 commands opens or flashes a device.
 

@@ -1,4 +1,4 @@
-"""Native firmware installation on the hub's physically pinned RP2040.
+"""Firmware installation on the hub's physically pinned RP2040.
 
 The caller must stop and join its UpstreamLink before calling ``run`` and
 restart a fresh link afterwards. This synchronous worker belongs in a thread;
@@ -253,7 +253,7 @@ class FirmwareInstaller:
         try:
             package = validate_update_package(Path(package_path))
             if not _is_native(expected_info):
-                raise FirmwareInstallError("The hub updates only a Captain that runs native Bosun firmware")
+                raise FirmwareInstallError("The hub updates only a Captain that runs Bosun firmware")
             io = io or LinuxInstallIO()
             if isinstance(io, LinuxInstallIO) and expected_device is None:
                 raise FirmwareInstallError("The hub did not preserve the connected Captain's physical USB identity")
@@ -302,7 +302,7 @@ class FirmwareInstaller:
             after = io.snapshot(device, save_dirty=False)
             _compare_snapshot(before, after, package.manifest["firmware_version"])
             if not _is_native(after["info"]):
-                raise FirmwareInstallError("The device did not boot native firmware")
+                raise FirmwareInstallError("The device did not boot Bosun firmware")
             _write_new(job_dir / "configuration-after.json", (json.dumps(after, indent=2, sort_keys=True) + "\n").encode())
             report("complete", status="complete", configuration_verified=True)
         except Exception as error:
@@ -520,7 +520,7 @@ class LinuxInstallIO:
                 for patch in patches:
                     bank, slot = patch.get("bank"), patch.get("slot")
                     if type(bank) is not int or type(slot) is not int or not 1 <= bank <= 125 or not 1 <= slot <= 10:
-                        raise FirmwareInstallError("Patch coordinates exceed native firmware limits")
+                        raise FirmwareInstallError("Patch coordinates exceed firmware limits")
                     key = f"{bank:02}/{slot:02}"
                     if key in row["patches"]:
                         raise FirmwareInstallError("Duplicate patch in device inventory")
@@ -587,7 +587,7 @@ class LinuxInstallIO:
         try:
             info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
             if not _is_native(info) or "bootloader" not in info.get("reboot_modes", []):
-                raise FirmwareInstallError("This native firmware cannot enter BOOTSEL remotely")
+                raise FirmwareInstallError("This firmware version cannot enter BOOTSEL remotely")
             try:
                 client.request("REBOOT", "ACK", mode="bootloader")
             except (OSError, FirmwareResponseTimeout):

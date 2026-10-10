@@ -222,7 +222,7 @@ static void prepare(bosun_display_t *display, const bosun_config_t *config,
     if (!display->count) {
         char name[192];
         resolve("patch_name", config, kemper, display->hold_effect, name, sizeof name, &display->status);
-        simple_label(display, *name ? name : "Bosun Native", 3, 0xffff, 120);
+        simple_label(display, *name ? name : "Bosun", 3, 0xffff, 120);
     }
 }
 static void row_label(bosun_display_t *display, const bosun_display_label_t *label) {

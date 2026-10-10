@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("native_manifest", ROOT / "firmware-native/cmake/build_manifest.py")
+spec = importlib.util.spec_from_file_location("native_manifest", ROOT / "firmware/cmake/build_manifest.py")
 build = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build)
 

@@ -18,10 +18,10 @@ npm --prefix editor install --no-audit --no-fund
 ```
 
 Prepare the pinned Pico SDK and ARM build tools using the
-[native firmware build instructions](../firmware-native/README.md), then run
+[firmware build instructions](../firmware/README.md), then run
 `bash tools/build-factory-installer.sh` from a Linux environment (WSL on Windows).
-This builds the matching native firmware archive, RAM-only USB helper and empty
-native storage image, with a verified manifest. It does not access a connected
+This builds the matching firmware archive, RAM-only USB helper and empty
+storage image, with a verified manifest. It does not access a connected
 pedal. The portable packager requires these resources and checks their hashes.
 
 ## Run and package
@@ -64,7 +64,7 @@ on the local network. Manual connection remains available if broadcasts are
 blocked.
 
 Disconnect before changing the saved endpoint. **Setup guide** offers direct
-factory-to-native installation over USB. Existing native firmware can be
+factory-to-Bosun installation over USB. Existing Bosun firmware can be
 updated over USB or through the Pi. See
 [firmware installation and updates](../docs/firmware-updates.md) for the
 different requirements and recovery procedures. Factory installation
@@ -78,7 +78,7 @@ For Android requirements and APK installation, see
 | Location | Purpose |
 | --- | --- |
 | `editor/` | Shared Desktop/Android UI, Stage and the setup wizard; native app code is in `src-tauri/`. |
-| `firmware-native/` | Captain firmware in C, shared schemas, host tests and RP2040 build tooling. |
+| `firmware/` | Captain firmware in C, shared schemas, host tests and RP2040 build tooling. |
 | `tools/` | Packaging, release checks, USB installer and Raspberry Pi services. |
 | `docs/` | Current user guides, hardware validation, current release notes and the pinned F-Droid reference recipe. |
 | `fastlane/` | Android store descriptions. |

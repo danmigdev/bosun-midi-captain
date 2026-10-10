@@ -1,4 +1,4 @@
-//! Bounded validation of the native package before acquiring a USB device.
+//! Bounded validation of the firmware package before acquiring a USB device.
 use crate::firmware_update::UpdateManifest;
 use sha2::{Digest, Sha256};
 use std::{
@@ -131,11 +131,11 @@ pub fn read_native_package(path: &Path) -> Result<NativePackage, String> {
         || manifest.release.is_empty()
         || !manifest.firmware_version.ends_with("-native")
     {
-        return Err("Unsupported native firmware release".into());
+        return Err("Unsupported firmware release".into());
     }
     let firmware = firmware.ok_or("Missing firmware")?;
     if sha256(&firmware) != manifest.firmware_sha256.to_lowercase() {
-        return Err("Native firmware checksum mismatch".into());
+        return Err("Firmware checksum mismatch".into());
     }
     let image = firmware_image(&firmware)?;
     let marker = format!("{}\0", manifest.firmware_version);

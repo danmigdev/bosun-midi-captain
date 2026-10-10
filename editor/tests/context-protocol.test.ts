@@ -1,7 +1,7 @@
 // Protocol-level tests for CONTEXT message handling and Stage Mode data flow.
 //
 // CONTEXT is the firmware's push of the live display_context over the data
-// port. Two producers exist (both in firmware-native/src/protocol.c):
+// port. Two producers exist (both in firmware/src/protocol.c):
 //   - GET_CONTEXT request/response - carries an `id` echoed back to the
 //     requester
 //   - unsolicited pushes (bosun_protocol_tick, sent when the runtime or
@@ -12,7 +12,7 @@
 // plus whatever the active plugin publishes: a Kemper profile adds
 // kemper_rig_name, kemper_bank, kemper_rig_in_bank, kemper_rig, kemper_bpm,
 // kemper_tuner*, kemper_connected (see bosun_runtime_context in
-// firmware-native/src/runtime.c) and mirrors the tuner fields to generic
+// firmware/src/runtime.c) and mirrors the tuner fields to generic
 // tuner / tuner_note / tuner_deviance aliases.
 //
 // These tests pin:

@@ -247,7 +247,7 @@
   }
 
   // ---- marquee preview ----
-  // Mirrors the firmware (scroll_offset in firmware-native/src/display.c):
+  // Mirrors the firmware (scroll_offset in firmware/src/display.c):
   // left inset, bounce with a dwell at each end, px/second travel. Keyed by
   // entry index; a positive span means the label overflows and is actively
   // scrolling, which the layout below uses to re-anchor it to the left (like

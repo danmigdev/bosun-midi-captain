@@ -1,4 +1,4 @@
-"""Fault injection for native firmware updates; no serial, USB or flash is opened."""
+"""Fault injection for firmware updates; no serial, USB or flash is opened."""
 from __future__ import annotations
 
 import copy
@@ -175,7 +175,7 @@ def test_non_native_firmware_is_refused_before_opening_the_device(environment):
         lambda state: None)
     assert result["status"] == "failed"
     assert result["flash_may_be_modified"] is False
-    assert "native Bosun firmware" in result["error"]
+    assert "runs Bosun firmware" in result["error"]
     assert io.calls == []
 
 

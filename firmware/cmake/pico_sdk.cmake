@@ -1,4 +1,4 @@
-# The native experiment uses a reproducible external SDK. Never download a
+# The firmware uses a reproducible external SDK. Never download a
 # moving branch or alter a user's SDK checkout as a side effect of configure.
 if(NOT PICO_SDK_PATH AND DEFINED ENV{PICO_SDK_PATH})
     set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}" CACHE PATH "Pico SDK 2.3.0 checkout")

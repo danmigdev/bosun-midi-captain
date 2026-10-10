@@ -52,7 +52,7 @@ jobs:
           python tools/verify_release_version_test.py
           python tools/verify-release-version.py --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install native test dependencies
+      - name: Install firmware test dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -91,7 +91,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install native host and ARM build tools
+      - name: Install firmware host and ARM build tools
         run: >-
           sudo apt-get update && sudo apt-get install -y cmake ninja-build
           gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
@@ -108,7 +108,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           python tools/package-native-update.py \
-            --uf2 firmware-native/build-rp2040/bosun_native.uf2 \
+            --uf2 firmware/build-rp2040/bosun_native.uf2 \
             --output editor/src-tauri/resources/update/bosun-update.zip \
             --release "$BOSUN_RELEASE" --firmware-version "$BOSUN_FIRMWARE_VERSION"
           python tools/verify-release-version.py --tag "$RELEASE_TAG" \
@@ -234,7 +234,7 @@ jobs:
           echo "file=$f" >> "$GITHUB_OUTPUT"
           echo "artifact -> $f"
 
-      - name: Collect the guide, Pi package, Stage and native firmware
+      - name: Collect the guide, Pi package, Stage and firmware
         if: matrix.name == 'windows'
         run: python tools/package-release-extras.py
 

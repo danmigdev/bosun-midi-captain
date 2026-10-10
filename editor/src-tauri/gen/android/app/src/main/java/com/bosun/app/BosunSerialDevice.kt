@@ -30,7 +30,7 @@ import android.util.Log
  *
  * Interface discovery: the Captain's firmware exposes its `console`
  * CDC-ACM function first (interfaces 0/1) and its `data` function second
- * (interfaces 2/3), followed by USB MIDI (see firmware-native/platform/
+ * (interfaces 2/3), followed by USB MIDI (see firmware/platform/
  * rp2040/usb_descriptors.c). Each CDC-ACM function is a Communications interface
  * (class 0x02) immediately followed by its paired Data interface (class
  * 0x0A) per the USB CDC spec's required Interface Association Descriptor

@@ -618,7 +618,7 @@
     {#if usbRelease}
       <section class="block">
         <h3>USB firmware</h3>
-        <p class="muted small">Install or reinstall the bundled native firmware directly from this computer. Bosun keeps a full recovery backup and verifies your saved configuration after restarting the Captain.</p>
+        <p class="muted small">Install or reinstall the bundled Bosun firmware directly from this computer. Bosun keeps a full recovery backup and verifies your saved configuration after restarting the Captain.</p>
         <button class="primary" disabled={!connected} onclick={onUsbUpdate}>Install firmware (USB): {usbRelease}</button>
       </section>
     {/if}
@@ -640,7 +640,7 @@
           {:else if unifiedRelease || resumeUnifiedUpdate}
             Use Update Bosun above to install the release and preserve your profiles.
           {:else}
-            Connect by Desktop USB or through a Raspberry Pi with update support to install a bundled native release.
+            Connect by Desktop USB or through a Raspberry Pi with update support to install a bundled Bosun release.
           {/if}
         {:else}
           Waiting for firmware information from the pedal.

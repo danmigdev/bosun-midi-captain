@@ -20,7 +20,7 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
 static GATE: Mutex<()> = Mutex::new(());
-/// MIDI Captain models the bundled native firmware accepts in SET_HARDWARE.
+/// MIDI Captain models the bundled firmware accepts in SET_HARDWARE.
 const SUPPORTED_MODELS: [&str; 2] = ["captain10", "mini6"];
 static BUSY: AtomicBool = AtomicBool::new(false);
 static PENDING: AtomicBool = AtomicBool::new(false);
@@ -252,7 +252,7 @@ impl Worker {
                 .as_array()
                 .is_some_and(|v| v.contains(&json!("bootloader")))
         {
-            return Err("Direct USB updates require Bosun native firmware that can restart into its USB bootloader.".into());
+            return Err("Direct USB updates require Bosun firmware that can restart into its USB bootloader.".into());
         }
         let dirty = runtime.request("GET_DIRTY", "DIRTY")?;
         if dirty["patches"].as_array().is_none_or(|v| !v.is_empty()) {
@@ -421,7 +421,7 @@ impl Worker {
             if UsbIdentity::from_factory_port(&self.job.port)? != self.job.identity {
                 return Err("Captain USB identity changed".into());
             }
-            // Native Bosun has separate console and data CDC ports. Probe every
+            // Bosun has separate console and data CDC ports. Probe every
             // port of this identity so choosing its console cannot bypass the guard.
             for port in self.job.identity.factory_ports() {
                 if UsbIdentity::from_factory_port(&port).ok().as_ref() != Some(&self.job.identity) {
@@ -429,7 +429,7 @@ impl Worker {
                 }
                 if let Ok(runtime) = Runtime::open_retry(&port) {
                     if runtime.request("GET_DEVICE_INFO", "DEVICE_INFO").is_ok() {
-                        return Err("Bosun native is already installed. Connect and use Update firmware to preserve your profiles.".into());
+                        return Err("Bosun is already installed. Connect and use Update firmware to preserve your profiles.".into());
                     }
                 }
             }
@@ -465,18 +465,18 @@ impl Worker {
                 .windows(b"native_experimental".len())
                 .any(|v| v == b"native_experimental")
             {
-                return Err("Native Bosun detected in the backup. Reconnect normally and use Update firmware to preserve profiles.".into());
+                return Err("Bosun detected in the backup. Reconnect normally and use Update firmware to preserve profiles.".into());
             }
             let image = factory_image(&before, &package.image, &assets.storage)?;
             self.job.write_started = true;
-            self.publish("writing", 0, "Installing native Bosun and preparing a fresh profile area. Keep USB and power connected.")?;
+            self.publish("writing", 0, "Installing Bosun and preparing a fresh profile area. Keep USB and power connected.")?;
             restore_image(&mut helper, &image, &mut |n, t| {
                 self.progress("writing", n, t)
             })?;
             self.publish(
                 "rebooting",
                 100,
-                "Firmware verified. Waiting for native Bosun to start",
+                "Firmware verified. Waiting for Bosun to start",
             )?;
             helper.reboot()?;
             Ok::<(), String>(())
@@ -495,11 +495,11 @@ impl Worker {
             match apply_hardware(&self.job.identity, &self.job.port, &self.job.model) {
                 Ok(port) => self.job.port = port,
                 Err(error) => {
-                    return self.publish("done", 100, &format!("Native Bosun installed and storage verified, but the pedal model could not be stored ({error}). Choose your model when Bosun asks, or in Maintenance > Pedal model. The complete original backup is retained on this computer."));
+                    return self.publish("done", 100, &format!("Bosun installed and storage verified, but the pedal model could not be stored ({error}). Choose your model when Bosun asks, or in Maintenance > Pedal model. The complete original backup is retained on this computer."));
                 }
             }
         }
-        self.publish("done",100,"Native Bosun installed and storage verified. Create a profile for your Kemper model to finish setup. The complete original backup is retained on this computer.")
+        self.publish("done",100,"Bosun installed and storage verified. Create a profile for your Kemper model to finish setup. The complete original backup is retained on this computer.")
     }
     fn restore_factory(&mut self) -> Result<(), String> {
         let backup = self.backup()?;
@@ -933,7 +933,7 @@ pub async fn factory_install_start(
             loader_sha256: firmware_package::sha256(&assets.loader),
             model,
             phase: "preflight".into(),
-            message: "Preparing first native installation".into(),
+            message: "Preparing first Bosun installation".into(),
             percent: 0,
             identity: candidate.identity,
             port: candidate.port,
@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn supported_models_match_the_native_firmware_table() {
         // The installer must offer exactly the models SET_HARDWARE accepts.
-        let firmware = include_str!("../../../firmware-native/src/hardware.c");
+        let firmware = include_str!("../../../firmware/src/hardware.c");
         let defined: Vec<&str> = firmware
             .split("const bosun_hardware_t bosun_hardware_")
             .skip(1)

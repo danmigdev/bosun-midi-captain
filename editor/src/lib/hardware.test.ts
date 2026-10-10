@@ -11,7 +11,7 @@ import {
   parseHardware,
 } from "./hardware";
 
-/** DEVICE_INFO.hardware exactly as native firmware 0.8 sends it. */
+/** DEVICE_INFO.hardware exactly as firmware 0.8 sends it. */
 const MINI_6_WIRE = {
   model: "mini6", name: "MIDI Captain Mini 6", configured: true,
   switches: ["1", "2", "3", "A", "B", "C"], rows: [["1", "2", "3"], ["A", "B", "C"]],

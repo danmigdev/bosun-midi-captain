@@ -316,7 +316,7 @@
         <mxCell id="autonomy-body" value="The Captain stays on the Pi USB port.&#10;With the Player on the Pi, the Pi handles MIDI.&#10;Closing the app leaves MIDI and HDMI Stage on.&#10;Apps, browsers and the display can coexist.&#10;Install hub and Stage; set up a hotspot if needed." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="571" y="879" width="457" height="131" />
         </mxCell>
-        <mxCell id="limits-title" value="NATIVE FIRMWARE AND LIMITS" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
+        <mxCell id="limits-title" value="FIRMWARE AND LIMITS" style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=16;fontStyle=1;fontColor=#172B3A;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="1084" y="848" width="458" height="28" />
         </mxCell>
         <mxCell id="limits-body" value="Firmware updates: use Bosun Desktop.&#10;See README for supported update paths.&#10;Player Wi-Fi/Bluetooth does not connect Bosun.&#10;Android is not a network hub for the Pi.&#10;Captain USB-B: one host at a time." style="whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=15;fontStyle=0;fontColor=#536779;text;strokeColor=none;fillColor=none;spacing=0;" vertex="1" parent="1">

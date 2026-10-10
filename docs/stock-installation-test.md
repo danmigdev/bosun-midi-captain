@@ -1,4 +1,4 @@
-# Windows stock-to-native installation test
+# Windows stock-to-Bosun installation test
 
 Tested on 19 September 2026 with a **10-switch RP2040 MIDI Captain, 8 MiB flash**,
 Windows Desktop, and the official **PaintAudio 5.15** firmware from
@@ -18,7 +18,7 @@ it was not repeated with the final 0.6.8 release binaries. The published 0.6.7
 binaries do not include the fix and must not be described as hardware-validated.
 
 The correction allows the stock identity only in the first-installation path.
-Existing native updates retain their stricter identity check. Device/model
+Updates of an existing Bosun installation retain their stricter identity check. Device/model
 confirmation, physical USB path, flash UID, 8 MiB capacity, verified backup and
 full flash readback checks remain in place.
 
@@ -38,8 +38,8 @@ full flash readback checks remain in place.
    model and pressed **Install**. The app requested BOOTSEL automatically using
    the stock firmware's 1200-baud procedure and loaded its RAM-only helper.
 5. The installer saved and verified its own complete stock backup before writing,
-   installed the bundled native firmware, verified full flash readback, restarted
-   and confirmed the native version, healthy storage and an empty profile list.
+   installed the bundled Bosun firmware, verified full flash readback, restarted
+   and confirmed the Bosun version, healthy storage and an empty profile list.
    No intermediate firmware or Pi was involved in this installation.
 6. Compared the installer's stock backup against every UF2 payload block in the
    official PaintAudio package: all programmed bytes matched.
@@ -48,7 +48,7 @@ full flash readback checks remain in place.
    the Captain, and verified those settings and storage readiness again.
 8. Reconnected the Captain to its original Pi/Kemper/Stage setup. The user
    confirmed that rig switching and Stage worked again; the hub readback also
-   confirmed the restored configuration and native firmware version.
+   confirmed the restored configuration and Bosun firmware version.
 
 The official ZIP used was `MIDICAPTAIN_10s_FW5.15.zip`, SHA-256
 `ee500c5a3d5146a0fd29d964ca44762c4df2e5d5e31ab7cc794411405b5d57ae`.

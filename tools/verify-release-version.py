@@ -26,9 +26,9 @@ def verify(root=ROOT, *, tag=None, package=None):
         "editor/src-tauri/Cargo.toml": (tomllib.loads((root / "editor/src-tauri/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"], release),
     }
     patterns = {
-        "firmware-native/include/bosun/protocol.h": (r'^#define BOSUN_NATIVE_VERSION\s+"([^"]+)"\s*$', firmware_version, 1),
-        "firmware-native/CMakeLists.txt": (r'project\(BosunNative\s+VERSION\s+(\S+)\s+LANGUAGES\b', release, 2),
-        "firmware-native/platform/rp2040/CMakeLists.txt": (r'pico_set_program_version\(\$\{target\}\s+"([^"]+)"\)', firmware_version, 1),
+        "firmware/include/bosun/protocol.h": (r'^#define BOSUN_NATIVE_VERSION\s+"([^"]+)"\s*$', firmware_version, 1),
+        "firmware/CMakeLists.txt": (r'project\(BosunNative\s+VERSION\s+(\S+)\s+LANGUAGES\b', release, 2),
+        "firmware/platform/rp2040/CMakeLists.txt": (r'pico_set_program_version\(\$\{target\}\s+"([^"]+)"\)', firmware_version, 1),
     }
     for path, (pattern, wanted, count) in patterns.items():
         versions = re.findall(pattern, (root / path).read_text(encoding="utf-8"), re.MULTILINE)

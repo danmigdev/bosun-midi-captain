@@ -268,7 +268,7 @@ class NativePersistenceTests(unittest.TestCase):
         device.native = False
         result = self.run_device(device, "--exercise-writes")
         self.assertFalse(result["passed"])
-        self.assertIn("native firmware required", result["errors"][0]["message"])
+        self.assertIn("Bosun firmware required", result["errors"][0]["message"])
         self.assertEqual(device.writes + device.reboots, 0)
         self.assertEqual(len(device.clients), 1)
 

@@ -12,11 +12,11 @@ bash tools/build-factory-installer.sh
 python tools/test_factory_installer.py
 ```
 
-The SDK and TinyUSB revisions are pinned by `firmware-native/cmake/pico_sdk.cmake`.
+The SDK and TinyUSB revisions are pinned by `firmware/cmake/pico_sdk.cmake`.
 Both the Python packager and Rust backend check that every UF2 block targets only
 contiguous SRAM, with RP2040 family ID, bounded size, block order and vectors.
 SDK `no_flash` entry code occupies SRAM + 0; its vector table starts at +0x100.
-The bundled manifest binds loader and empty littlefs hashes to the exact native
+The bundled manifest binds loader and empty littlefs hashes to the exact
 release's firmware hash. The host storage-image builder creates and remounts an
 empty volume using the same littlefs implementation as the firmware.
 
@@ -33,8 +33,8 @@ The host pins USB topology and flash UID. It durably saves and verifies the full
 original flash before recording write intent and writing firmware plus initial
 storage. It retains the RAM helper alongside the backup so recovery does not
 depend on a subsequently installed Desktop release. Original factory settings
-are not converted. An existing native image is rejected by this first-install
-path to protect its profiles; use native update instead.
+are not converted. An existing Bosun image is rejected by this first-install
+path to protect its profiles; use the Bosun update instead.
 
 The helper deliberately supplies its own CDC descriptors: the SDK's default
 `pico_unique_id` returns an EE placeholder in a `NO_FLASH` build. After calling
@@ -43,7 +43,7 @@ that UID in both USB enumeration and INFO/ARM. USB starts only afterwards.
 
 The [Windows hardware trial](../../docs/stock-installation-test.md) verified
 automatic BOOTSEL entry, RAM-helper CDC enumeration, full backup and readback,
-installation from official PaintAudio 5.15, native startup and configuration
+installation from official PaintAudio 5.15, Bosun startup and configuration
 restoration. The required Desktop discovery fix ships in 0.6.8; it is not
 present in the published 0.6.7 binaries. Interrupted-write recovery still needs a separate controlled
 hardware trial with a separately retained known-good backup. Do not generalize

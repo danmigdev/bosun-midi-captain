@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Usage: %s --empty --output NEW_IMAGE.bin\n", argv[0]);
         return 2;
     }
-    /* Factory provisioning: an empty, mountable native volume that the native
+    /* Factory provisioning: an empty, mountable volume that the
      * configuration code accepts without writing anything on first mount. */
     memset(flash, 0xff, sizeof flash);
     bool valid = bosun_store_format() == BOSUN_STORE_OK &&

@@ -45,7 +45,7 @@
 
   // Preset-navigation row (e.g. rig-select switches): a device-level
   // overlay, not a patch binding, so it never shows up in fullPatch.bindings
-  // - mirrors the firmware's render_leds (firmware-native/src/application.c),
+  // - mirrors the firmware's render_leds (firmware/src/application.c),
   // which paints these switches from device.preset_navigation, not the patch.
   // Without this a nav switch had no binding to read a label from and
   // rendered "-" forever (2026-08-14: reported as "bottom row shows no
@@ -66,7 +66,7 @@
   /** The patch a nav switch targets IN THE CURRENT BANK, or null if the
    *  switch isn't mapped or that slot has no saved patch. Mirrors the
    *  firmware's saved-slot gate (bosun_runtime_config_changed in
-   *  firmware-native/src/runtime.c): a mapped switch pointing at an empty
+   *  firmware/src/runtime.c): a mapped switch pointing at an empty
    *  slot is fully inert on the real pedal (LED off, no navigation) -
    *  showing a "RIG N" placeholder here
    *  when nothing's there would claim a working switch that does nothing
@@ -832,7 +832,7 @@
   // Fetches the CURRENT context once (fast first paint on entering Stage,
   // before the firmware's own next proactive push). NOT re-run on a timer:
   // the firmware already pushes a fresh CONTEXT message on every change
-  // (bosun_protocol_tick in firmware-native/src/protocol.c, at most every
+  // (bosun_protocol_tick in firmware/src/protocol.c, at most every
   // 50 ms, regardless of which page the editor shows), so polling again
   // every 2 s here was pure redundant traffic on an already-busy data CDC
   // channel - competing with patch fetches, switch EVENT delivery and the
