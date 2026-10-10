@@ -163,6 +163,5 @@ jobs:
         # but the app has ABI-flavoured task names.  Name its universal variant
         # explicitly so our Kotlin bridge tests and sources cannot be skipped.
         run: >-
-          ./gradlew verifyAndroidSdkCompatibility
-          :app:testUniversalDebugUnitTest :app:lintUniversalDebug
+          ./gradlew :app:testUniversalDebugUnitTest :app:lintUniversalDebug
           testDebugUnitTest lintDebug --stacktrace

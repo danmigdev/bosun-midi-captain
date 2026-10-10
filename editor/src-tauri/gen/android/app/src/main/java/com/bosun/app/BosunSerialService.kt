@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 
 /**
@@ -14,8 +13,8 @@ import android.os.IBinder
  * Bosun app is backgrounded. Shows a persistent notification "Connected to
  * MIDI Captain" so the user knows the pedal link is active.
  *
- * Started by the Rust backend (via tauri-plugin-serialplugin) when a serial
- * connection is opened. Stopped when the connection is closed.
+ * Started by BosunSerialBridge when the Captain's data connection opens.
+ * Stopped when the connection is closed.
  */
 class BosunSerialService : Service() {
 
@@ -23,18 +22,16 @@ class BosunSerialService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Serial Connection",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shown while Bosun is connected to the MIDI Captain pedal"
-                setShowBadge(false)
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Serial Connection",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Shown while Bosun is connected to the MIDI Captain pedal"
+            setShowBadge(false)
         }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -46,19 +43,13 @@ class BosunSerialService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification: Notification =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(this, CHANNEL_ID)
-            } else {
-                @Suppress("DEPRECATION")
-                Notification.Builder(this)
-            }
-                .setContentTitle("Bosun")
-                .setContentText("Connected to MIDI Captain")
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
+        val notification: Notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("Bosun")
+            .setContentText("Connected to MIDI Captain")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
 
         startForeground(NOTIFICATION_ID, notification)
         // The connection itself is process-local. Recreating only the

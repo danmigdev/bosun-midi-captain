@@ -6,8 +6,7 @@
 //! bidirectional protocol) between the Player and the pedal, dropping only
 //! clock / active-sensing to keep the link quiet.
 //!
-//! Platform split: [`MidiPorts`] and [`BridgeStatus`] are shared by both
-//! backends. The desktop backend below uses the midir crate (winmm on
+//! Platform split: [`BridgeStatus`] is shared by both backends. The desktop backend below uses the midir crate (winmm on
 //! Windows, CoreMIDI on macOS, ALSA on Linux); Android uses `midi_android`
 //! instead, which JNI-calls the Kotlin `BosunMidiBridge` singleton.
 //!
@@ -28,12 +27,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput};
 #[cfg(not(target_os = "android"))]
 use tauri::State;
-
-#[derive(Serialize)]
-pub struct MidiPorts {
-    pub inputs: Vec<String>,
-    pub outputs: Vec<String>,
-}
 
 #[derive(Serialize)]
 pub struct BridgeStatus {
@@ -78,16 +71,6 @@ fn find_name(names: &[String], needles: &[&str]) -> Option<String> {
 #[cfg(not(target_os = "android"))]
 fn should_forward(msg: &[u8]) -> bool {
     !matches!(msg.first(), Some(0xF8) | Some(0xFE))
-}
-
-#[cfg(not(target_os = "android"))]
-#[tauri::command]
-pub fn midi_list_ports() -> Result<MidiPorts, String> {
-    let mi = MidiInput::new("bosun-scan-in").map_err(|e| e.to_string())?;
-    let mo = MidiOutput::new("bosun-scan-out").map_err(|e| e.to_string())?;
-    let inputs = mi.ports().iter().filter_map(|p| mi.port_name(p).ok()).collect();
-    let outputs = mo.ports().iter().filter_map(|p| mo.port_name(p).ok()).collect();
-    Ok(MidiPorts { inputs, outputs })
 }
 
 #[cfg(not(target_os = "android"))]

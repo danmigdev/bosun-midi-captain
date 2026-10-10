@@ -1,6 +1,5 @@
 // Android serial backend using a raw-USB JNI bridge (android_native.rs /
-// Kotlin BosunSerialBridge) instead of tauri-plugin-serialplugin.
-// Compiled only on Android targets.
+// Kotlin BosunSerialBridge). Compiled only on Android targets.
 //
 // Architecture: a single I/O thread owns the port and serialises all
 // reads and writes.  All USB access happens via UsbDeviceConnection.
@@ -21,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use super::android_helpers::{
-    call_with_timeout, is_transient_error, is_write_only_stall, marker_found, sort_ports_desc,
+    call_with_timeout, is_transient_error, is_write_only_stall, marker_found,
 };
 use super::android_native::{available_ports, close, open, read, write};
 
@@ -275,8 +274,6 @@ pub async fn connect(
                     let ports_result = call_with_timeout(IO_CALL_TIMEOUT, available_ports);
                     match ports_result {
                         Ok(Ok(names)) => {
-                            let mut names = names;
-                            sort_ports_desc(&mut names);
                             for name in names {
                                 let name_for_log = name.clone();
                                 let open_name = name.clone();
@@ -692,21 +689,16 @@ pub async fn auto_connect(
         }
     }
 
-    let mut port_names = available_ports().map_err(|e| format!("list ports: {}", e))?;
+    let port_names = available_ports().map_err(|e| format!("list ports: {}", e))?;
     if port_names.is_empty() { return Err("no USB serial devices found".into()); }
 
-    // Sort descending so the data port is tried first (matters if this
-    // ever reports more than one synthetic port name).
-    sort_ports_desc(&mut port_names);
-
+    // A failed connect() already releases its own session, so the loop
+    // only collects the reasons.
     let mut diag: Vec<String> = Vec::new();
     for port_name in port_names {
         match connect(port_name.clone(), state.clone(), app.clone()).await {
             Ok(()) => return Ok(port_name.clone()),
-            Err(why) => {
-                let _ = disconnect(state.clone(), app.clone());
-                diag.push(format!("{}: {}", port_name, why));
-            }
+            Err(why) => diag.push(format!("{}: {}", port_name, why)),
         }
     }
 

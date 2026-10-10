@@ -10,13 +10,13 @@ import android.util.Log
 
 /**
  * One CDC-ACM "data" function on the Captain's composite USB device, talked
- * to directly over UsbDeviceConnection.bulkTransfer()/controlTransfer() -
- * bypassing tauri-plugin-serialplugin's Android backend entirely.
+ * to directly over UsbDeviceConnection.bulkTransfer()/controlTransfer().
  *
- * Why: that backend (the android-usb-serial crate, via nusb's ioctl-based
- * transport) DOES set a per-call read/write timeout, but Android's own USB
- * host stack does not reliably honor it - a well-documented, long-standing
- * platform limitation (mik3y/usb-serial-for-android issue #159:
+ * Why: the serial plugin used before (the android-usb-serial crate, via
+ * nusb's ioctl-based transport) did set a per-call read/write timeout, but
+ * Android's own USB host stack does not reliably honor it - a
+ * well-documented, long-standing platform limitation
+ * (mik3y/usb-serial-for-android issue #159:
  * UsbDeviceConnection async requests can block indefinitely with no OS-level
  * timeout on API 17+). Confirmed live on this project 2026-08-15: "io read
  * hung"/"close hung" events roughly every 60-90s, each forcing a ~10-16s
@@ -31,9 +31,7 @@ import android.util.Log
  * Interface discovery: the Captain's firmware exposes its `console`
  * CDC-ACM function first (interfaces 0/1) and its `data` function second
  * (interfaces 2/3), followed by USB MIDI (see firmware-native/platform/
- * rp2040/usb_descriptors.c) - matching the existing sort_ports_desc
- * heuristic in android_helpers.rs ("data CDC index 1+ tried before console
- * CDC index 0"). Each CDC-ACM function is a Communications interface
+ * rp2040/usb_descriptors.c). Each CDC-ACM function is a Communications interface
  * (class 0x02) immediately followed by its paired Data interface (class
  * 0x0A) per the USB CDC spec's required Interface Association Descriptor
  * grouping. This class finds the CDC_DATA-class interface with the highest
@@ -71,9 +69,8 @@ class BosunSerialDevice private constructor(
          * both its interfaces. Returns null (releasing anything partially
          * claimed) on any failure: no USB permission, fewer than two
          * CDC_DATA interfaces found (console's + data's), no bulk
-         * endpoints, or a claim failure (already claimed elsewhere - the
-         * caller must make sure tauri-plugin-serialplugin's own connection
-         * to this port is closed first).
+         * endpoints, or a claim failure (the interface is already claimed
+         * elsewhere).
          */
         fun open(manager: UsbManager, device: UsbDevice): BosunSerialDevice? {
             if (!manager.hasPermission(device)) {

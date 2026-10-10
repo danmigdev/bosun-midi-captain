@@ -2,7 +2,7 @@
 //! singleton, which owns the Android `MidiManager`/`UsbManager` plumbing and
 //! the actual Kemper (Player) <-> pedal relay.
 //!
-//! Exposes the same four commands as the desktop [`crate::midi`] module, so
+//! Exposes the same three commands as the desktop [`crate::midi`] module, so
 //! the frontend cannot tell the platforms apart. Every Kotlin call runs on
 //! the Android main thread via `tauri::wry::prelude::dispatch` (the same
 //! mechanism Tauri's internal `run_on_android_context` uses); the result is
@@ -16,9 +16,7 @@
 //!
 //! object BosunMidiBridge {
 //!   data class BridgeStatus(val active: Boolean, val kemperPort: String?, val pedalPort: String?)
-//!   data class MidiPorts(val inputs: Array<String>, val outputs: Array<String>)
 //!
-//!   @JvmStatic fun listPorts(context: Context): MidiPorts
 //!   @JvmStatic fun start(context: Context, kemper: String?, pedal: String?): BridgeStatus
 //!   @JvmStatic fun stop(context: Context): BridgeStatus
 //!   @JvmStatic fun status(context: Context): BridgeStatus
@@ -26,29 +24,26 @@
 //! ```
 //!
 //! JNI descriptors derived from that contract (the Kotlin data class getters
-//! are `getActive()`, `getKemperPort()`, `getPedalPort()`, `getInputs()`,
-//! `getOutputs()`).
+//! are `getActive()`, `getKemperPort()`, `getPedalPort()`).
 #![cfg(target_os = "android")]
 
 use std::sync::mpsc;
 
-use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
+use jni::objects::{JClass, JObject, JString, JValue};
 use jni::JNIEnv;
 use tauri::wry::prelude::dispatch;
 
-use crate::midi::{BridgeStatus, MidiPorts};
+use crate::midi::BridgeStatus;
 
 /// JNI descriptor of the Kotlin singleton class and the static method
 /// signatures it must expose. Keep in sync with `BosunMidiBridge.kt`.
 const BRIDGE_CLASS: &str = "com/bosun/app/BosunMidiBridge";
 const GET_APP_CONTEXT_SIG: &str = "()Landroid/content/Context;";
-const LIST_PORTS_SIG: &str = "(Landroid/content/Context;)Lcom/bosun/app/BosunMidiBridge$MidiPorts;";
 const START_SIG: &str = "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Lcom/bosun/app/BosunMidiBridge$BridgeStatus;";
 const STOP_SIG: &str = "(Landroid/content/Context;)Lcom/bosun/app/BosunMidiBridge$BridgeStatus;";
 const STATUS_SIG: &str = "(Landroid/content/Context;)Lcom/bosun/app/BosunMidiBridge$BridgeStatus;";
 const GET_ACTIVE_SIG: &str = "()Z";
 const GET_STRING_SIG: &str = "()Ljava/lang/String;";
-const GET_STRING_ARRAY_SIG: &str = "()[Ljava/lang/String;";
 
 /// Run `f` on the Android main thread with a JNI env and the activity, then
 /// wait for its result.
@@ -176,13 +171,6 @@ fn read_bridge_status(env: &mut JNIEnv<'_>, obj: &JObject<'_>) -> Result<BridgeS
     })
 }
 
-fn read_midi_ports(env: &mut JNIEnv<'_>, obj: &JObject<'_>) -> Result<MidiPorts, String> {
-    Ok(MidiPorts {
-        inputs: read_string_array(env, obj, "getInputs")?,
-        outputs: read_string_array(env, obj, "getOutputs")?,
-    })
-}
-
 /// Read a `String` getter result, mapping a JNI null reference to `None`.
 fn read_optional_string(env: &mut JNIEnv<'_>, obj: &JObject<'_>, getter: &str) -> Result<Option<String>, String> {
     let value = env
@@ -196,24 +184,6 @@ fn read_optional_string(env: &mut JNIEnv<'_>, obj: &JObject<'_>, getter: &str) -
     }
 }
 
-/// Read a `String[]` getter result into a `Vec<String>`.
-fn read_string_array(env: &mut JNIEnv<'_>, obj: &JObject<'_>, getter: &str) -> Result<Vec<String>, String> {
-    let value = env
-        .call_method(obj, getter, GET_STRING_ARRAY_SIG, &[])
-        .and_then(|v| v.l())
-        .map_err(|e| format!("{getter}: {e}"))?;
-    let array = JObjectArray::from(value);
-    let len = env.get_array_length(&array).map_err(|e| format!("{getter}: {e}"))?;
-    let mut out = Vec::with_capacity(len as usize);
-    for i in 0..len {
-        let elem = env
-            .get_object_array_element(&array, i)
-            .map_err(|e| format!("{getter}[{i}]: {e}"))?;
-        out.push(jstring_to_rust(env, &elem)?);
-    }
-    Ok(out)
-}
-
 fn jstring_to_rust(env: &mut JNIEnv<'_>, value: &JObject<'_>) -> Result<String, String> {
     // jni treats JString as a repr(transparent) view over JObject, so this
     // borrows without copying.
@@ -224,12 +194,6 @@ fn jstring_to_rust(env: &mut JNIEnv<'_>, value: &JObject<'_>) -> Result<String, 
 }
 
 // --------------------- commands ---------------------
-
-/// Enumerate MIDI inputs and outputs via the Kotlin `BosunMidiBridge`.
-#[tauri::command]
-pub fn midi_list_ports() -> Result<MidiPorts, String> {
-    call_bridge("listPorts", LIST_PORTS_SIG, read_midi_ports)
-}
 
 /// Open the Kemper <-> pedal relay in Kotlin. `kemper` / `pedal` are optional
 /// substring hints; without them Kotlin auto-detects by device name.

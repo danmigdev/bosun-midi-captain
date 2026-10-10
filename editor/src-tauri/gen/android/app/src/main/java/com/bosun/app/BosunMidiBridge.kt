@@ -31,9 +31,8 @@ import androidx.core.content.ContextCompat
  * to Android's ALSA-backed USB host implementation and got no fix from the
  * framework owners). UsbMidiPacketCodec + UsbMidiDevice bypass that layer
  * entirely instead of trying to detect-and-restart around it - the same
- * raw-USB approach this app's own SerialPlugin already uses reliably for
- * the Captain's other USB interface (data CDC), which never showed this
- * failure mode.
+ * raw-USB approach BosunSerialDevice uses for the Captain's other USB
+ * interface (data CDC), which never showed this failure mode.
  *
  * All MIDI messages are forwarded in both directions (Kemper IN -> Captain
  * OUT and Captain IN -> Kemper OUT) except MIDI clock (0xF8) and active
@@ -46,9 +45,7 @@ import androidx.core.content.ContextCompat
  * ```kotlin
  * object BosunMidiBridge {
  *   data class BridgeStatus(val active: Boolean, val kemperPort: String?, val pedalPort: String?)
- *   data class MidiPorts(val inputs: Array<String>, val outputs: Array<String>)
  *
- *   @JvmStatic fun listPorts(context: Context): MidiPorts
  *   @JvmStatic fun start(context: Context, kemper: String?, pedal: String?): BridgeStatus
  *   @JvmStatic fun stop(context: Context): BridgeStatus
  *   @JvmStatic fun status(context: Context): BridgeStatus
@@ -94,12 +91,6 @@ object BosunMidiBridge {
         val active: Boolean,
         val kemperPort: String?,
         val pedalPort: String?
-    )
-
-    /** Enumerated MIDI-capable USB devices visible to the system. */
-    data class MidiPorts(
-        val inputs: Array<String>,
-        val outputs: Array<String>
     )
 
     // State below is only touched from start()/stop() (both synchronized) or
@@ -176,25 +167,6 @@ object BosunMidiBridge {
         } else {
             intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
         }
-
-    /** Enumerate the MIDI-capable USB devices currently visible to the
-     * system (i.e. anything the OS sees on the bus with USB permission
-     * already granted - devices without permission can still be found by
-     * VID/name but their exact port count isn't queryable). */
-    @JvmStatic
-    fun listPorts(context: Context): MidiPorts {
-        val manager = context.applicationContext
-            .getSystemService(Context.USB_SERVICE) as? UsbManager
-            ?: return MidiPorts(emptyArray(), emptyArray())
-        val inputs = ArrayList<String>()
-        val outputs = ArrayList<String>()
-        for (device in manager.deviceList.values) {
-            val label = deviceLabel(device)
-            inputs.add("$label IN")
-            outputs.add("$label OUT")
-        }
-        return MidiPorts(inputs.toTypedArray(), outputs.toTypedArray())
-    }
 
     /**
      * Opens the Kemper and the Captain, wires Kemper IN to Captain OUT and
@@ -369,7 +341,7 @@ object BosunMidiBridge {
 
     /** Closes every open device and marks the bridge inactive.
      * The Context parameter exists purely for the JNI signature parity with
-     * listPorts/start - the bridge itself does not need it. */
+     * start - the bridge itself does not need it. */
     @JvmStatic
     @Synchronized
     fun stop(context: Context): BridgeStatus {

@@ -164,7 +164,7 @@ pub async fn connect(
                 Ok(0) => continue,
                 Ok(n) => {
                     append_bounded(&mut drain_buf, &drain_chunk[..n]);
-                    if crate::serial::marker_found(&drain_buf, &sentinel_id) {
+                    if super::android_helpers::marker_found(&drain_buf, &sentinel_id) {
                         seen_sentinel = true;
                     }
                 }

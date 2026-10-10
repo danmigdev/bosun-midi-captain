@@ -21,8 +21,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Platform-specific serial and MIDI dependencies.
 # Desktop: serial2 for CDC serial and serialport for USB VID/PID enumeration.
-# Android: tauri-plugin-serialplugin v3 (pure Rust, uses nusb +
-# android-usb-serial, supports CDC-ACM). No firmware installer on mobile.
+# Android: the Kotlin BosunSerialBridge and BosunMidiBridge own the USB
+# devices and Rust reaches them over JNI. No firmware installer on mobile.
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 serial2 = "0.2"
@@ -35,8 +35,11 @@ rfd = "0.15"
 midir = "0.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
-tauri-plugin-serialplugin = "3"
-# JNI bridge to the Kotlin BosunMidiBridge singleton (Android MIDI relay).
+# Keep the embedded frontend brotli-compressed on Android, as before (it used
+# to come with a plugin's default tauri features): the APK stores each ABI's
+# library uncompressed, so this keeps the download small.
+tauri = { version = "2.12.0", default-features = false, features = ["compression"] }
+# JNI bridge to the Kotlin BosunSerialBridge and BosunMidiBridge singletons.
 # Version matches the jni crate wry/tauri use so the types unify.
 jni = "0.21"
 # Default export folder (export.rs): Android has no native folder picker.

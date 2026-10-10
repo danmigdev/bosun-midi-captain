@@ -7,24 +7,6 @@
 //! Every function here pins a regression fixed during the 2026-08-12
 //! Android connectivity work; each has a test named after the bug.
 
-/// Extract the port index from a serialplugin port path.
-/// Port paths look like /dev/bus/usb/001/002#0, /dev/bus/usb/001/002#1.
-/// Returns -1 when the name has no #N suffix.
-#[cfg(any(target_os = "android", test))]
-pub fn port_index(name: &str) -> i32 {
-    name.rsplit('#').next()
-        .and_then(|n| n.parse::<i32>().ok())
-        .unwrap_or(-1)
-}
-
-/// Sort port names in descending index order so the data CDC (index 1+)
-/// is tried before the console CDC (index 0), which only prints status
-/// lines and never answers the protocol.
-#[cfg(any(target_os = "android", test))]
-pub fn sort_ports_desc(ports: &mut Vec<String>) {
-    ports.sort_by(|a, b| port_index(b).cmp(&port_index(a)));
-}
-
 /// Does `buf` contain the PING ACK marker for `id`?  The firmware writes
 /// compact JSON ({"type":"ACK","id":"..."}); the ACK type and our id must
 /// be on the same protocol line.
@@ -37,16 +19,15 @@ pub fn marker_found(buf: &[u8], id: &str) -> bool {
     })
 }
 
-/// Classify a serialplugin error message.  The plugin returns read
-/// timeouts as Err("no data received within N ms") rather than an
-/// empty Ok(..) like desktop serial2; treating those as fatal killed
-/// the connection on the very first idle read (2026-08-12 regression).
+/// Classify a transport error message.  BosunSerialBridge reports a write
+/// that runs out of time as "write timeout: sent N/M bytes", which is worth
+/// a retry; a stale session or a missing device is fatal.  Read timeouts
+/// never get here: the bridge returns an empty read instead.  Treating
+/// timeouts as fatal killed the connection on the very first idle I/O
+/// (2026-08-12 regression).
 #[cfg(any(target_os = "android", test))]
 pub fn is_transient_error(msg: &str) -> bool {
-    msg.contains("lock timeout")
-        || msg.contains("no data received")
-        || msg.contains("timeout")
-        || msg.contains("timed out")
+    msg.contains("timeout") || msg.contains("timed out")
 }
 
 /// A link that can WRITE but never READ looks "alive" if staleness is
@@ -68,16 +49,13 @@ pub fn is_write_only_stall(writes_since_last_read: u32, threshold: u32) -> bool 
 
 /// Run `f` on its own thread and wait at most `timeout` for it to finish.
 ///
-/// The Android serial plugin's `write`/`read` calls can block forever: the
-/// plugin's internal hub thread holds the port mutex while polling, and the
-/// module-level doc comment already notes "the Android USB stack may not
-/// honour the [read] timeout - that lock can be held indefinitely." When
-/// that happens on the I/O thread's OWN write/read call (not just the
-/// plugin's internal hub thread), the whole I/O thread freezes mid-call -
-/// and the stall watchdog in the surrounding loop, which only runs BETWEEN
-/// iterations, never gets a chance to fire (2026-08-15: confirmed live,
-/// writes silently stopped succeeding and the app never recovered even
-/// minutes later and even after removing all MIDI traffic, because the
+/// A JNI call into BosunSerialBridge can still block despite bulkTransfer's
+/// own timeout (a wedged USB endpoint or a stuck JNI dispatch). When that
+/// happens on the I/O thread's own write/read call, the whole I/O thread
+/// freezes mid-call - and the stall watchdog in the surrounding loop, which
+/// only runs BETWEEN iterations, never gets a chance to fire (2026-08-15,
+/// with the previous plugin-based transport: writes silently stopped
+/// succeeding and the app never recovered even minutes later, because the
 /// thread was frozen inside one blocking call, not looping and failing to
 /// notice staleness).
 ///
@@ -104,37 +82,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn port_sort_tries_data_cdc_before_console() {
-        // Real port names captured from the Pixel 8 Pro (adb logcat).
-        let mut ports = vec![
-            "/dev/bus/usb/001/002#0".to_string(),
-            "/dev/bus/usb/001/002#1".to_string(),
-        ];
-        sort_ports_desc(&mut ports);
-        assert_eq!(ports[0], "/dev/bus/usb/001/002#1", "data CDC must be first");
-        assert_eq!(ports[1], "/dev/bus/usb/001/002#0", "console CDC must be last");
-    }
-
-    #[test]
-    fn port_sort_handles_single_port() {
-        let mut ports = vec!["/dev/bus/usb/001/002#1".to_string()];
-        sort_ports_desc(&mut ports);
-        assert_eq!(ports.len(), 1);
-    }
-
-    #[test]
-    fn port_sort_tolerates_names_without_index() {
-        let mut ports = vec![
-            "/dev/bus/usb/001/002".to_string(),   // no #N suffix -> -1
-            "/dev/bus/usb/001/002#1".to_string(), // data CDC
-            "COM4".to_string(),                   // desktop-style name
-        ];
-        sort_ports_desc(&mut ports);
-        // The indexed port must sort first regardless of the others.
-        assert_eq!(ports[0], "/dev/bus/usb/001/002#1");
-    }
 
     #[test]
     fn marker_matches_firmware_ack() {
@@ -172,19 +119,18 @@ mod tests {
     }
 
     #[test]
-    fn read_timeout_is_transient() {
-        // Exact error the plugin returns when the 100/150 ms read
-        // deadline expires with no data.
-        assert!(is_transient_error("no data received within 150 ms"));
-        assert!(is_transient_error("serial port lock timeout after 250 ms"));
+    fn write_timeout_is_transient() {
+        // BosunSerialBridge.write throws this when bulkTransfer runs out
+        // of time part-way through a line.
+        assert!(is_transient_error("write timeout: sent 12/40 bytes"));
         assert!(is_transient_error("exchange timed out after 5000 ms"));
     }
 
     #[test]
     fn real_errors_are_not_transient() {
-        assert!(!is_transient_error("Port '/dev/bus/usb/001/002#1' not found"));
-        assert!(!is_transient_error("Serial port disconnected: No such device (os error 19)"));
-        assert!(!is_transient_error("Cannot read while watch is active"));
+        assert!(!is_transient_error("stale or disconnected session"));
+        assert!(!is_transient_error("Captain USB device not found"));
+        assert!(!is_transient_error("failed to open/claim the Captain's data CDC interface (see logcat)"));
     }
 
     // Regression for the 2026-08-14 report: Stage never updated, a

@@ -9,12 +9,12 @@ import androidx.core.content.ContextCompat
 
 /**
  * JNI-facing singleton owning the raw-USB data-CDC connection to the
- * Captain (see BosunSerialDevice's doc comment for why this bypasses
- * tauri-plugin-serialplugin's Android backend). One logical port,
- * "usb-data" - there is only ever one Captain to talk to on this
- * connection, unlike the desktop path's real multi-port COM enumeration.
+ * Captain (see BosunSerialDevice's doc comment for why it talks to the USB
+ * device directly). One logical port, "usb-data" - there is only ever one
+ * Captain to talk to on this connection, unlike the desktop path's real
+ * multi-port COM enumeration.
  *
- * Lifecycle is driven from Rust through JNI (see serial_android_native.rs),
+ * Lifecycle is driven from Rust through JNI (see serial/android_native.rs),
  * same shape as BosunMidiBridge.kt:
  *
  * ```kotlin
@@ -51,9 +51,8 @@ object BosunSerialBridge {
 
     /** Opens (or reopens - closes any existing connection first) the
      * Captain's data CDC interface. Returns the canonical port name on
-     * success; throws with a descriptive message on failure so the JNI
-     * caller can surface it the same way the old plugin's Result<String,
-     * String> did. */
+     * success; throws with a descriptive message on failure, which the JNI
+     * caller returns as its Err. */
     @JvmStatic
     @Synchronized
     fun open(context: Context, @Suppress("UNUSED_PARAMETER") port: String, generation: Long): String {

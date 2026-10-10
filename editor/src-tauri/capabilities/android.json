@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "android",
-  "description": "Capability set required on Android. Grants the serialplugin permission for USB OTG serial communication with the MIDI Captain pedal.",
+  "description": "Capability set required on Android. The pedal and Kemper USB links go through Bosun's own commands, so only core permissions are needed.",
   "platforms": ["android"],
   "windows": ["main"],
   "permissions": [
@@ -9,7 +9,6 @@
     "core:event:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "core:event:allow-emit",
-    "serialplugin:default"
+    "core:event:allow-emit"
   ]
 }

@@ -1,11 +1,10 @@
 //! JNI front-end for the Kotlin `BosunSerialBridge` singleton, which owns a
 //! raw-USB CDC-ACM connection to the Captain's data port via
-//! `UsbDeviceConnection.bulkTransfer()` - bypassing
-//! `tauri-plugin-serialplugin`'s Android backend entirely. See
-//! `BosunSerialDevice.kt`'s doc comment for why: that backend's own
-//! per-call timeout is not reliably honored by Android's USB host stack (a
-//! well-documented platform limitation), which was causing frequent
-//! multi-second read/write hangs even after `android.rs`'s own
+//! `UsbDeviceConnection.bulkTransfer()`. See `BosunSerialDevice.kt`'s doc
+//! comment for why this replaced the serial plugin used before: that
+//! backend's own per-call timeout is not reliably honored by Android's USB
+//! host stack (a well-documented platform limitation), which was causing
+//! frequent multi-second read/write hangs even after `android.rs`'s own
 //! `call_with_timeout` watchdog made them survivable rather than fatal.
 //!
 //! Wry's main-thread dispatch is used once to cache the JavaVM and a global
