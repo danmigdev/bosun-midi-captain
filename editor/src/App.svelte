@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
   import PatchEditor from "./components/PatchEditor.svelte";
-  import MidiLearn, { type PatchCapture } from "./components/MidiLearn.svelte";
   import Installer from "./components/Installer.svelte";
   import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
   import NativeUsbUpdate from "./components/NativeUsbUpdate.svelte";
@@ -66,8 +65,6 @@
     patchIdOf,
     type FirmwareMessage,
     type Manifest,
-    type MidiInCapturedEvent,
-    type MidiLearnTable,
     type Binding,
     type Patch,
     type PatchSummary,
@@ -243,7 +240,6 @@
   function prepareUsbUpdate() {
     usbPreparing = true;
     connected = false;
-    learning = false;
     showInstaller = false;
   }
   function acceptUsbJob(job: UsbUpdateJob | null) {
@@ -322,7 +318,6 @@
   let hasActiveProfile = $derived<boolean>(!!deviceInfo?.profile);
   let patches = $state<PatchSummary[]>([]);
   let dirtyIds = $state<Array<{ bank: number; slot: number }>>([]);
-  let learning = $state(false);
   let manifest = $state<Manifest | null>(null);
   let currentPatch = $state<{ bank: number; slot: number; patch: Patch } | null>(null);
   // Auto-retry state for GET_MANIFEST. The firmware occasionally drops a
@@ -344,10 +339,6 @@
   let globalDevice = $state<Record<string, unknown> | null>(null);
   let rigsPerBank = $derived(getRigsPerBank(globalDevice));
   let bankCount = $derived(getBankCount(globalDevice));
-  let midiLearnTable = $state<MidiLearnTable>({ pc_to_patch: [] });
-  let captures = $state<PatchCapture[]>([]);
-  const _bankMsbCache = new Map<string, number>();
-  const CAPTURE_CAP = 20;
 
   type LogEntry = { ts: number; raw: FirmwareMessage };
   let log = $state<LogEntry[]>([]);
@@ -463,7 +454,7 @@
       busy = true; error = "";
       // Clear UI immediately so user sees the transition happening
       deviceInfo = null; manifest = null; currentPatch = null;
-      patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+      patches = []; dirtyIds = [];
       globalDevice = null; activeKind = "";
       manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
       try { await disconnect(); } catch {}
@@ -515,7 +506,7 @@
         connected = await isConnected();
         if (connected) {
           deviceInfo = null; manifest = null; currentPatch = null;
-          patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+          patches = []; dirtyIds = [];
           globalDevice = null; activeKind = "";
           manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
           await refetchAll();
@@ -569,7 +560,7 @@
       if (page === "home") return false; // let the app close from home
       // Go back one logical step
       if (page === "editor" || page === "settings" || page === "tft" ||
-          page === "learn" || page === "setlist" || page === "monitor" ||
+          page === "setlist" || page === "monitor" ||
           page === "stage") {
         page = "patches";
         return true;
@@ -631,9 +622,9 @@
       networkRecoveryPending = true;
       busy = true;
     }
-    connected = false; learning = false;
+    connected = false;
     deviceInfo = null; manifest = null; currentPatch = null;
-    patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+    patches = []; dirtyIds = [];
     globalDevice = null; activeKind = "";
     manifestRetries = 0; manifestGaveUp = false; manifestFallbackActive = false;
     try { await disconnect(); } catch {}
@@ -709,7 +700,7 @@
       // (Settings sections, TFT fields like kemper_rig) never appears.
       await cmd.getManifest();
       // Resolve the active profile. A freshly-installed pedal has none, and the
-      // PER-PROFILE queries below (patches/global/dirty/midi-learn) answer
+      // PER-PROFILE queries below (patches/global/dirty) answer
       // "not_found" until one exists - so skip them when there's no profile.
       let hasProfile = false;
       try {
@@ -722,7 +713,6 @@
       if (hasProfile) {
         await cmd.listPatches();
         await cmd.getDirty();
-        await cmd.getMidiLearn();
         await cmd.getGlobal();
       }
       // Successful re-sync - any prior "lost connection" / "reconnect failed"
@@ -968,30 +958,16 @@
       // Drop the MIDI relay too - the pedal is going away.
       if (!networkSession) await stopBridge();
       connected = false; deviceInfo = null; manifest = null;
-      currentPatch = null; learning = false; captures = [];
-      patches = []; dirtyIds = []; midiLearnTable = { pc_to_patch: [] };
+      currentPatch = null;
+      patches = []; dirtyIds = [];
       globalDevice = null; activeKind = ""; error = "";
-      _bankMsbCache.clear();
     } catch (e) { error = String(e); }
     finally { busy = false; }
   }
 
-  async function toggleLearn() {
-    try {
-      if (learning) await cmd.stopLearn();
-      else          await cmd.startLearn();
-      learning = !learning;
-      // Capture only works if the source's MIDI actually reaches the pedal. For
-      // a USB-only Kemper Player that means the PC must relay it - so when the
-      // user starts learning, bring the in-editor bridge up automatically (best
-      // effort: a missing Kemper/pedal MIDI port just leaves it off with a hint).
-      if (learning && !bridge.active) void startBridge(true);
-    } catch (e) { error = String(e); }
-  }
-
   // ---- in-editor MIDI bridge (Kemper Player <-> pedal) ----
-  // Relays USB-MIDI both ways so MIDI Learn capture and the bidirectional sync
-  // work without a separate bridge program.
+  // Relays USB-MIDI both ways so the bidirectional sync works without a
+  // separate bridge program.
   let bridge = $state<BridgeStatus>({ active: false, kemper_port: null, pedal_port: null });
   async function refreshBridge() {
     try { bridge = await midiBridgeStatus(); } catch { /* leave as-is */ }
@@ -1005,9 +981,9 @@
       bridge = await midiBridgeStart();
       showToast("ok", `MIDI bridge on: ${bridge.kemper_port} <-> ${bridge.pedal_port}`);
     } catch (e) {
-      // On an auto-start (learn began) a missing device is expected for users
-      // not on a USB Kemper - keep it quiet-ish but still tell them why capture
-      // may stay empty. A manual click always surfaces the reason.
+      // On an auto-start a missing device is expected for users not on a USB
+      // Kemper - keep it quiet-ish but still tell them why sync may be missing.
+      // A manual click always surfaces the reason.
       const msg = String(e);
       showToast(auto ? "info" : "error", `MIDI bridge not started: ${msg}`);
       await refreshBridge();
@@ -1022,8 +998,6 @@
     _bridgeManuallyStopped = true;
     await refreshBridge();
   }
-  // Reflect the real backend state whenever the Learn page opens.
-  $effect(() => { if (page === "learn" && connected && !networkSession) void refreshBridge(); });
 
   // Stage setups need the Kemper <-> pedal relay whenever both devices
   // are on the USB bus, so auto-start the bridge on every connect
@@ -1087,12 +1061,6 @@
     void cmd.listPatches();
   });
 
-  async function updateMidiLearn(table: MidiLearnTable) {
-    midiLearnTable = table;
-    await cmd.putMidiLearn(table);
-  }
-  function clearCapture(idx: number) { captures = captures.filter((_, i) => i !== idx); }
-  function clearAllCaptures() { captures = []; }
 
   // Click a placeholder cell in the patches grid to materialize a
   // blank patch at that (bank, slot) and drop straight into the
@@ -1189,7 +1157,7 @@
     (window as unknown as { __app: unknown }).__app = {
       page, connected, connectedPortName,
       deviceInfo, manifest, currentPatch, patches, dirtyIds,
-      globalDevice, midiLearnTable, captures, learning,
+      globalDevice,
       logCount: log.length,
       lastLog: log.length ? log[log.length - 1] : null,
       error,
@@ -1286,9 +1254,6 @@
       case "DIRTY":
         dirtyIds = msg.patches;
         break;
-      case "MIDI_LEARN":
-        midiLearnTable = msg.table?.pc_to_patch ? msg.table : { pc_to_patch: [] };
-        break;
       case "ERROR": {
         if (isInternallyRetriedFirmwareError(msg)) break;
         const err = (msg as { error?: string }).error || "unknown";
@@ -1325,27 +1290,8 @@
             cmd.getPatch(cur.bank, cur.slot).catch(() => {});
             cmd.listPatches().catch(() => {});
           }
-        } else if (msg.event === "midi_in_captured") {
-          handleCapture(msg as unknown as MidiInCapturedEvent);
         }
         break;
-    }
-  }
-
-  function handleCapture(msg: MidiInCapturedEvent) {
-    const port = msg.port, channel = msg.channel, kind = msg.kind;
-    const data = msg.data ?? [];
-    const key = `${port}:${channel}`;
-    if (kind === "cc" && data[0] === 0) { _bankMsbCache.set(key, data[1] ?? 0); return; }
-    if (kind === "pc" && data.length > 0) {
-      const capture: PatchCapture = {
-        port, channel,
-        bank_msb: _bankMsbCache.get(key) ?? 0,
-        pc: data[0], ts: Date.now(),
-      };
-      const next = [capture, ...captures];
-      if (next.length > CAPTURE_CAP) next.length = CAPTURE_CAP;
-      captures = next;
     }
   }
 
@@ -1435,7 +1381,6 @@
     { id: "editor",   label: "Editor",       icon: "✎", group: "build" },
     { id: "setlist",  label: "Setlist",      icon: "≣", group: "build" },
     { id: "tft",      label: "Screen layout", icon: "▭", group: "device" },
-    { id: "learn",    label: "MIDI Learn",   icon: "↻", group: "device" },
     { id: "settings", label: "Settings",     icon: "⚙", group: "device" },
     { id: "maint",    label: "Maintenance",  icon: "⊕", group: "system" },
     { id: "monitor",  label: "MIDI Monitor", icon: "∿", group: "system" },
@@ -1507,8 +1452,7 @@
     <div class="grow"></div>
 
     {#if connected}
-      <!-- MIDI bridge (Kemper <-> pedal relay). Independent from MIDI Learn:
-           Learn auto-starts it for capture, but the stage setup needs it
+      <!-- MIDI bridge (Kemper <-> pedal relay): the stage setup needs it
            running whenever both devices are on the bus. -->
       {#if !networkSession}
       <button class="topbtn"
@@ -1665,9 +1609,6 @@
               <span class="lbl">{item.label}</span>
               {#if item.id === "patches" && dirtyIds.length > 0}
                 <span class="badge-dot" title="unsaved">{dirtyIds.length}</span>
-              {/if}
-              {#if item.id === "learn" && learning}
-                <span class="pulse-dot" title="learning"></span>
               {/if}
             </button>
           {/each}
@@ -1882,31 +1823,6 @@
             onSend={(payload) => { void sendSetlistToPedal(payload); }}
           />
 
-        {:else if page === "learn"}
-          <header class="pageHead">
-            <h2>MIDI Learn</h2>
-            <button class="primary" onclick={toggleLearn}>
-              {learning ? "Stop learn" : "Start learn"}
-            </button>
-          </header>
-          {#if deviceInfo}
-            <MidiLearn
-              {learning}
-              table={midiLearnTable}
-              {captures}
-              {patches}
-              currentBank={deviceInfo.bank}
-              currentSlot={deviceInfo.slot}
-              {bridge}
-              {networkSession}
-              onStartBridge={() => startBridge(false)}
-              onStopBridge={stopBridge}
-              onUpdate={updateMidiLearn}
-              onClearCapture={clearCapture}
-              onClearAllCaptures={clearAllCaptures}
-            />
-          {/if}
-
         {:else if page === "tft"}
           <TftLayout device={globalDevice} {manifest} {activeKind} />
 
@@ -1936,8 +1852,8 @@
           <p class="muted" style="margin:0 0 0.75rem">
             Live view of every MIDI message the pedal sends and receives, decoded
             newest-first. The stream runs only while this page is open, so it
-            never adds traffic during normal play. Handy for debugging bindings,
-            MIDI Learn, and device sync.
+            never adds traffic during normal play. Handy for debugging bindings
+            and device sync.
           </p>
           <MidiMonitor {connected} />
 
@@ -2375,11 +2291,6 @@
     background: var(--warn); color: var(--bg-card); font-size: 0.65rem; font-weight: 600;
     padding: 0.05rem 0.4rem; border-radius: 999px; min-width: 1rem; text-align: center;
   }
-  .pulse-dot {
-    width: 8px; height: 8px; border-radius: 50%; background: var(--warn-text);
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse { 50% { opacity: 0.35; } }
   /* Section header separating the sidebar groups (Build / Device / System). */
   .navgroup-label {
     font-size: 0.66rem; font-weight: 600; letter-spacing: 0.07em;

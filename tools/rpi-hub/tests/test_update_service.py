@@ -484,7 +484,7 @@ def recovery_job(tmp_path, monkeypatch):
     device = worker.PinnedDevice(*hub.link.usb_identity)
     before = {"info": dict(hub._update_device_info), "active": "live", "profiles": {
         "live": {"metadata": {"id": "live", "color": "blue"}, "device": {"channel": 1},
-                 "patches": {"01/01": {"name": "Original"}}, "midi_learn": {}}}}
+                 "patches": {"01/01": {"name": "Original"}}}}}
     installation = tmp_path / job / "installation"
     installation.mkdir()
     journal = {"device": asdict(device), "source_version": before["info"]["fw"],

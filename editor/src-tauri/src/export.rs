@@ -67,6 +67,7 @@ pub fn write_export_file(folder: String, relative: String, content: String) -> R
     Ok(path.to_string_lossy().to_string())
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn open_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -89,12 +90,6 @@ pub fn open_in_file_manager(path: String) -> Result<(), String> {
             .arg(&path)
             .spawn()
             .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "android")]
-    {
-        // Android has no native file manager intent from Rust.
-        // The export folder path is shown to the user in the UI instead.
-        let _ = path;
     }
     Ok(())
 }

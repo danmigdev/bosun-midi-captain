@@ -14,13 +14,13 @@ import { readNetworkBootstrap } from "../src/lib/network-bootstrap";
 const profiles = [{ id: "live", name: "Live Kemper", kind: "kemper_player", active: true }];
 const requests = [
   ["GET_DEVICE_INFO", 8000], ["LIST_PROFILES", 8000], ["GET_MANIFEST", 15000],
-  ["LIST_PATCHES", 10000], ["GET_DIRTY", 8000], ["GET_MIDI_LEARN", 8000], ["GET_GLOBAL", 10000],
+  ["LIST_PATCHES", 10000], ["GET_DIRTY", 8000], ["GET_GLOBAL", 10000],
 ] as const;
 
 function response(type: string) {
   if (type === "LIST_PROFILES") return { type: "PROFILE_LIST", profiles, active: "live" };
   return { type: ({ GET_DEVICE_INFO: "DEVICE_INFO", GET_MANIFEST: "MANIFEST",
-    LIST_PATCHES: "PATCH_LIST", GET_DIRTY: "DIRTY", GET_MIDI_LEARN: "MIDI_LEARN", GET_GLOBAL: "GLOBAL" } as Record<string, string>)[type] };
+    LIST_PATCHES: "PATCH_LIST", GET_DIRTY: "DIRTY", GET_GLOBAL: "GLOBAL" } as Record<string, string>)[type] };
 }
 
 describe("network bootstrap", () => {
@@ -74,7 +74,7 @@ describe("network bootstrap", () => {
     await expect(bootstrap).resolves.toEqual({ profiles, active: "live" });
     expect(send.mock.calls.map(([message]) => message.type)).toEqual([
       "GET_DEVICE_INFO", "LIST_PROFILES", "LIST_PROFILES", "GET_MANIFEST",
-      "LIST_PATCHES", "GET_DIRTY", "GET_MIDI_LEARN", "GET_GLOBAL",
+      "LIST_PATCHES", "GET_DIRTY", "GET_GLOBAL",
     ]);
   });
 

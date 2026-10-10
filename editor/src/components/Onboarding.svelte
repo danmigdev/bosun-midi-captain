@@ -122,7 +122,7 @@
       <h1>Welcome to Bosun</h1>
       <p class="lede">
         A friendly editor for your MIDI Captain pedal - patches, screen
-        layouts, MIDI learn, and live state from your target amp.
+        layouts and live state from your target amp.
       </p>
       <ul class="features">
         <li><span class="bullet">✓</span> Bidirectional with the Kemper Player</li>

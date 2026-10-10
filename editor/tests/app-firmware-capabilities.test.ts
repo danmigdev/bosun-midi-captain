@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   cmd: {
     getDeviceInfo: vi.fn(), getManifest: vi.fn(), getManifestAwait: vi.fn(),
     listProfiles: vi.fn(), listPatches: vi.fn(), getDirty: vi.fn(),
-    getMidiLearn: vi.fn(), getGlobal: vi.fn(), getStats: vi.fn(), getPatch: vi.fn(),
+    getGlobal: vi.fn(), getStats: vi.fn(), getPatch: vi.fn(),
   },
 }));
 

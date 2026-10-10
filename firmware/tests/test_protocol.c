@@ -239,23 +239,20 @@ static void array_is(const char *key, const uint8_t *data, size_t length) {
     }
     assert(bosun_json_at(&reply, array, (unsigned)length) == -1);
 }
-static void monitor_and_learn(void) {
+static void monitor_events(void) {
     bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
     const uint8_t first[] = {0xb3, 7, 42}, second[] = {0xc3, 11}, sysex[] = {0xf0, 0, 0x20, 0x33, 2, 0xf7};
     bosun_runtime_feed_midi(&runtime, 0, first, sizeof first, 1);
     assert(!protocol.event_length);
-    request("{\"type\":\"START_MIDI_LEARN\"}", "ACK");
+    request("{\"type\":\"SET_MIDI_MONITOR\",\"on\":true}", "ACK");
     bosun_runtime_feed_midi(&runtime, 0, first, sizeof first, 2);
     bosun_runtime_feed_midi(&runtime, 1, second, sizeof second, 2);
-    bosun_protocol_tick(&protocol, 2); event_is("midi_in_captured");
-    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "kind"), "cc"));
+    bosun_protocol_tick(&protocol, 2); event_is("midi");
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "port"), "usb"));
-    array_is("data", first + 1, 2);
-    bosun_protocol_tick(&protocol, 3); event_is("midi_in_captured");
-    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "kind"), "pc"));
+    array_is("raw", first, sizeof first);
+    bosun_protocol_tick(&protocol, 3); event_is("midi");
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "port"), "din"));
-    array_is("data", second + 1, 1);
-    request("{\"type\":\"SET_MIDI_MONITOR\",\"on\":true}", "ACK");
+    array_is("raw", second, sizeof second);
     const char *manifest = "{\"type\":\"GET_MANIFEST\",\"id\":\"monitor-drain\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)manifest, strlen(manifest), 4) == strlen(manifest));
     size_t before = protocol.tx_length;
@@ -265,8 +262,6 @@ static void monitor_and_learn(void) {
     read_reply("MANIFEST", "monitor-drain");
     bosun_protocol_tick(&protocol, 5); event_is("midi"); array_is("raw", sysex, sizeof sysex);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "dir"), "in"));
-    bosun_protocol_tick(&protocol, 6); event_is("midi_in_captured"); array_is("data", sysex + 1, sizeof sysex - 2);
-    request("{\"type\":\"STOP_MIDI_LEARN\"}", "ACK");
     runtime.monitor(runtime.monitor_context, true, 0, 0, 0, first, sizeof first);
     bosun_protocol_tick(&protocol, 7); event_is("midi"); array_is("raw", first, sizeof first);
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "dir"), "out"));
@@ -295,7 +290,7 @@ static void monitor_and_learn(void) {
     bosun_protocol_tick(&protocol, 50000); read_reply("CONTEXT", NULL);
     assert(protocol.event_length);
     bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
-    assert(!protocol.event_length && !runtime.midi_monitor && !runtime.midi_learn && !runtime.learn.fresh);
+    assert(!protocol.event_length && !runtime.midi_monitor);
     /* No event from the previous connection survives reconnect. */
     bosun_protocol_tick(&protocol, 50050); read_reply("CONTEXT", NULL);
     bosun_protocol_tick(&protocol, 50050); assert(!protocol.tx_length);
@@ -587,17 +582,9 @@ int main(void) {
     request("{\"type\":\"GET_PATCH\",\"profile\":\"other\",\"bank\":2,\"slot\":3}", "PATCH");
     assert(strstr(output, "OTHER") && !strcmp(config.profile, "test"));
     request("{\"type\":\"LIST_PROFILES\"}", "PROFILE_LIST"); assert(strstr(output, "other"));
-    request("{\"type\":\"PUT_MIDI_LEARN\",\"table\":{\"pc_to_patch\":[]}}", "ACK");
-    request("{\"type\":\"GET_MIDI_LEARN\"}", "MIDI_LEARN");
-    request("{\"type\":\"PUT_MIDI_LEARN\",\"table\":[]}", "ERROR"); is_error("invalid_request");
-    request("{\"type\":\"GET_MIDI_LEARN\"}", "MIDI_LEARN"); assert(strstr(output, "\"pc_to_patch\":[]"));
-    const char *broken = "{broken";
-    assert(bosun_store_write_atomic("/config/profiles/test/midi_learn.json", broken, strlen(broken)) == BOSUN_STORE_OK);
-    request("{\"type\":\"GET_MIDI_LEARN\"}", "ERROR"); is_error("invalid_request");
-    request("{\"type\":\"PUT_MIDI_LEARN\",\"table\":{\"pc_to_patch\":[],\"future\":{\"saved\":true}}}", "ACK");
-    request("{\"type\":\"GET_MIDI_LEARN\"}", "MIDI_LEARN"); assert(strstr(output, "\"future\""));
-    request("{\"type\":\"START_MIDI_LEARN\"}", "ACK"); assert(runtime.midi_learn);
-    request("{\"type\":\"STOP_MIDI_LEARN\"}", "ACK"); assert(!runtime.midi_learn);
+    /* MIDI Learn was retired; its commands are unknown like any other. */
+    request("{\"type\":\"GET_MIDI_LEARN\"}", "ERROR"); is_error("unknown_type");
+    request("{\"type\":\"START_MIDI_LEARN\"}", "ERROR"); is_error("unknown_type");
     request("{\"type\":\"SET_MIDI_MONITOR\",\"on\":true}", "ACK"); assert(runtime.midi_monitor);
     request("{\"type\":\"SET_MIDI_MONITOR\",\"on\":\"yes\"}", "ERROR"); assert(runtime.midi_monitor);
     request("{\"type\":\"GET_CONTEXT\"}", "CONTEXT"); assert(strstr(output, "CLEAN"));
@@ -652,15 +639,16 @@ int main(void) {
     bosun_protocol_tick(&protocol, 10000); assert(!protocol.tx_length);
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)"{\"type\":\"PING\"}\n", 16, 10001) == 0);
     bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
-    assert(!protocol.reboot_requested && !runtime.midi_monitor && !runtime.midi_learn);
+    assert(!protocol.reboot_requested && !runtime.midi_monitor);
     assert(!protocol.tx_length && !protocol.rx_length);
     request("{\"type\":\"PING\"}", "ACK");
     assert(sent == 0);
     full_catalog();
-    monitor_and_learn(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
+    monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));
+    const char *broken = "{broken";
     assert(bosun_store_write_atomic("/config/profiles/test/patches/01/02.json", broken, strlen(broken)) == BOSUN_STORE_OK);
     request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("invalid_request");
     assert(!bosun_store_mount("/no-such-native-storage-root"));

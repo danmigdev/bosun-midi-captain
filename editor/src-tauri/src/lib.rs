@@ -96,7 +96,6 @@ pub fn run() {
             serial::drain_inbox,
             export::pick_export_folder,
             export::write_export_file,
-            export::open_in_file_manager,
             midi_android::midi_bridge_start,
             midi_android::midi_bridge_stop,
             midi_android::midi_bridge_status,

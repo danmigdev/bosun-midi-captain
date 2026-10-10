@@ -56,7 +56,6 @@ BOOTSTRAP = r"""(() => {
       case 'LIST_PATCHES': reply = {type:'PATCH_LIST',patches}; break;
       case 'GET_GLOBAL': reply = {type:'GLOBAL',device:{}}; break;
       case 'GET_DIRTY': reply = {type:'DIRTY',patches:[]}; break;
-      case 'GET_MIDI_LEARN': reply = {type:'MIDI_LEARN',table:{pc_to_patch:[]}}; break;
       case 'GET_PATCH': reply = {type:'PATCH',active_profile:'parity',bank:message.bank,slot:message.slot,
         patch}; break;
       case 'GET_CONTEXT': reply = {type:'CONTEXT',context:{bank:1,slot:1,expression_mode:'WAH',kemper_rig_name:'CLEAN'}}; break;

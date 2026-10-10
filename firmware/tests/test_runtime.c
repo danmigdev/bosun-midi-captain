@@ -259,36 +259,38 @@ static void test_expression(void) {
 }
 
 static void test_midi(void) {
-    fixture(NULL, "{}"); runtime.midi_monitor = runtime.midi_learn = true;
+    fixture(NULL, "{}"); runtime.midi_monitor = true;
     runtime.monitor = monitor; runtime.monitor_context = &monitored;
     const uint8_t partial[] = {0xb2, 7}, din[] = {0x94, 60, 100}, finish[] = {99};
     bosun_runtime_feed_midi(&runtime, 0, partial, sizeof partial, 0);
     bosun_runtime_feed_midi(&runtime, 1, din, sizeof din, 1);
-    assert(runtime.learn.sequence == 1 && runtime.learn.port == 1 && runtime.learn.channel == 5);
+    assert(monitored == 1 && last_monitor.port == 1 && last_monitor.channel == 5);
     bosun_runtime_feed_midi(&runtime, 0, finish, sizeof finish, 2);
-    assert(runtime.midi_rx_count == 2 && monitored == 2 && runtime.learn.channel == 3);
-    assert(runtime.learn.data[0] == 7 && runtime.learn.data[1] == 99 && runtime.learn.fresh);
+    assert(runtime.midi_rx_count == 2 && monitored == 2 && last_monitor.channel == 3);
+    assert(last_monitor.length == 2 && last_monitor.data[0] == 7 && last_monitor.data[1] == 99);
     assert(!last_monitor.outbound && last_monitor.port == 0 && last_monitor.status == 0xb0);
     const uint8_t realtime[] = {0xf8};
-    bosun_runtime_feed_midi(&runtime, 1, realtime, 1, 3); assert(runtime.learn.sequence == 2);
+    bosun_runtime_feed_midi(&runtime, 1, realtime, 1, 3); assert(monitored == 2);
     const uint8_t running[] = {8, 1};
-    bosun_runtime_feed_midi(&runtime, 0, running, sizeof running, 4); assert(runtime.learn.sequence == 3);
+    bosun_runtime_feed_midi(&runtime, 0, running, sizeof running, 4);
+    assert(monitored == 3 && last_monitor.channel == 3 && last_monitor.data[0] == 8);
     bosun_runtime_feed_midi(&runtime, 0, partial, sizeof partial, 5);
     bosun_runtime_reset_midi_input(&runtime, 0);
     bosun_runtime_feed_midi(&runtime, 0, finish, sizeof finish, 6);
-    bosun_runtime_feed_midi(&runtime, 0, running, sizeof running, 7); assert(runtime.learn.sequence == 3);
-    bosun_runtime_feed_midi(&runtime, 1, running, sizeof running, 8); assert(runtime.learn.sequence == 4 && runtime.learn.port == 1);
+    bosun_runtime_feed_midi(&runtime, 0, running, sizeof running, 7); assert(monitored == 3);
+    bosun_runtime_feed_midi(&runtime, 1, running, sizeof running, 8);
+    assert(monitored == 4 && last_monitor.port == 1 && last_monitor.status == 0x90);
     bosun_runtime_feed_midi(&runtime, 2, din, sizeof din, 9);
-    bosun_runtime_feed_midi(&runtime, 0, NULL, 3, 9); assert(runtime.learn.sequence == 4);
+    bosun_runtime_feed_midi(&runtime, 0, NULL, 3, 9); assert(monitored == 4);
     assert(submit("{\"type\":\"cc\",\"channel\":2,\"cc\":7,\"value\":1}", false)); tick(10, 0);
     assert(last_monitor.outbound && last_monitor.channel == 0 && last_monitor.status == 0 && last_monitor.length == 3);
-    assert(last_monitor.data[0] == 0xb1 && runtime.learn.sequence == 4);
-    runtime.midi_monitor = runtime.midi_learn = false; size_t before = monitored;
+    assert(last_monitor.data[0] == 0xb1);
+    runtime.midi_monitor = false; size_t before = monitored;
     bosun_runtime_feed_midi(&runtime, 1, din, sizeof din, 11);
-    assert(monitored == before && runtime.learn.sequence == 4);
-    runtime.midi_learn = true;
+    assert(monitored == before);
+    runtime.midi_monitor = true;
     bosun_runtime_feed_midi(&runtime, 1, din, sizeof din, 12);
-    assert(monitored == before + 1 && runtime.learn.sequence == 5 && !last_monitor.outbound);
+    assert(monitored == before + 1 && !last_monitor.outbound && last_monitor.port == 1);
 }
 
 static void midi_param(uint8_t page, uint8_t address, uint16_t value, uint32_t now) {
@@ -748,6 +750,6 @@ int main(void) {
     test_remote_double_tap(); test_remote_navigation_tuner();
     test_remote_validation_and_kemper_latch();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
-    puts("Runtime: atomic queue/patch macros, delays and rollover, switch bindings, preview/setlist, expression and MIDI monitor/learn/reconnect passed");
+    puts("Runtime: atomic queue/patch macros, delays and rollover, switch bindings, preview/setlist, expression and MIDI monitor/reconnect passed");
     return 0;
 }

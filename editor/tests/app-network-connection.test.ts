@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   cmd: {
     getDeviceInfo: vi.fn(), getManifest: vi.fn(), getManifestAwait: vi.fn(),
     listProfiles: vi.fn(), listPatches: vi.fn(), getDirty: vi.fn(),
-    getMidiLearn: vi.fn(), getGlobal: vi.fn(), getStats: vi.fn(),
+    getGlobal: vi.fn(), getStats: vi.fn(),
   },
 }));
 
@@ -318,7 +318,7 @@ describe("App network connection", () => {
     expect(commands.lastIndexOf("disconnect")).toBeGreaterThan(commands.lastIndexOf("tcp_connect"));
   });
 
-  it("shows Raspberry Pi routing in MIDI Learn without offering a local bridge", async () => {
+  it("offers no local MIDI bridge and no MIDI Learn page in a network session", async () => {
     await ready();
     await submitAddress("192.168.1.72", "9876");
     await screen.findByTitle("Connected on tcp://192.168.1.72:9876");
@@ -327,11 +327,10 @@ describe("App network connection", () => {
       profile: "kemper", current: { bank: 1, slot: 1 },
     });
     await fireEvent.click(screen.getByRole("button", { name: "Menu", exact: true }));
-    await fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: /MIDI Learn$/ }));
-    expect(await screen.findByText("MIDI routing is managed by the Raspberry Pi.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^(Start|Stop) bridge$/ })).not.toBeInTheDocument();
+    const nav = within(screen.getByRole("navigation"));
+    expect(nav.getByRole("button", { name: /MIDI Monitor$/ })).toBeInTheDocument();
+    expect(nav.queryByRole("button", { name: /MIDI Learn$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Bridge (OFF|ON)$/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("through this PC")).not.toBeInTheDocument();
     const commands = mocks.invoke.mock.calls.map(([name]) => name);
     expect(commands).not.toContain("midi_bridge_start");
     expect(commands).not.toContain("midi_bridge_status");

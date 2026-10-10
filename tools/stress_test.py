@@ -25,7 +25,6 @@ class FakeClient:
             },
             "LIST_PATCHES": {"type": "PATCH_LIST", "patches": []},
             "GET_DIRTY": {"type": "DIRTY", "patches": []},
-            "GET_MIDI_LEARN": {"type": "MIDI_LEARN", "table": {}},
             "STATS": {
                 "type": "STATS", "uptime_ms": 1000,
                 "mem_free": 4096, "loop_iters": 10,
@@ -43,7 +42,7 @@ class SmokeContractTests(unittest.TestCase):
         self.assertEqual(
             [call[0] for call in client.calls],
             ["PING", "GET_DEVICE_INFO", "GET_MANIFEST", "LIST_PATCHES",
-             "GET_DIRTY", "GET_MIDI_LEARN", "STATS"],
+             "GET_DIRTY", "STATS"],
         )
         for request_type, timeout, _kwargs in client.calls:
             minimum = (stress.SMOKE_MANIFEST_TIMEOUT

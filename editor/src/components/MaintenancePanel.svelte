@@ -446,7 +446,7 @@
   <section class="block">
     <h3>Backup &amp; restore</h3>
     <p class="muted small">
-      Save profiles - device settings, every patch, MIDI Learn - to JSON
+      Save profiles - device settings and every patch - to JSON
       files on disk. Each export run creates a fresh timestamped folder
       so you never overwrite a previous backup.
     </p>
@@ -565,7 +565,7 @@
               <b>Overwrite active profile</b>
               <span class="muted small">
                 {#if activeProfile}
-                  Replaces the active profile's device, patches and MIDI Learn in place. Existing patches are lost.
+                  Replaces the active profile's device and patches in place. Existing patches are lost.
                 {:else}
                   No active profile to overwrite - create a new one above.
                 {/if}
@@ -587,7 +587,6 @@
       <p class="curr">
         {#if backupProgress.phase === "device"}Reading device.json
         {:else if backupProgress.phase === "patches"}Reading patch {backupProgress.current} ({backupProgress.done}/{backupProgress.total})
-        {:else if backupProgress.phase === "midi_learn"}Reading midi_learn
         {:else}Done{/if}
       </p>
     {/if}
@@ -599,14 +598,14 @@
         {:else if restoreProgress.phase === "switch_profile"}Switching to new profile…
         {:else if restoreProgress.phase === "device"}Pushing device.json
         {:else if restoreProgress.phase === "patches"}Pushing patch {restoreProgress.current} ({restoreProgress.done}/{restoreProgress.total})
-        {:else if restoreProgress.phase === "midi_learn"}Pushing midi_learn
         {:else}Done{/if}
       </p>
     {/if}
     {#if backupMsg}
       <p class="curr">
         {backupMsg}
-        {#if backupSavedFolder}
+        <!-- Android has no way to open a folder; the path is in the message. -->
+        {#if backupSavedFolder && !IS_ANDROID}
           <button class="link" onclick={openSavedFolder}>Open folder</button>
         {/if}
       </p>
@@ -657,6 +656,9 @@
     </section>
   {/if}
 
+  <!-- The Android app has no Reboot (nor bootloader) action: Maintenance
+       there covers backups, stats and the pedal model. -->
+  {#if !IS_ANDROID}
   <section class="block">
     <h3>Reboot</h3>
     <p class="muted small">
@@ -680,6 +682,7 @@
       <p class="curr">{rebootMsg}</p>
     {/if}
   </section>
+  {/if}
 {/if}
 
 <style>

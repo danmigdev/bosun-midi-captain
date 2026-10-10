@@ -147,8 +147,8 @@ perform firmware updates. For a factory pedal, follow
 
 The updater checks compatibility, creates a complete recovery backup and writes
 only the firmware area, keeping the existing configuration. After the restart it
-checks the new version and compares the profiles, settings, patches, MIDI Learn
-data and pedal model with the copy read before the update.
+checks the new version and compares the profiles, settings, patches and pedal
+model with the copy read before the update.
 
 ## Reconnect or recover a Pi update
 

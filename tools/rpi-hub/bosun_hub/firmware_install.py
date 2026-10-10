@@ -115,7 +115,7 @@ def _require_snapshot(snapshot: dict) -> None:
         raise FirmwareInstallError("Invalid active profile or unsupported profile count")
     for profile in profiles.values():
         if not isinstance(profile, dict) or any(not isinstance(profile.get(key), dict)
-                for key in ("metadata", "device", "patches", "midi_learn")):
+                for key in ("metadata", "device", "patches")):
             raise FirmwareInstallError("Incomplete profile snapshot; no firmware was written")
 
 
@@ -126,12 +126,19 @@ def _hardware_model(info: dict) -> str:
     return model if isinstance(model, str) and model else "captain10"
 
 
+def _configuration(snapshot: dict) -> dict:
+    """Profiles to compare. Recovery evidence written by a hub from before MIDI
+    Learn was retired also holds each profile's `midi_learn` table; skip it."""
+    return {profile: {key: value for key, value in row.items() if key != "midi_learn"}
+            for profile, row in snapshot["profiles"].items()}
+
+
 def _compare_snapshot(before: dict, after: dict, version: str) -> None:
     _require_snapshot(after)
     if after["info"].get("fw") != version:
         raise FirmwareInstallError("The device did not boot the expected firmware version")
-    if before["active"] != after["active"] or before["profiles"] != after["profiles"]:
-        raise FirmwareInstallError("Profile, settings, patch or MIDI Learn readback differs from the backup")
+    if before["active"] != after["active"] or _configuration(before) != _configuration(after):
+        raise FirmwareInstallError("Profile, settings or patch readback differs from the backup")
     # The model record lives in preserved storage; losing it would remap a Mini 6.
     if _hardware_model(before["info"]) != _hardware_model(after["info"]):
         raise FirmwareInstallError("The device reports a different MIDI Captain model after the update")
@@ -508,15 +515,14 @@ class LinuxInstallIO:
                     raise FirmwareInstallError("Invalid or duplicate profile identifier")
                 device_reply = client.request("GET_GLOBAL", "GLOBAL", profile=profile)
                 patches_reply = _patch_inventory(client, profile)
-                learn_reply = client.request("GET_MIDI_LEARN", "MIDI_LEARN", profile=profile)
-                for response in (device_reply, patches_reply, learn_reply):
+                for response in (device_reply, patches_reply):
                     if response.get("profile") != profile:
                         raise FirmwareInstallError("Firmware cannot confirm cross-profile backup identity")
                 patches = patches_reply.get("patches")
                 if not isinstance(patches, list) or len(patches) > 625:
                     raise FirmwareInstallError("Unsupported or incomplete patch inventory")
                 row = {"metadata": {key: entry.get(key) for key in ("id", "name", "kind", "color")},
-                       "device": device_reply.get("device"), "midi_learn": learn_reply.get("table"), "patches": {}}
+                       "device": device_reply.get("device"), "patches": {}}
                 for patch in patches:
                     bank, slot = patch.get("bank"), patch.get("slot")
                     if type(bank) is not int or type(slot) is not int or not 1 <= bank <= 125 or not 1 <= slot <= 10:

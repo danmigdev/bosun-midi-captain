@@ -50,7 +50,6 @@ export async function readNetworkBootstrap(): Promise<{ profiles: ProfileInfo[];
   if (profiles.profiles.some(profile => profile.active)) {
     await read("LIST_PATCHES", 10000);
     await read("GET_DIRTY", 8000);
-    await read("GET_MIDI_LEARN", 8000);
     await read("GET_GLOBAL", 10000);
   }
   return { profiles: profiles.profiles, active: profiles.active };

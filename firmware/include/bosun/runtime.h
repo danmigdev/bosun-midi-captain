@@ -42,14 +42,9 @@ typedef struct {
     bool enabled, invert, armed, sampled, present;
 } bosun_runtime_expression_t;
 typedef bosun_patch_key_t bosun_runtime_coordinate_t;
-typedef struct {
-    uint32_t sequence;
-    uint8_t port, channel, status, length, data[2];
-    bool fresh;
-} bosun_runtime_learn_t;
 
-/* RX callback is active during monitor or learn. Payload follows MidiParser
- * semantics on RX; on TX (monitor only) status/channel
+/* Monitor callback, active while the MIDI monitor runs. Payload follows
+ * MidiParser semantics on RX; on TX status/channel
  * are zero and data is the complete wire packet. Callback consumes it now. */
 typedef void (*bosun_runtime_monitor_fn)(void *context, bool outbound,
     uint8_t port, uint8_t channel, uint8_t status, const uint8_t *data, size_t length);
@@ -73,7 +68,6 @@ typedef struct {
     bosun_runtime_expression_t expression[2];
     bosun_runtime_command_t commands[BOSUN_RUNTIME_COMMANDS];
     bosun_runtime_coordinate_t navigation[BOSUN_RUNTIME_NAV_PATCHES];
-    bosun_runtime_learn_t learn;
     uint32_t now_ms, wait_until_ms, expression_last_ms, preview_until_ms, revision;
     uint32_t midi_rx_count, midi_tx_count, midi_tx_failed;
     uint32_t queue_overflows, unsupported_messages, invalid_messages, storage_errors;
@@ -82,7 +76,7 @@ typedef struct {
     uint16_t preview_bank, preview_slot;
     char preview_name[129], profile[BOSUN_PROFILE_ID_BYTES];
     uint8_t receiving_port;
-    bool waiting, preview_active, kemper_enabled, midi_monitor, midi_learn;
+    bool waiting, preview_active, kemper_enabled, midi_monitor;
     bool initialized, expression_polled;
     bosun_store_result_t last_error;
 } bosun_runtime_t;

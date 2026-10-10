@@ -95,7 +95,7 @@ patches and choose **Save**. To update its firmware, follow
 - **Maintenance → Pedal model** selects 10-switch or Mini 6 without
   reinstalling; every layout follows the connected pedal.
 - **Maintenance → Export config… / Import config…** backs up and restores
-  profiles, settings, patches and MIDI Learn data.
+  profiles, settings and patches.
 
 Save edits before disconnecting or updating. **Discard** restores the saved
 version of pending patch changes.

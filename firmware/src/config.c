@@ -142,9 +142,6 @@ bosun_store_result_t bosun_config_create(const char *profile, const char *name, 
     bosun_config_path(path, sizeof path, profile, "device.json");
     r = bosun_store_write_atomic(path, default_device_json(), strlen(default_device_json()));
     if (r != BOSUN_STORE_OK) return r;
-    bosun_config_path(path, sizeof path, profile, "midi_learn.json");
-    r = bosun_store_write_atomic(path, "{\"pc_to_patch\":[]}", 18);
-    if (r != BOSUN_STORE_OK) return r;
     /* Publishing the manifest last keeps a partially created profile hidden. */
     bosun_config_path(path, sizeof path, profile, "manifest.json");
     return bosun_store_write_atomic(path, workspace, w.length);
@@ -170,8 +167,7 @@ bosun_store_result_t bosun_config_read(const bosun_config_t *c, const char *prof
     if (length) *length = 0;
     if (!c || !file || !length || !out || !capacity) return BOSUN_STORE_INVALID;
     const char *id = profile && *profile ? profile : c->profile; char path[BOSUN_PATH_MAX];
-    const char *fallback = !strcmp(file, "device.json") ? default_device_json() :
-        !strcmp(file, "midi_learn.json") ? "{\"pc_to_patch\":[]}" : NULL;
+    const char *fallback = !strcmp(file, "device.json") ? default_device_json() : NULL;
     const char *memory = (!profile || !*profile) && !strcmp(file, "device.json") ? c->device : NULL;
     if (memory || (!*id && fallback)) {
         const char *value = memory ? memory : fallback;

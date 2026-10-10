@@ -41,11 +41,10 @@ def snapshot(firmware="0.6.5-native"):
                 "metadata": {"id": "live", "name": "Live", "kind": "kemper_player", "color": "#123456"},
                 "device": {"future_setting": {"preserve": True}, "leds": {"brightness": 81}},
                 "patches": {"01/01": {"name": "Clean", "bindings": []}},
-                "midi_learn": {"pc_to_patch": [{"pc": 2, "bank": 1, "slot": 1}]},
             },
             "backup": {
                 "metadata": {"id": "backup", "name": "Spare", "kind": "generic_midi", "color": None},
-                "device": {"long_press_ms": 777}, "patches": {}, "midi_learn": {"pc_to_patch": []},
+                "device": {"long_press_ms": 777}, "patches": {},
             },
         },
     }
@@ -526,8 +525,6 @@ def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty, b
             data = {"type": response, "profile": fields["profile"]}
             if command == "GET_GLOBAL":
                 return {**data, "device": row["device"]}
-            if command == "GET_MIDI_LEARN":
-                return {**data, "table": row["midi_learn"]}
             if command == "LIST_PATCHES":
                 return {**data, "patches": [{"bank": int(key.split("/")[0]), "slot": int(key.split("/")[1])} for key in row["patches"]]}
             if command == "GET_PATCH":
@@ -544,7 +541,7 @@ def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty, b
         assert calls == ["GET_DEVICE_INFO", "GET_DIRTY"]
     else:
         assert io.snapshot(device, save_dirty=True, expected_info=expected["info"]) == expected
-        assert set(calls) <= {"GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "GET_GLOBAL", "LIST_PATCHES", "GET_PATCH", "GET_MIDI_LEARN"}
+        assert set(calls) <= {"GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "GET_GLOBAL", "LIST_PATCHES", "GET_PATCH"}
 
 
 def test_changed_firmware_is_rejected_at_first_readonly_response(monkeypatch):

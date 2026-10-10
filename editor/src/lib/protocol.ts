@@ -1,7 +1,6 @@
 import { collectPatchCatalog } from './patch-catalog';
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { IS_ANDROID } from "./platform";
 import { MAX_BANKS } from "./bank-layout";
 
 
@@ -342,26 +341,6 @@ export interface DeviceStats {
                        armed?: boolean; present?: boolean }>;
 }
 
-export interface MidiLearnEntry {
-  channel: number;
-  bank_msb: number;
-  pc: number;
-  /** Captain patch id in "BB/SS" zero-padded form, e.g. "01/03" */
-  captain_patch: string;
-}
-export interface MidiLearnTable {
-  pc_to_patch: MidiLearnEntry[];
-}
-
-export type MidiInKind = "cc" | "pc" | "note_on" | "note_off" | "poly_pressure" | "channel_pressure" | "pitch_bend" | "unknown";
-
-export interface MidiInCapturedEvent {
-  port: "din" | "usb";
-  channel: number;
-  kind: MidiInKind;
-  data: number[];
-}
-
 export type FirmwareMessage =
   | { type: "ACK"; id?: string; fw?: string }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
@@ -390,7 +369,6 @@ export type FirmwareMessage =
       profile?: string; active_profile?: string }
   | { type: "SAVED"; id?: string; patches: Array<{ bank: number; slot: number }> }
   | { type: "DIRTY"; id?: string; patches: Array<{ bank: number; slot: number }> }
-  | { type: "MIDI_LEARN"; id?: string; table: MidiLearnTable }
   | { type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }
   | ({ type: "STATS"; id?: string } & DeviceStats)
   | { type: "PROFILE_LIST"; id?: string; profiles: ProfileInfo[]; active: string }
@@ -443,8 +421,8 @@ export async function reconnectLast(): Promise<string> {
 }
 
 // ---- USB-MIDI bridge (Kemper Player <-> pedal) ----
-// Relays MIDI both ways so MIDI Learn capture and the bidirectional sync work
-// without a separate bridge program. Separate from the CDC link.
+// Relays MIDI both ways so the bidirectional sync works without a separate
+// bridge program. Separate from the CDC link.
 export type BridgeStatus = {
   active: boolean;
   kemper_port: string | null;
@@ -912,11 +890,7 @@ export const cmd = {
                     send({ type: "DISCARD", id: nextId(),
                            ...(bank !== undefined ? { bank, slot } : {}) }),
   getDirty:       () => send({ type: "GET_DIRTY",       id: nextId() }),
-  startLearn:     () => send({ type: "START_MIDI_LEARN", id: nextId() }),
-  stopLearn:      () => send({ type: "STOP_MIDI_LEARN", id: nextId() }),
-  getMidiLearn:   () => send({ type: "GET_MIDI_LEARN", id: nextId() }),
-  putMidiLearn:   (table: MidiLearnTable) => send({ type: "PUT_MIDI_LEARN", id: nextId(), table }),
-  reboot:         () => { if (!IS_ANDROID) send({ type: "REBOOT", id: nextId() }); },
+  reboot:         () => send({ type: "REBOOT", id: nextId() }),
   // Firmware 0.8+: persist the pedal model (lib/hardware.ts ids). The firmware
   // restarts normally when the model differs; `reboot` reports whether it will.
   setHardware:    (model: string) =>

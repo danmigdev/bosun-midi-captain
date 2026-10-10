@@ -194,9 +194,6 @@
         <button onclick={() => onNavigate("settings")}>
           <span class="ico">⚙</span><span class="lbl">Settings</span>
         </button>
-        <button onclick={() => onNavigate("learn")}>
-          <span class="ico">↻</span><span class="lbl">MIDI Learn</span>
-        </button>
         <button onclick={() => onNavigate("maint")}>
           <span class="ico">⊕</span><span class="lbl">Maintenance</span>
         </button>

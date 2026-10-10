@@ -13,8 +13,8 @@ spam      Fire-and-forget: send N PINGs without waiting; drain replies after.
 soak      PING + STATS every N seconds for a duration. Logs CSV to stdout.
           Cheap way to spot memory leaks or runaway counters.
 midi-rt   MIDI round-trip latency. Requires DIN-out wired to DIN-in (loopback).
-          Starts a learn capture, sends a PUT_BINDING that fires a CC, measures
-          time from press to the matching midi_in_captured event.
+          Turns on the MIDI monitor, switches to a patch whose on_enter sends
+          a PC, and measures the time to the matching inbound midi event.
 
 Examples
 --------
@@ -123,8 +123,6 @@ def smoke(c: CaptainClient) -> None:
     print(f"LIST_PATCHES: {len(patches)} patches")
     dirty = _smoke_call(c, "GET_DIRTY", "DIRTY")["patches"]
     print(f"GET_DIRTY: {len(dirty)} dirty")
-    learn = _smoke_call(c, "GET_MIDI_LEARN", "MIDI_LEARN").get("table", {})
-    print(f"GET_MIDI_LEARN: {len(learn.get('pc_to_patch', []))} entries")
     stats = _smoke_call(c, "STATS", "STATS")
     print(f"STATS: uptime={stats['uptime_ms']/1000:.0f}s mem_free={stats['mem_free']} loop_iters={stats['loop_iters']}")
 
@@ -219,14 +217,14 @@ def soak(c: CaptainClient, duration_s: float, interval_s: float) -> None:
 def midi_round_trip(c: CaptainClient, presses: int = 20) -> None:
     """Requires DIN-OUT wired into DIN-IN (TRS loopback cable).
 
-    Strategy: start learn mode so inbound MIDI gets forwarded as events. We
+    Strategy: turn on the MIDI monitor so inbound MIDI gets forwarded as events. We
     can't physically press a switch from the host, so instead we configure
     a binding that fires a unique CC, then change the patch via SWITCH_PATCH
     which fires its on_enter macro. The captain TX goes out on DIN, loops
-    back, gets parsed, and emits a midi_in_captured event."""
+    back, gets parsed, and emits an inbound midi monitor event."""
 
     print("# MIDI ROUND TRIP (DIN loopback required)")
-    c.call_sync("START_MIDI_LEARN", timeout=1)
+    c.call_sync("SET_MIDI_MONITOR", on=True, timeout=1)
     info = c.call_sync("GET_DEVICE_INFO")["current"]
     bank, slot = info["bank"], info["slot"]
     latencies = []
@@ -241,15 +239,14 @@ def midi_round_trip(c: CaptainClient, presses: int = 20) -> None:
             "bindings": [],
         })
         c.call_sync("SWITCH_PATCH", bank=bank, slot=slot, timeout=1)
-        # Wait for the captured PC event
+        # Wait for the looped-back PC (channel 16: status 0xCF)
         deadline = time.monotonic() + 0.5
         captured = False
         while time.monotonic() < deadline:
             c.drain(10)
             for ev in c.events:
-                if (ev.get("event") == "midi_in_captured"
-                        and ev.get("kind") == "pc"
-                        and (ev.get("data") or [-1])[0] == pc):
+                if (ev.get("event") == "midi" and ev.get("dir") == "in"
+                        and (ev.get("raw") or [])[:2] == [0xCF, pc]):
                     latencies.append((time.monotonic() - t0) * 1000)
                     captured = True
                     break
@@ -257,7 +254,7 @@ def midi_round_trip(c: CaptainClient, presses: int = 20) -> None:
                 break
         if not captured:
             print(f"  iter {i}: no loopback echo (cable wired?)")
-    c.call_sync("STOP_MIDI_LEARN", timeout=1)
+    c.call_sync("SET_MIDI_MONITOR", on=False, timeout=1)
 
     if not latencies:
         print("  no round trips completed.")

@@ -824,14 +824,8 @@ void bosun_runtime_tick(bosun_runtime_t *rt, uint32_t now_ms, uint16_t pressed_m
 static void receive(void *context, uint8_t channel, uint8_t status, const uint8_t *data, size_t length) {
     bosun_runtime_t *rt = context;
     ++rt->midi_rx_count;
-    if ((rt->midi_monitor || rt->midi_learn) && rt->monitor)
+    if (rt->midi_monitor && rt->monitor)
         rt->monitor(rt->monitor_context, false, rt->receiving_port, channel, status, data, length);
-    if (rt->midi_learn && channel && length <= 2) {
-        ++rt->learn.sequence; rt->learn.fresh = true; rt->learn.port = rt->receiving_port;
-        rt->learn.channel = channel; rt->learn.status = status; rt->learn.length = (uint8_t)length;
-        memset(rt->learn.data, 0, sizeof(rt->learn.data));
-        memcpy(rt->learn.data, data, length);
-    }
     if (!rt->kemper_enabled) return;
     uint32_t changes = rt->kemper.state.external_rig_changes;
     uint8_t previous = rt->kemper.state.effect_known, on = 0;

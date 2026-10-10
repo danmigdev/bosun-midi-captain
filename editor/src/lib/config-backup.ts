@@ -3,12 +3,14 @@
 //
 // A backup is a single JSON file containing:
 //   { format, version, generated_at, profile_label, kind?,
-//     device, patches, midi_learn }
+//     device, patches, hardware? }
 //
 // `patches` is an array of {bank, slot, patch} - the raw patch JSON the
 // firmware would store under /config/profiles/<id>/patches/BB/SS.json.
 //
-// Restore writes everything via PUT_GLOBAL, PUT_PATCH, PUT_MIDI_LEARN.
+// Restore writes everything via PUT_GLOBAL and PUT_PATCH. Backups from
+// older releases may also carry a `midi_learn` section from the retired
+// MIDI Learn page; restore ignores it.
 // By default it targets the active profile; pass `asNewProfile` to
 // create a fresh profile from the backup instead of overwriting.
 //
@@ -17,7 +19,7 @@
 // user (CREATE_PROFILE needs it).
 
 import { cmd, sendAndAwait } from "./protocol";
-import type { Patch, MidiLearnTable, PatchSummary } from "./protocol";
+import type { Patch, PatchSummary } from "./protocol";
 import { CAPTAIN_10, type HardwareLayout } from "./hardware";
 
 export interface ConfigBackup {
@@ -30,14 +32,13 @@ export interface ConfigBackup {
   kind?: string;
   device: Record<string, unknown>;
   patches: Array<{ bank: number; slot: number; patch: Patch }>;
-  midi_learn?: MidiLearnTable;
   /** Pedal model the backup was taken from (editor 0.8+). Older backups
    * omit it: they all come from the 10-switch Captain. Informational only. */
   hardware?: { model: string; name: string };
 }
 
 export interface BackupProgress {
-  phase: "device" | "patches" | "midi_learn" | "done";
+  phase: "device" | "patches" | "done";
   total: number;
   done: number;
   current: string;
@@ -75,14 +76,6 @@ export async function exportConfig(
     patches.push({ bank: s.bank, slot: s.slot, patch: pResp.patch });
   }
 
-  report({ phase: "midi_learn", total: 0, done: 0, current: "midi_learn.json" });
-  let midi_learn: MidiLearnTable | undefined;
-  try {
-    const mlResp = await sendAndAwait<{ type: "MIDI_LEARN"; id?: string; table: MidiLearnTable }>(
-      { type: "GET_MIDI_LEARN", ...profileArg }, 5000);
-    midi_learn = mlResp.table;
-  } catch { /* midi_learn is optional */ }
-
   report({ phase: "done", total: summaries.length, done: summaries.length, current: "" });
   return {
     format: "bosun-config-backup",
@@ -92,7 +85,6 @@ export async function exportConfig(
     kind,
     device,
     patches,
-    midi_learn,
     ...(hardware ? { hardware: { model: hardware.model, name: hardware.name } } : {}),
   };
 }
@@ -140,7 +132,7 @@ export function validateBackup(parsed: unknown): ConfigBackup {
 }
 
 export interface RestoreProgress {
-  phase: "create_profile" | "switch_profile" | "device" | "patches" | "midi_learn" | "done";
+  phase: "create_profile" | "switch_profile" | "device" | "patches" | "done";
   total: number;
   done: number;
   current: string;
@@ -219,11 +211,6 @@ export async function importConfig(
              current: `${String(bank).padStart(2, "0")}/${String(slot).padStart(2, "0")}` });
     await putRetry({ type: "PUT_PATCH", bank, slot, patch, ...profileArg });
     done += 1;
-  }
-
-  if (backup.midi_learn) {
-    report({ phase: "midi_learn", total: 0, done: 0, current: "midi_learn.json" });
-    await putRetry({ type: "PUT_MIDI_LEARN", table: backup.midi_learn, ...profileArg });
   }
 
   report({ phase: "done", total: backup.patches.length, done: backup.patches.length, current: "" });

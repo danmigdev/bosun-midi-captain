@@ -24,11 +24,10 @@ def configuration():
                 "metadata": {"id": "live", "name": "Live", "kind": "kemper_player"},
                 "device": {"leds": {"brightness": 81}},
                 "patches": {"01/01": {"name": "Clean", "bindings": []}},
-                "midi_learn": {"pc_to_patch": [{"pc": 2, "bank": 1, "slot": 1}]},
             },
             "spare": {
                 "metadata": {"id": "spare", "name": "Spare", "kind": "generic_midi"},
-                "device": {"long_press_ms": 777}, "patches": {}, "midi_learn": {},
+                "device": {"long_press_ms": 777}, "patches": {},
             },
         },
     }
@@ -141,7 +140,7 @@ def test_fresh_usb_identity_swap_before_or_after_snapshot_is_rejected(recovery, 
     assert_no_record(recovery)
 
 
-@pytest.mark.parametrize("changed", ["firmware", "active", "metadata", "device", "patches", "midi_learn"])
+@pytest.mark.parametrize("changed", ["firmware", "active", "metadata", "device", "patches"])
 def test_returned_firmware_and_every_configuration_component_must_match(recovery, changed):
     after = recovery.io.after
     if changed == "firmware":
@@ -153,6 +152,14 @@ def test_returned_firmware_and_every_configuration_component_must_match(recovery
     with pytest.raises(install.FirmwareInstallError, match="expected firmware|differs from the backup"):
         verify(recovery)
     assert_no_record(recovery)
+
+
+def test_evidence_from_a_hub_with_midi_learn_still_matches(recovery):
+    # Hubs from before MIDI Learn was retired also saved each profile's table.
+    for row in recovery.before["profiles"].values():
+        row["midi_learn"] = {"pc_to_patch": [{"pc": 2, "bank": 1, "slot": 1}]}
+    write_json(recovery.directory / "configuration-before.json", recovery.before)
+    assert verify(recovery)["recovery_verified"] is True
 
 
 def test_same_version_but_different_firmware_family_is_rejected(recovery):

@@ -19,7 +19,7 @@ import {
   validateBackup, backupFilename, timestampedFolderName,
   type ConfigBackup,
 } from "../src/lib/config-backup";
-import type { Patch, MidiLearnTable, Action, BindingMode } from "../src/lib/protocol";
+import type { Patch, Action, BindingMode } from "../src/lib/protocol";
 
 const SWITCHES = ["1","2","3","4","up","A","B","C","D","down"] as const;
 const MODES: BindingMode[] = ["tap","latched","momentary","long_press_alt","double_tap"];
@@ -85,14 +85,6 @@ function fullBackup(): ConfigBackup {
       patches.push({ bank, slot, patch: richPatch(bank, slot) });
     }
   }
-  const midi_learn: MidiLearnTable = {
-    pc_to_patch: patches.slice(0, 30).map((p, i) => ({
-      channel: 1,
-      bank_msb: Math.floor(i / 16),
-      pc: i % 128,
-      captain_patch: `${String(p.bank).padStart(2, "0")}/${String(p.slot).padStart(2, "0")}`,
-    })),
-  };
   return {
     format: "bosun-config-backup",
     version: 2,
@@ -105,7 +97,6 @@ function fullBackup(): ConfigBackup {
       patch_link: { implicit_by_position: false },
     },
     patches,
-    midi_learn,
   };
 }
 
@@ -152,13 +143,15 @@ describe("Backup roundtrip: 125 patches, every aspect preserved", () => {
     }
   });
 
-  it("midi_learn table is fully preserved", () => {
-    const backup = fullBackup();
-    const parsed = JSON.parse(JSON.stringify(backup)) as ConfigBackup;
-    expect(parsed.midi_learn).toEqual(backup.midi_learn);
+  it("a backup from an older release with a midi_learn section still validates", () => {
+    // MIDI Learn was retired; its table is ignored on restore.
+    const legacy = { ...fullBackup(), midi_learn: { pc_to_patch: [
+      { channel: 1, bank_msb: 0, pc: 3, captain_patch: "01/04" }] } };
+    const parsed = JSON.parse(JSON.stringify(legacy));
+    expect(validateBackup(parsed).patches).toEqual(legacy.patches);
   });
 
-  it("a backup without the optional midi_learn section still validates", () => {
+  it("a backup without the optional sections still validates", () => {
     const backup: ConfigBackup = {
       format: "bosun-config-backup",
       version: 2,

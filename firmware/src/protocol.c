@@ -67,7 +67,7 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "table", "on", "request", "mode", "switch", "model"};
+        "on", "request", "mode", "switch", "model"};
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
         for (unsigned k = 0; k < sizeof names / sizeof *names; ++k)
@@ -88,9 +88,7 @@ static void event_append(bosun_protocol_t *p, uint8_t byte) {
 static void monitor(void *context, bool outbound, uint8_t port, uint8_t channel,
                     uint8_t status, const uint8_t *data, size_t length) {
     bosun_protocol_t *p = context;
-    uint8_t flags = (p->runtime->midi_monitor ? 1u : 0u) |
-        (!outbound && p->runtime->midi_learn ? 2u : 0u);
-    if (!p->connected || !flags || p->reboot_requested) return;
+    if (!p->connected || !p->runtime->midi_monitor || p->reboot_requested) return;
     if (length > BOSUN_MIDI_MAX_SYSEX + 2u ||
         length + 6u > BOSUN_PROTOCOL_EVENT_BYTES - p->event_length) {
         ++p->midi_events_dropped; return;
@@ -98,32 +96,23 @@ static void monitor(void *context, bool outbound, uint8_t port, uint8_t channel,
     /* Binary records preserve every byte with only six bytes of overhead.
      * Encoding is deferred until the response owns a completely empty TX. */
     event_append(p, (uint8_t)length); event_append(p, (uint8_t)(length >> 8));
-    event_append(p, (uint8_t)(flags | (outbound ? 4u : 0u)));
+    event_append(p, outbound ? 1u : 0u);
     event_append(p, port); event_append(p, channel); event_append(p, status);
     for (size_t i = 0; i < length; ++i) event_append(p, data[i]);
 }
 static bool emit_midi_event(bosun_protocol_t *p) {
     while (p->event_length) {
         unsigned length = event_byte(p, 0) | ((unsigned)event_byte(p, 1) << 8);
-        uint8_t flags = event_byte(p, 2), channel = event_byte(p, 4), status = event_byte(p, 5);
-        bool outbound = (flags & 4u) != 0;
-        bool midi = (flags & 1u) && p->runtime->midi_monitor;
-        bool learn = (flags & 2u) && p->runtime->midi_learn;
-        if (midi || learn) {
+        uint8_t channel = event_byte(p, 4), status = event_byte(p, 5);
+        bool outbound = event_byte(p, 2) != 0, midi = p->runtime->midi_monitor;
+        if (midi) {
             strcpy(p->id, "null"); p->type[0] = 0;
-            begin(p, "EVENT"); string(&p->writer, "event", midi ? "midi" : "midi_in_captured");
+            begin(p, "EVENT"); string(&p->writer, "event", "midi");
             if (!outbound) string(&p->writer, "port", event_byte(p, 3) ? "din" : "usb");
-            if (midi) string(&p->writer, "dir", outbound ? "out" : "in");
-            else {
-                static const char *const kinds[] = {"note_off", "note_on", "poly_pressure",
-                    "cc", "pc", "channel_pressure", "pitch_bend"};
-                integer(&p->writer, "channel", channel);
-                string(&p->writer, "kind", status >= 0x80 && status <= 0xe0 && !(status & 15u) ?
-                    kinds[(status - 0x80) >> 4] : "unknown");
-            }
-            field(&p->writer, midi ? "raw" : "data"); bosun_json_puts(&p->writer, "[");
+            string(&p->writer, "dir", outbound ? "out" : "in");
+            field(&p->writer, "raw"); bosun_json_puts(&p->writer, "[");
             bool comma = false;
-            if (midi && !outbound) {
+            if (!outbound) {
                 bosun_json_write_integer(&p->writer, status == 0xf0 ? 0xf0 : status | ((channel - 1u) & 15u));
                 comma = true;
             }
@@ -131,18 +120,12 @@ static bool emit_midi_event(bosun_protocol_t *p) {
                 if (comma) bosun_json_puts(&p->writer, ",");
                 bosun_json_write_integer(&p->writer, event_byte(p, i + 6)); comma = true;
             }
-            if (midi && !outbound && status == 0xf0) bosun_json_puts(&p->writer, ",247");
+            if (!outbound && status == 0xf0) bosun_json_puts(&p->writer, ",247");
             bosun_json_puts(&p->writer, "]"); finish(p);
         }
-        flags &= (uint8_t)~(midi ? 1u : 3u);
-        if (!p->runtime->midi_learn) flags &= (uint8_t)~2u;
-        if (!p->runtime->midi_monitor) flags &= (uint8_t)~1u;
-        if (flags & 3u) p->midi_events[(p->event_head + 2u) % BOSUN_PROTOCOL_EVENT_BYTES] = flags;
-        else {
-            p->event_head = (uint16_t)((p->event_head + length + 6u) % BOSUN_PROTOCOL_EVENT_BYTES);
-            p->event_length = (uint16_t)(p->event_length - length - 6u);
-        }
-        if (midi || learn) return true;
+        p->event_head = (uint16_t)((p->event_head + length + 6u) % BOSUN_PROTOCOL_EVENT_BYTES);
+        p->event_length = (uint16_t)(p->event_length - length - 6u);
+        if (midi) return true;
     }
     return false;
 }
@@ -519,21 +502,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             else r = bosun_config_rename(target, name);
         } else if (!strcmp(p->type, "SWITCH_PROFILE")) r = bosun_config_activate(c, target, true);
         else r = bosun_config_delete(c, target);
-    } else if (!strcmp(p->type, "GET_MIDI_LEARN")) {
-        begin(p, "MIDI_LEARN"); string(&p->writer, "profile", *profile ? profile : c->profile);
-        field(&p->writer, "table"); r = read_value(p, profile, "midi_learn.json", 0, 0);
-    } else if (!strcmp(p->type, "PUT_MIDI_LEARN")) {
-        char path[BOSUN_PATH_MAX];
-        if (!object_arg(p, "table", &data, &length) ||
-            !bosun_config_path(path, sizeof path, *profile ? profile : c->profile, "midi_learn.json")) r = BOSUN_STORE_INVALID;
-        else if (!bosun_config_profile_exists(*profile ? profile : c->profile)) r = BOSUN_STORE_NOT_FOUND;
-        else if (length > BOSUN_DEVICE_BYTES) r = BOSUN_STORE_LIMIT;
-        else r = bosun_store_write_atomic(path, data, length);
-    } else if (!strcmp(p->type, "START_MIDI_LEARN") || !strcmp(p->type, "STOP_MIDI_LEARN")) {
-        rt->midi_learn = !strcmp(p->type, "START_MIDI_LEARN"); rt->learn.fresh = false;
-        p->event_head = p->event_length = 0;
-    }
-    else if (!strcmp(p->type, "SET_MIDI_MONITOR")) {
+    } else if (!strcmp(p->type, "SET_MIDI_MONITOR")) {
         bool on;
         if (!bosun_json_boolean(&p->request, get(p, "on"), &on)) r = BOSUN_STORE_INVALID;
         else {
@@ -658,8 +627,7 @@ void bosun_protocol_session(bosun_protocol_t *p, bool connected) {
     p->discarding = p->reboot_requested = p->reboot_bootloader = false;
     p->event_head = p->event_length = 0;
     p->context_revision = p->kemper_revision = UINT32_MAX;
-    p->runtime->midi_monitor = p->runtime->midi_learn = false;
-    p->runtime->learn.fresh = false;
+    p->runtime->midi_monitor = false;
     bosun_kemper_morph_clear(&p->runtime->kemper);
     p->ui_pending = 0; p->ui_observed = false;
     memset(p->binding_pending, 0, sizeof p->binding_pending);
