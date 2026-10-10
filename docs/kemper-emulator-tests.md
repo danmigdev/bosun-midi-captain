@@ -15,6 +15,8 @@ flowchart LR
 
 Install Node.js 22 in the Linux/WSL environment used for native builds, along
 with the [native build dependencies](../firmware-native/README.md#build-requirements).
+Instead of installing it system-wide, you can unpack the official Linux x64
+archive under `firmware-native/.deps/`; CMake uses it when PATH has no `node`.
 No npm packages, browser, virtual MIDI driver or network download is needed
 for these tests. The reviewed upstream JavaScript subset is stored in the repo.
 

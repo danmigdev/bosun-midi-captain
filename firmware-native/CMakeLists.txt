@@ -102,7 +102,16 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_host_emulator.py"
         --emulator "$<TARGET_FILE:bosun_emulator>")
     set_tests_properties(host_emulator PROPERTIES TIMEOUT 120)
-    find_program(BOSUN_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+    # The PySwitch suites need Node.js 22. PATH wins; otherwise a Linux build
+    # unpacked under firmware-native/.deps, like the pinned SDK, is used.
+    file(GLOB bosun_local_node_bins LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/.deps/node-v*/bin")
+    find_program(BOSUN_NODE_EXECUTABLE NAMES node nodejs PATHS ${bosun_local_node_bins})
+    if(NOT BOSUN_NODE_EXECUTABLE)
+        message(FATAL_ERROR "Node.js 22 is required for the PySwitch integration tests: put it on "
+            "PATH, or unpack the Linux x64 build under firmware-native/.deps "
+            "(see docs/kemper-emulator-tests.md).")
+    endif()
+    message(STATUS "PySwitch integration tests use ${BOSUN_NODE_EXECUTABLE}")
     add_test(NAME pyswitch_framing COMMAND "${BOSUN_NODE_EXECUTABLE}" --test
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/pyswitch/framing.test.mjs")
     add_test(NAME pyswitch_integration COMMAND "${CMAKE_COMMAND}" -E env

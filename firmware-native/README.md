@@ -55,7 +55,9 @@ sudo apt-get install -y git cmake ninja-build gcc g++ python3 \
 
 Host tests also require Node.js 22 in the same Linux/WSL environment. It runs
 the pinned [PySwitch virtual Kemper integration tests](../docs/kemper-emulator-tests.md);
-no npm install is needed for those tests.
+no npm install is needed for those tests. A `node` on PATH is used first;
+otherwise CMake uses a Linux build unpacked under `firmware-native/.deps`
+(for example `firmware-native/.deps/node-v22.23.2-linux-x64`).
 
 The build helper fetches and verifies the pinned Pico SDK 2.3.0 and TinyUSB when
 `--fetch-sdk` is supplied. Keep the full repository checkout: the native build
