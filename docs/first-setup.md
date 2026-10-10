@@ -1,6 +1,6 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.7.2 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.7.2) includes `Bosun-0.7.2-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.8.0 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.8.0) includes `Bosun-0.8.0-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
 These instructions target the **RP2040 MIDI Captain with 8 MiB flash** (the 10-switch model, and experimentally the 6-switch [Mini 6](mini6.md)) and **Kemper Player, Head, Rack and Stage**. Kemper family support is experimental; Head/Rack/Stage hardware validation is pending. Select your model in the wizard, then the connection, host and display. Use the **Kemper Player** profile for Player and **Kemper PROFILER** for Head/Rack/Stage. For PROFILER profiles, select the matching MK1/MK2 generation and Performance/Browse mode; Bosun does not switch the Kemper's mode for you. See [PROFILER setup and limitations](kemper-head.md).
 
@@ -74,7 +74,7 @@ Power the Pi and Kemper with their own supplies. HDMI supplies video, not displa
 
 ## 2. Install native firmware on the Captain
 
-1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.7.2). On Windows, extract the entire folder and open `Bosun.exe`.
+1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.8.0). On Windows, extract the entire folder and open `Bosun.exe`.
 2. Connect **Captain USB-B directly to the computer**, using a data cable. This temporary connection is needed even if your final setup uses Android or a Pi.
 3. Open **Setup guide → Prepare the Captain → Install native firmware**. Select the device, choose your Captain model (**MIDI Captain**, 10 switches, or **MIDI Captain Mini 6**), confirm it, check the displayed native version, then press **Install**. On a Mini 6, read the [Mini 6 notes](mini6.md) first.
 4. Bosun saves and verifies the full original firmware and files before writing. Keep the computer and Captain powered and the USB cable connected. The firmware installs directly as native Bosun; no old Bosun or CircuitPython installation is needed.
