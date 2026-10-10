@@ -1,6 +1,6 @@
 [package]
 name = "bosun-editor"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 description = "Desktop and Android editor for PaintAudio MIDI Captain controllers running Bosun firmware, with Kemper Player, Kemper PROFILER and generic MIDI profiles."
 license = "GPL-3.0-or-later"
