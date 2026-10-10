@@ -28,8 +28,6 @@ pub struct DeviceState {
     // it's only false when we positively detect an incompatible major.
     pub circuitpython_version: Option<String>,
     pub circuitpython_ok: bool,
-    pub assets_present: bool,
-    pub asset_problems: Vec<String>,
     // True when a pedal-class USB serial device is plugged in (CircuitPython
     // VID 239A or the RP2 ROM-bootloader VID 2E8A), regardless of whether it
     // speaks the bosun protocol. The frontend combines this with "not
@@ -78,7 +76,7 @@ fn cp_major(ver: &str) -> Option<u32> {
 // async (off the UI thread): volume + serial enumeration is polled every few
 // seconds while disconnected; on the main thread it would periodically jank.
 #[tauri::command]
-pub async fn detect_pedal(app: AppHandle) -> DeviceState {
+pub async fn detect_pedal() -> DeviceState {
     let mut state = DeviceState::default();
     let disks = Disks::new_with_refreshed_list();
     for disk in disks.list() {
@@ -120,91 +118,9 @@ pub async fn detect_pedal(app: AppHandle) -> DeviceState {
         }
     }
 
-    // Asset health check
-    let (ok, problems) = assets_status(&app);
-    state.assets_present = ok;
-    state.asset_problems = problems;
-
     state.usb_pedal_present = usb_pedal_present();
 
     state
-}
-
-
-fn assets_status(app: &AppHandle) -> (bool, Vec<String>) {
-    let mut problems = Vec::new();
-    let required = [
-        "circuitpython.uf2",
-        "firmware/boot.py",
-        "firmware/code.py",
-        "firmware/lib/captain/__init__.py",
-        "lib/neopixel.mpy",
-        "lib/adafruit_pixelbuf.mpy",
-        "lib/adafruit_st7789.mpy",
-        "lib/adafruit_display_text",
-    ];
-    let resource_root = match app.path().resolve("", BaseDirectory::Resource) {
-        Ok(p) => p,
-        Err(e) => return (false, vec![format!("resource dir: {}", e)]),
-    };
-    for rel in &required {
-        let p = resource_root.join(rel);
-        if !p.exists() {
-            problems.push(format!("missing: {}", rel));
-        }
-    }
-    (problems.is_empty(), problems)
-}
-
-
-// ---------------------- flash + install ----------------------
-
-#[tauri::command]
-pub fn flash_circuitpython(target: String, app: AppHandle) -> Result<(), String> {
-    let _operation = crate::usb_update::normal_operation()?;
-    let resource = app
-        .path()
-        .resolve("circuitpython.uf2", BaseDirectory::Resource)
-        .map_err(|e| format!("resource path: {}", e))?;
-    if !resource.exists() {
-        return Err(format!("UF2 asset missing at {:?}. Run tools/download-assets.ps1.", resource));
-    }
-    let target_path = PathBuf::from(&target).join("CURRENT.UF2");
-    std::fs::copy(&resource, &target_path)
-        .map_err(|e| format!("copy UF2: {}", e))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn install_firmware(target: String, app: AppHandle) -> Result<Vec<String>, String> {
-    let _operation = crate::usb_update::normal_operation()?;
-    let resource_root = app
-        .path()
-        .resolve("", BaseDirectory::Resource)
-        .map_err(|e| format!("resource path: {}", e))?;
-    let target = PathBuf::from(&target);
-
-    let mut written: Vec<String> = Vec::new();
-
-    // Firmware tree → root of CIRCUITPY
-    let firmware_src = resource_root.join("firmware");
-    if !firmware_src.exists() {
-        return Err(format!("firmware asset missing at {:?}", firmware_src));
-    }
-    copy_dir_recursive(&firmware_src, &target, &mut written)
-        .map_err(|e| format!("copy firmware: {}", e))?;
-
-    // Adafruit libs → CIRCUITPY/lib
-    let libs_src = resource_root.join("lib");
-    if !libs_src.exists() {
-        return Err(format!("lib assets missing at {:?}", libs_src));
-    }
-    let lib_target = target.join("lib");
-    std::fs::create_dir_all(&lib_target).map_err(|e| format!("mkdir lib: {}", e))?;
-    copy_dir_recursive(&libs_src, &lib_target, &mut written)
-        .map_err(|e| format!("copy libs: {}", e))?;
-
-    Ok(written)
 }
 
 
@@ -437,34 +353,6 @@ pub fn read_firmware_file_at_b64(root: String, rel: String) -> Result<String, St
     Ok(base64::engine::general_purpose::STANDARD.encode(&data))
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path, written: &mut Vec<String>) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            continue;
-        } else if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path, written)?;
-        } else if file_type.is_file() {
-            // Skip __pycache__ leftovers and .DS_Store
-            if let Some(name) = src_path.file_name().and_then(|n| n.to_str()) {
-                if name == ".DS_Store" || name == "Thumbs.db" {
-                    continue;
-                }
-            }
-            if has_compiled_sibling(&src_path) {
-                continue;
-            }
-            std::fs::copy(&src_path, &dst_path)?;
-            written.push(dst_path.to_string_lossy().into_owned());
-        }
-    }
-    Ok(())
-}
-
 fn safe_relative(rel: &str) -> Result<&Path, String> {
     let path = Path::new(rel);
     if path.as_os_str().is_empty()
@@ -599,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_modules_exclude_source_from_ota_and_initial_copy() {
+    fn compiled_modules_exclude_source_from_ota() {
         let temp = unique_temp_dir().unwrap();
         let source = temp.join("source");
         let modules = source.join("lib").join("captain");
@@ -614,13 +502,6 @@ mod tests {
         assert!(names.contains(&"lib/captain/app.mpy"));
         assert!(names.contains(&"lib/captain/bindings.py"));
         assert!(!names.contains(&"lib/captain/app.py"));
-
-        let target = temp.join("target");
-        let mut written = Vec::new();
-        copy_dir_recursive(&source, &target, &mut written).unwrap();
-        assert!(target.join("lib/captain/app.mpy").is_file());
-        assert!(target.join("lib/captain/bindings.py").is_file());
-        assert!(!target.join("lib/captain/app.py").exists());
 
         std::fs::remove_dir_all(temp).unwrap();
     }

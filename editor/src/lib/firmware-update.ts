@@ -87,11 +87,3 @@ export function compareVersions(a: string, b: string): number {
   }
   return 0;
 }
-
-/** Convenience: compare the firmware version reported by the pedal with
- * the latest GitHub release and tell us whether an update is available
- * (returns null if either side is missing). */
-export function evaluateUpdate(installed: string | null, latest: FirmwareRelease | null): boolean | null {
-  if (!installed || !latest || !latest.version) return null;
-  return compareVersions(latest.version, installed) > 0;
-}

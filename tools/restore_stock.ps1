@@ -118,8 +118,8 @@ function Get-Cached([string]$Url, [string]$FileName) {
 
 # Drive the CircuitPython REPL with a block of commands. Broadcasts to every
 # open-able port (the console runs the REPL; the data CDC just ignores it) and
-# asserts DTR/RTS - this mirrors the editor's serial::reboot_to_bootloader,
-# which is the proven recipe. $Body is the python the REPL should run.
+# asserts DTR/RTS, the recipe the editor's old REPL bootloader command used.
+# $Body is the python the REPL should run.
 function Send-ReplCommands([string]$Body, [string]$What) {
     $names = [System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object
     if ($Port) { $names = @($Port) }   # honor explicit -Port if given

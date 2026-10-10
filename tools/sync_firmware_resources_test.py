@@ -97,12 +97,12 @@ class ResourceSyncTests(unittest.TestCase):
         self.assertTrue((captain / "app.mpy").is_file())
 
         # The resource mirror remains reviewable and exact; deployment itself
-        # must select the compiled sibling.  This is enforced in both the OTA
-        # listing and initial-volume copy paths in installer.rs.
+        # must select the compiled sibling.  The OTA file listing in
+        # installer.rs enforces this; it is the only remaining copy path.
         installer = SCRIPT.parent.parent / "editor" / "src-tauri" / "src" / "installer.rs"
         text = installer.read_text(encoding="utf-8")
         self.assertIn("fn has_compiled_sibling", text)
-        self.assertGreaterEqual(text.count("if has_compiled_sibling("), 2)
+        self.assertGreaterEqual(text.count("if has_compiled_sibling("), 1)
 
     def test_second_sync_is_a_true_noop(self):
         sync.sync_repository(self.root)

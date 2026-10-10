@@ -1092,7 +1092,7 @@
 
   // ---- in-editor MIDI bridge (Kemper Player <-> pedal) ----
   // Relays USB-MIDI both ways so MIDI Learn capture and the bidirectional sync
-  // work without running tools/midi_bridge.py by hand.
+  // work without a separate bridge program.
   let bridge = $state<BridgeStatus>({ active: false, kemper_port: null, pedal_port: null });
   async function refreshBridge() {
     try { bridge = await midiBridgeStatus(); } catch { /* leave as-is */ }

@@ -479,7 +479,7 @@ export async function reconnectLast(): Promise<string> {
 
 // ---- USB-MIDI bridge (Kemper Player <-> pedal) ----
 // Relays MIDI both ways so MIDI Learn capture and the bidirectional sync work
-// without running tools/midi_bridge.py by hand. Separate from the CDC link.
+// without a separate bridge program. Separate from the CDC link.
 export type MidiPorts = { inputs: string[]; outputs: string[] };
 export type BridgeStatus = {
   active: boolean;
@@ -920,7 +920,6 @@ async function refreshPatchList(refresh: PatchListRefresh): Promise<void> {
 
 
 export const cmd = {
-  ping:           () => send({ type: "PING",            id: nextId() }),
   getDeviceInfo:  () => send({ type: "GET_DEVICE_INFO", id: nextId() }),
   getGlobal:      () => send({ type: "GET_GLOBAL",      id: nextId() }),
   putGlobal,

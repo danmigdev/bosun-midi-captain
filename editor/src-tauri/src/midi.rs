@@ -2,8 +2,7 @@
 //!
 //! The Kemper Player is USB-MIDI only and the MIDI Captain pedal is a USB
 //! device (not a host), so the two cannot talk directly - the PC must relay
-//! MIDI both ways. This is the in-editor equivalent of tools/midi_bridge.py.
-//! It forwards every message (SYSEX included - that carries the Kemper
+//! MIDI both ways. It forwards every message (SYSEX included - that carries the Kemper
 //! bidirectional protocol) between the Player and the pedal, dropping only
 //! clock / active-sensing to keep the link quiet.
 //!

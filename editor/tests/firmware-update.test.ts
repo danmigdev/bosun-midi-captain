@@ -4,14 +4,13 @@
  *
  * These are the version-comparison brains behind the "Update firmware"
  * affordance: compareVersions decides whether a GitHub release is newer
- * than what the pedal reports, evaluateUpdate wraps that with the
- * missing-data guards the UI relies on, and humanBytes formats the file
- * sizes shown in the push log. All pure - no Tauri, no network - so they
- * are cheap to lock down and easy to regress on.
+ * than what the pedal reports, and humanBytes formats the file sizes shown
+ * in the push log. All pure - no Tauri, no network - so they are cheap to
+ * lock down and easy to regress on.
  */
 import { describe, it, expect } from "vitest";
 
-import { compareVersions, evaluateUpdate, type FirmwareRelease } from "../src/lib/firmware-update";
+import { compareVersions } from "../src/lib/firmware-update";
 import { FIRMWARE_CHUNK_B64, humanBytes } from "../src/lib/firmware-push";
 
 describe("compareVersions", () => {
@@ -42,34 +41,6 @@ describe("compareVersions", () => {
     // parseInt("x") is NaN -> coerced to 0 by the `|| 0` guard.
     expect(compareVersions("x.y.z", "0.0.0")).toBe(0);
     expect(compareVersions("1.x.0", "1.0.5")).toBeLessThan(0);
-  });
-});
-
-describe("evaluateUpdate", () => {
-  const rel = (version: string): FirmwareRelease => ({
-    version,
-    tag: `v${version}`,
-    htmlUrl: "https://example.test/releases/latest",
-    publishedAt: "2026-01-01T00:00:00Z",
-  });
-
-  it("returns true when the release is newer than the installed version", () => {
-    expect(evaluateUpdate("0.3.0", rel("0.4.0"))).toBe(true);
-  });
-
-  it("returns false when installed is equal or newer", () => {
-    expect(evaluateUpdate("0.4.0", rel("0.4.0"))).toBe(false);
-    expect(evaluateUpdate("0.5.0", rel("0.4.0"))).toBe(false);
-  });
-
-  it("returns null when either side is missing", () => {
-    expect(evaluateUpdate(null, rel("0.4.0"))).toBeNull();
-    expect(evaluateUpdate("", rel("0.4.0"))).toBeNull();
-    expect(evaluateUpdate("0.3.0", null)).toBeNull();
-  });
-
-  it("returns null when the release carries no version string", () => {
-    expect(evaluateUpdate("0.3.0", rel(""))).toBeNull();
   });
 });
 
