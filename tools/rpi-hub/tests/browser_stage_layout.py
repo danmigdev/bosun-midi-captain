@@ -107,6 +107,27 @@ VIEWPORTS = ((1045, 399), (800, 480), (640, 360), (568, 320),
              (480, 800), (375, 667), (320, 568), (834, 1112), (1920, 1080))
 
 
+# The label frame shrinks with its card and clips (overflow:hidden), so
+# compare the text line itself with the frame and the frame with the card.
+LABEL_FIT = r"""[...document.querySelectorAll('.stage__switch')].map(card => {
+  const label = card.querySelector('.stage__switch-label');
+  const line = label.querySelector('.stage__marquee-track');
+  const c = card.getBoundingClientRect(), l = label.getBoundingClientRect(), t = line.getBoundingClientRect();
+  return {text:label.textContent, cardTop:c.top, cardBottom:c.bottom, frameTop:l.top,
+          frameBottom:l.bottom, lineTop:t.top, lineBottom:t.bottom,
+          fontSize:getComputedStyle(label).fontSize};
+})"""
+
+
+async def reload_stage(cdp, page):
+    await cdp.command('Page.navigate', {'url': page})
+    for _ in range(150):
+        if await cdp.evaluate("!!document.querySelector('.stage__switch')"):
+            return
+        await asyncio.sleep(.1)
+    raise AssertionError('Stage did not mount after reload')
+
+
 async def fixture(cdp, mode, *, title='CLEAN', bpm=None, tuner=False):
     # Use the preview's normal firmware-message bus; no fake DOM/CSS geometry.
     await cdp.evaluate("""(async () => {
@@ -125,7 +146,7 @@ async def fixture(cdp, mode, *, title='CLEAN', bpm=None, tuner=False):
         ['1','2','3','4','up','A','B','C','D','down'].map((switchId, index) => ({
           switch:switchId, mode:'latched', label:labels[index], actions:{}, led:{on:colors[index]}
         }))}});
-      await push({type:'CONTEXT', context:{bank:1, slot:1, kemper_rig_name:TITLE,
+      await push({type:'CONTEXT', context:{bank:1, slot:1, kemper_mode:'performance', kemper_rig_name:TITLE,
         kemper_bpm:BPM, expression_mode:MODE, kemper_tuner:TUNER ? 'on' : 'off',
         kemper_tuner_note:'F#', kemper_tuner_deviance:8192}});
       for (const sw of ['3', 'B', 'down'])
@@ -624,6 +645,26 @@ async def run(args):
                 if not args.live and case == 'long-title':
                     await assert_marquee_motion(cdp)
                 print('PASS geometry %s %dx%d (stable panels, opacity-only active LEDs and vertical controls)' % (case,width,height), flush=True)
+        if not args.live:
+            # The Stage theme can enlarge switch labels up to 500%. The Pi's
+            # 1920x440 panel has short cards: the glyphs must stay inside them.
+            for scale in (2.5, 5.0):
+                await cdp.evaluate("localStorage.setItem('BOSUN_STAGE_THEME', JSON.stringify("
+                                   "{version:2, sections:{switchLabel:{scale:%s}}}))" % scale)
+                await reload_stage(cdp, args.page)
+                await fixture(cdp, 'VOL')
+                for width, height in ((1920, 440), (1920, 1080), (800, 480)):
+                    await cdp.command('Emulation.setDeviceMetricsOverride', {
+                        'width':width, 'height':height, 'deviceScaleFactor':1, 'mobile':False,
+                    })
+                    await asyncio.sleep(.1)
+                    for card in await cdp.evaluate(LABEL_FIT):
+                        assert (card['frameTop'] >= card['cardTop'] - 1 and card['frameBottom'] <= card['cardBottom'] + 1
+                                and card['lineTop'] >= card['frameTop'] - 1 and card['lineBottom'] <= card['frameBottom'] + 1), (
+                            'Switch label cut by its card at %d%% %dx%d: %s' % (scale * 100, width, height, json.dumps(card)))
+                    print('PASS switch labels inside their cards at %d%% %dx%d' % (scale * 100, width, height), flush=True)
+            await cdp.evaluate("localStorage.removeItem('BOSUN_STAGE_THEME')")
+            await reload_stage(cdp, args.page)
         if not args.live:
             # The native editor may use 150% UI text with a nearly square
             # landscape viewport. Height-only type sizes made even CLEAN and

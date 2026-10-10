@@ -23,6 +23,8 @@ def setup_files():
                   'tools/rpi-hub/install.sh', 'tools/rpi-hub/install-native-updater.sh',
                   'tools/rpi-hub/quick-install.sh', 'tools/rpi-hub/install-boot-splash.sh',
                   'tools/rpi-hub/prepare-framebuffer-splash.sh',
+                  # install-boot-splash.sh brands Stage from its source template.
+                  'editor/stage-kiosk.html',
                   'editor/package.json', 'editor/src-tauri/icons/icon.png', 'LICENSE'))
     return sorted(files)
 

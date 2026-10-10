@@ -17,7 +17,8 @@ from browser_stage_transition import EDGE, CdpSession, cdp_socket, cleanup_brows
 
 
 async def context(cdp, **fields):
-    fields = {"kemper_tuner": "on", "kemper_tuner_note": "F#",
+    # The tuner and the wah/volume label exist on Kemper profiles only.
+    fields = {"kemper_mode": "performance", "kemper_tuner": "on", "kemper_tuner_note": "F#",
               "kemper_tuner_deviance": 8192, **fields}
     await cdp.evaluate("""(() => {
       window.__stageInbox = [JSON.stringify({type:'CONTEXT', context:FIELDS})];
@@ -75,9 +76,10 @@ async def run(args):
             await cdp.command('Emulation.setDeviceMetricsOverride', {
                 'width':width,'height':height,'deviceScaleFactor':1,'mobile':False})
             await context(cdp, kemper_tuner='off')
-            sizes = await cdp.evaluate("""['.stage__bank','.stage__rig','.stage__expression-label']
+            # BANK and RIG share one size; the wah/volume readout has its own.
+            sizes = await cdp.evaluate("""['.stage__bank','.stage__rig']
               .map(s => parseFloat(getComputedStyle(document.querySelector(s)).fontSize))""")
-            assert max(sizes) - min(sizes) < .01, ('Header font sizes differ', sizes)
+            assert max(sizes) - min(sizes) < .01, ('BANK and RIG font sizes differ', sizes)
             await context(cdp, kemper_tuner='on', kemper_tuner_note='F#', kemper_tuner_deviance=8192)
             await wait_for(cdp, "!!document.querySelector('.tuner-screen[open]')", 'Automatic tuner')
             assert not await cdp.evaluate("!!document.querySelector('.stage__tuner')"), 'Compact tuner must not appear in Stage'

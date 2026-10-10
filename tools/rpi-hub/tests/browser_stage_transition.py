@@ -796,11 +796,14 @@ def named(state, expected):
 
 def at_location(state, bank, slot):
     # These test rigs use either the Stage defaults or the saved Captain TFT
-    # prefixes "BANK " / "RIG ". Both require the complete normalized header,
-    # including the separator before the bank and between bank and rig.
+    # prefixes "BANK " / "RIG ". Both require the complete normalized header:
+    # the older single readout separated bank and rig with dots, the current
+    # header shows them as two adjacent readouts.
     return state.get("meta") in (
         "· B%d · R%d" % (bank, slot),
         "· BANK %d · RIG %d" % (bank, slot),
+        "B%d R%d" % (bank, slot),
+        "BANK %d RIG %d" % (bank, slot),
     )
 
 

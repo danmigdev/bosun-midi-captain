@@ -87,6 +87,7 @@ jobs:
         run: |
           python tools/verify_release_version_test.py
           python tools/verify_firmware_package_test.py
+          python tools/package_pi_setup_test.py
 
   hub:
     name: Raspberry Pi hub (end-to-end)

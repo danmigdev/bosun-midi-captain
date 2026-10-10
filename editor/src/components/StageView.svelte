@@ -1552,6 +1552,9 @@
     border: 1px solid #26343e;
     min-width: 0;
     min-height: 0;
+    /* Rows size the cards, never their text, so a card can bound its own
+       label height (cqh below). */
+    container-type: size;
     box-sizing: border-box;
     font: inherit;
     color: inherit;
@@ -1611,7 +1614,10 @@
   }
 
   .stage__switch-label {
-    font-size: calc(var(--stage-card-label-size) * var(--stage-switch-label-scale, 1));
+    /* The Stage theme may enlarge labels up to 500%; past what the card can
+       show, keep the glyphs inside it instead of cutting them at the bottom
+       (the 1920x440 Pi panel has short cards). */
+    font-size: min(calc(var(--stage-card-label-size) * var(--stage-switch-label-scale, 1)), 85cqh);
     color: var(--stage-switch-label-color, #ffffff);
     font-family: var(--stage-switch-label-font, var(--stage-font, "Inter", -apple-system, sans-serif));
     text-align: center;
