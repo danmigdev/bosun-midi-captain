@@ -12,9 +12,9 @@ Repo: https://github.com/danmigdev/bosun-midi-captain
 Binaries: https://github.com/danmigdev/bosun-midi-captain/releases/download/v%v/bosun.apk
 
 Builds:
-  - versionName: 0.7.2
-    versionCode: 40
-    commit: 8d60f159f25162960a9696b49beda77aad389d33
+  - versionName: 0.8.1
+    versionCode: 42
+    commit: f858f22a321a5e74061cc4df9d1cd275bb8545d4
     subdir: editor/src-tauri/gen/android
     sudo:
       - apt-get update
@@ -55,5 +55,5 @@ AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: 
   editor/src-tauri/android-version-code.txt|(\d+)|editor/src-tauri/tauri.conf.json|"version":\s*"([^"]+)"
-CurrentVersion: 0.7.2
-CurrentVersionCode: 40
+CurrentVersion: 0.8.1
+CurrentVersionCode: 42
