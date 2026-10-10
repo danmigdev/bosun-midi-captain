@@ -90,6 +90,6 @@ int main(void) {
     assert(fclose(file) == 0);
     assert(!bosun_store_mount(NULL));
     assert(unlink(other_path) == 0 && rmdir(outside) == 0 && rmdir(root) == 0);
-    puts("Host storage: CP paths/raw JSON, remount, bounded reads/lists, failed atomic writes, symlink/hardlink containment and explicit format passed");
+    puts("Host storage: /config paths/raw JSON, remount, bounded reads/lists, failed atomic writes, symlink/hardlink containment and explicit format passed");
     return 0;
 }

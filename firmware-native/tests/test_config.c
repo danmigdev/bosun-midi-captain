@@ -225,11 +225,23 @@ static void test_inventory_and_autosave(void) {
     bosun_config_tick(&config, 41); assert(config.dirty_count == 0 && config.last_error == BOSUN_STORE_OK);
 }
 
+static void test_retired_display_keys(void) {
+    fixture();
+    /* Profiles created by earlier firmware still carry tft.theme_color,
+     * rowstart and colstart. Nothing reads them; they load and save as is. */
+    const char old[] = "{\"tft\":{\"brightness\":40,\"theme_color\":\"#00ff88\",\"rotation\":90,\"rowstart\":80,\"colstart\":0}}";
+    assert(!strstr(bosun_default_device, "theme_color") && !strstr(bosun_default_device, "rowstart"));
+    assert(bosun_store_write_atomic("/config/profiles/test/device.json", old, strlen(old)) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "test", false) == BOSUN_STORE_OK && !strcmp(config.device, old));
+    assert(bosun_config_int(&config.device_doc, bosun_json_get(&config.device_doc, 0, "tft"), "rotation", 0) == 90);
+    assert(bosun_config_put_device(&config, NULL, old, strlen(old)) == BOSUN_STORE_OK && !strcmp(config.device, old));
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-config-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
     test_profiles(); test_drafts_and_save(); test_checked_select_and_binding(); test_inventory_and_autosave();
-    test_profile_bank_layout(); test_navigation_bank_limit();
+    test_profile_bank_layout(); test_navigation_bank_limit(); test_retired_display_keys();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Config: profiles, activation rollback, persisted/draft isolation and reboot recovery, checked selection, binding preservation, save/discard/failed writes, inventory and autosave rollover passed");
     return 0;

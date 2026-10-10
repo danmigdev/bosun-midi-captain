@@ -24,7 +24,6 @@ void bosun_midi_feed_byte(bosun_midi_parser *p, uint8_t b,
                 else {
                     p->sysex_overflow = true;
                     p->sysex_length = 0;
-                    p->discarded_sysex++;
                 }
             }
             return;
@@ -73,15 +72,4 @@ size_t bosun_midi_encode(uint8_t *output, size_t capacity, uint8_t channel,
     output[1] = first & 0x7f;
     if (length == 3) output[2] = second & 0x7f;
     return length;
-}
-
-size_t bosun_midi_encode_sysex(uint8_t *output, size_t capacity,
-                               const uint8_t *payload, size_t length) {
-    if (!output || (!payload && length) || capacity < 2 ||
-        length > capacity - 2 || length > BOSUN_MIDI_MAX_SYSEX) return 0;
-    for (size_t i = 0; i < length; ++i) if (payload[i] >= 0x80) return 0;
-    if (length) memmove(output + 1, payload, length);
-    output[0] = 0xf0;
-    output[length + 1] = 0xf7;
-    return length + 2;
 }

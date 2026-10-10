@@ -2,9 +2,9 @@
 """Bounded, read-only by default Captain protocol baseline/acceptance recorder.
 
 Run on the Pi with its hub active:
-  python3 live_hardware_benchmark.py --output cp-hub.json --samples 30
+  python3 live_hardware_benchmark.py --output hub.json --samples 30
 Or release the data CDC from bosun-hub first (this script changes no services):
-  python3 live_hardware_benchmark.py --serial /dev/ttyACM1 --output cp-usb.json
+  python3 live_hardware_benchmark.py --serial /dev/ttyACM1 --output usb.json
 
 Only --switch-rigs changes live state, and the original rig is restored. No
 PUT_*, SAVE_NOW, DISCARD, REBOOT, format or firmware command is sent. Restoring
@@ -34,9 +34,8 @@ KINDS = {"PING": "ACK", "GET_CONTEXT": "CONTEXT", "GET_GLOBAL": "GLOBAL",
          "STATS": "STATS", "SWITCH_PATCH": "ACK", "GET_RIG_INFO": "RIG_INFO",
          "GET_DEVICE_INFO": "DEVICE_INFO", "GET_PATCH": "PATCH",
          "PUT_GLOBAL": "ACK", "REBOOT": "ACK"}
-ERROR_COUNTERS = ("usb_tx_dropped", "midi_tx_failed", "queue_overflows",
-                  "invalid_messages", "protocol_errors", "storage_errors",
-                  "midi_events_dropped")
+ERROR_COUNTERS = ("midi_tx_failed", "queue_overflows", "invalid_messages",
+                  "protocol_errors", "storage_errors", "midi_events_dropped")
 MAX_LINE = 256 * 1024
 STARTUP_DISCARD_MAX_FRAMES = 4
 STARTUP_DISCARD_MAX_BYTES = 16 * 1024
@@ -270,7 +269,6 @@ def timing_scope(args):
         "GET_CONTEXT": ("direct firmware reply" if args.serial else
                         "may join an in-flight hub request; no retained context cache"),
         "hub_assumption": "Remote hub must match tools/rpi-hub/bosun_hub/hub.py for these semantics.",
-        "memory": "CP mem_free/mem_alloc are heap readings; native counters are not heap or stack headroom.",
         "startup": "A bounded PING synchronization precedes each connection; startup fragments are recorded separately and excluded from timings.",
     }
 
@@ -320,12 +318,6 @@ def evaluate(result):
     for check, passed in checks.items():
         if not passed:
             result["errors"].append({"phase": "acceptance", "error": check})
-    result["memory_observations"] = {}
-    for key in ("mem_free", "mem_alloc"):
-        values = [entry["reply"][key] for entry in result["stats_samples"]
-                  if isinstance(entry["reply"].get(key), (int, float))]
-        if values:
-            result["memory_observations"][key] = {"min_bytes": min(values), "max_bytes": max(values)}
 
 
 def run(args, connector=connect):

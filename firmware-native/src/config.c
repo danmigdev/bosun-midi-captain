@@ -25,7 +25,7 @@ _Static_assert(sizeof work_tokens >= BOSUN_DEVICE_BYTES + 1,
     "{\"version\":1,\"long_press_ms\":600,\"double_tap_window_ms\":250," \
     "\"auto_momentary_on_hold\":true,\"auto_momentary_ms\":500,\"long_press_actions\":{}," \
     "\"autosave\":{\"enabled\":false,\"debounce_ms\":2000},\"leds\":{\"brightness\":64,\"dim\":4}," \
-    "\"tft\":{\"brightness\":80,\"theme_color\":\"#00ff88\",\"rotation\":180,\"rowstart\":80,\"colstart\":0}"
+    "\"tft\":{\"brightness\":80,\"rotation\":180}"
 #define DEFAULT_JACK(n) \
     "{\"jack\":" #n ",\"enabled\":false,\"invert\":false,\"calibration\":{\"min\":300,\"max\":65200},\"curve\":\"linear\",\"message\":{\"type\":\"cc\",\"channel\":1,\"cc\":11,\"value\":0}}"
 const char bosun_default_device[] = DEFAULT_DEVICE_HEAD ",\"expression\":[" DEFAULT_JACK(1) "," DEFAULT_JACK(2) "]}";

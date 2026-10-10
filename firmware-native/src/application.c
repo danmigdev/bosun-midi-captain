@@ -211,8 +211,8 @@ static void render_leds(bosun_application_t *app, uint32_t now) {
                 rgb = binding->preset_slot == app->config.slot ? bank_color : scale(bank_color, dim);
             }
             rgb = scale(rgb, brightness);
-            /* CP reverses the last two physical LED indices on the lower
-             * row; all three get one colour, so the resulting bytes agree. */
+            /* The lower row's LED ring runs in reverse order (see LED_DUMP);
+             * all three pixels get one colour, so the order does not matter. */
             for (unsigned pixel = 3 * sw; pixel < 3 * sw + 3; ++pixel) {
                 if (app->leds[pixel] != rgb) { app->leds[pixel] = rgb; app->leds_dirty = true; }
             }
@@ -306,7 +306,7 @@ void bosun_application_tick(bosun_application_t *app) {
     ++app->ticks;
     if (app->startup_action_pending) {
         app->startup_action_pending = false;
-        /* Match CP boot: generic targets run the initial on_enter once;
+        /* Generic targets run the initial on_enter once at boot;
          * Kemper's authoritative rig must never be overwritten at boot.
          * Queue before processing user commands, execute during runtime_tick. */
         int action = bosun_json_get(&app->config.patch_doc, 0, "on_enter");

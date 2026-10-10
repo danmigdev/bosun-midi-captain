@@ -8,7 +8,7 @@
 #define BOSUN_DISPLAY_LABELS 16u
 #define BOSUN_DISPLAY_GLYPHS 128u
 typedef enum {
-    BOSUN_DISPLAY_OK = 0, BOSUN_DISPLAY_UNSUPPORTED_FONT = 1,
+    BOSUN_DISPLAY_OK = 0,
     BOSUN_DISPLAY_UNKNOWN_FIELD = 2, BOSUN_DISPLAY_LIMIT = 4,
     BOSUN_DISPLAY_INVALID_LAYOUT = 8, BOSUN_DISPLAY_IO = 16,
     BOSUN_DISPLAY_MISSING_GLYPH = 32
@@ -33,8 +33,8 @@ typedef struct {
 
 /* Retains one bounded label snapshot and one 480-byte RGB565 stripe. A call
  * transfers at most eight rows; MIDI processing stays in the outer loop.
- * Unsupported BDF fonts explicitly set UNSUPPORTED_FONT and use the ROM font.
- * Unknown context fields stay empty instead of displaying orphan prefixes. */
+ * Every label uses the ROM font. Unknown context fields stay empty instead of
+ * displaying orphan prefixes. */
 void bosun_display_init(bosun_display_t *display);
 unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *config,
                               const bosun_kemper_state *kemper, const char *hold_effect,

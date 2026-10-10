@@ -48,7 +48,6 @@ class FakeDevice:
         self.fail_switch = False
         self.fail_restore = False
         self.drops = False
-        self.native = False
 
     def connect(self, args, observations):
         owner = self
@@ -79,11 +78,8 @@ class FakeDevice:
                 if kind == "STATS":
                     owner.stats_calls += 1
                     reply.update(uptime_ms=1000 + owner.stats_calls * 100)
-                    if owner.native:
-                        reply.update(queue_overflows=0, storage_ready=True)
-                    else:
-                        reply.update(mem_free=7000 - owner.stats_calls,
-                                     usb_tx_dropped=int(owner.drops and owner.stats_calls > 1))
+                    reply.update(queue_overflows=int(owner.drops and owner.stats_calls > 1),
+                                 storage_ready=True)
                 return copy.deepcopy(reply), .25, len(line(reply))
         connection = Connection()
         self.clients.append(connection)
@@ -355,7 +351,6 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["initial"]["GET_GLOBAL"]["device"]["nested"], {"x": [1, 2]})
         self.assertEqual(result["distributions"]["PING"]["count"], 2)
         self.assertEqual(len(result["stats_samples"]), 4)
-        self.assertEqual(result["memory_observations"]["mem_free"]["min_bytes"], 6996)
         self.assertTrue(all(c.closed for c in device.clients))
 
     def test_failed_ack_restores_original_on_fresh_connection(self):
@@ -391,17 +386,15 @@ class BenchmarkTests(unittest.TestCase):
             with self.subTest(wrong=wrong), self.assertRaises(TimeoutError):
                 benchmark.confirmed(BadConfirmation(), 1, 2, .002, True)
 
-    def test_error_counter_growth_fails_and_native_does_not_invent_heap_readings(self):
+    def test_error_counter_growth_fails(self):
         device = FakeDevice()
         device.drops = True
         result = benchmark.run(self.args(), device.connect)
         self.assertFalse(result["passed"])
-        self.assertEqual(result["counter_deltas"]["usb_tx_dropped"], 1)
-        device = FakeDevice()
-        device.native = True
-        result = benchmark.run(self.args(), device.connect)
+        self.assertEqual(result["counter_deltas"]["queue_overflows"], 1)
+        result = benchmark.run(self.args(), FakeDevice().connect)
         self.assertTrue(result["passed"])
-        self.assertEqual(result["memory_observations"], {})
+        self.assertTrue(result["checks"]["native_storage_ready"])
 
     def test_percentiles_and_transport_scope_are_explicit(self):
         self.assertEqual(benchmark.distribution([]), {"count": 0})

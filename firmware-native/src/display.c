@@ -81,11 +81,11 @@ static void resolve(const char *field, const bosun_config_t *config,
         if (kemper) snprintf(out, capacity, "%u", kemper->bpm);
     } else if (!strcmp(field, "kemper_connected")) {
         if (kemper) snprintf(out, capacity, "%s", kemper->connected ? "on" : "off");
-    } else if (!strcmp(field, "tuner") || !strcmp(field, "kemper_tuner")) {
+    } else if (!strcmp(field, "kemper_tuner")) {
         if (kemper) snprintf(out, capacity, "%s", kemper->tuner_active ? "on" : "off");
-    } else if (!strcmp(field, "tuner_note") || !strcmp(field, "kemper_tuner_note")) {
+    } else if (!strcmp(field, "kemper_tuner_note")) {
         if (kemper) snprintf(out, capacity, "%s", kemper->tuner_note);
-    } else if (!strcmp(field, "tuner_deviance") || !strcmp(field, "kemper_tuner_deviance")) {
+    } else if (!strcmp(field, "kemper_tuner_deviance")) {
         if (kemper) snprintf(out, capacity, "%u", kemper->tuner_deviance);
     } else *status |= BOSUN_DISPLAY_UNKNOWN_FIELD;
 }
@@ -148,9 +148,7 @@ static void add_label(bosun_display_t *display, const bosun_json_doc_t *doc, int
     if (size < 1 || size > 8) display->status |= BOSUN_DISPLAY_LIMIT;
     label->scale = (uint8_t)clamp(size, 1, 8);
     label->color = label_color(doc, entry);
-    char field[48], value[192], prefix[96], suffix[96], text[384], font_name[64];
-    string_field(doc, entry, "font", font_name, sizeof font_name, &display->status);
-    if (*font_name && strcmp(font_name, "system")) display->status |= BOSUN_DISPLAY_UNSUPPORTED_FONT;
+    char field[48], value[192], prefix[96], suffix[96], text[384];
     string_field(doc, entry, "field", field, sizeof field, &display->status);
     if (*field) resolve(field, config, kemper, display->hold_effect, value, sizeof value, &display->status);
     else string_field(doc, entry, "text", value, sizeof value, &display->status);

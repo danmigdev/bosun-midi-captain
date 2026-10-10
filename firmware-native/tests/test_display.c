@@ -97,12 +97,12 @@ static void expression_labels_are_text_only(void) {
     assert(display.labels[0].width == 42);
     assert(display.labels[0].length == 7 && !memcmp(display.labels[0].glyphs, "WAH VOL", 7));
 }
-static void fields_fonts_and_clipping(void) {
+static void fields_and_clipping(void) {
     load("{\"tft\":{\"layout\":[{\"field\":\"patch_name\",\"prefix\":\"RIG \",\"suffix\":\"!\",\"x\":-10},"
         "{\"field\":\"missing_field\",\"prefix\":\"ORPHAN \"},"
-        "{\"text\":\"Caf\\u00e9\",\"font\":\"custom.bdf\",\"y\":20}]}}", "{\"name\":\"Crunch\"}");
+        "{\"text\":\"Caf\\u00e9\",\"y\":20}]}}", "{\"name\":\"Crunch\"}");
     unsigned status = frame(0);
-    assert(status == (BOSUN_DISPLAY_UNKNOWN_FIELD | BOSUN_DISPLAY_UNSUPPORTED_FONT));
+    assert(status == BOSUN_DISPLAY_UNKNOWN_FIELD);
     assert(display.labels[0].length == 11 && !memcmp(display.labels[0].glyphs, "RIG Crunch!", 11));
     assert(display.labels[1].length == 0);
     assert(display.labels[2].length == 4 && display.labels[2].glyphs[3] == 0x82);
@@ -195,7 +195,7 @@ int main(void) {
     assert(sizeof(bosun_display_t) < 4096);
     geometry_and_colors();
     expression_labels_are_text_only();
-    fields_fonts_and_clipping();
+    fields_and_clipping();
     scroll_snapshot_and_tuner();
     failed_transfer_is_visible();
     slow_scroll_long_labels_do_not_overflow();

@@ -89,7 +89,6 @@
       "y": 0,
       "size": 5,
       "color": "#ffffff",
-      "font": "system",
       "scroll": true
     },
     {
@@ -100,7 +99,6 @@
       "y": 60,
       "size": 5,
       "color": "#9aa1ad",
-      "font": "system",
       "prefix": "BANK ",
       "suffix": ""
     },
@@ -112,7 +110,6 @@
       "y": 120,
       "size": 5,
       "color": "#6fd99b",
-      "font": "system",
       "prefix": "SLOT ",
       "suffix": ""
     }

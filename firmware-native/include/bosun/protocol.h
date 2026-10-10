@@ -26,7 +26,7 @@ typedef struct {
     bosun_json_writer_t writer;
     size_t rx_length, tx_length, tx_offset;
     uint32_t last_rx_ms, last_context_ms, context_revision, kemper_revision;
-    uint32_t requests, errors, oversized, timeouts;
+    uint32_t requests, errors;
     uint32_t midi_events_dropped;
     uint8_t midi_events[BOSUN_PROTOCOL_EVENT_BYTES];
     uint16_t event_head, event_length;

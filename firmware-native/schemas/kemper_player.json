@@ -341,7 +341,6 @@
       "y": 0,
       "size": 5,
       "color": "#ffffff",
-      "font": "system",
       "scroll": true
     },
     {
@@ -352,7 +351,6 @@
       "y": 60,
       "size": 5,
       "color": "#9aa1ad",
-      "font": "system",
       "prefix": "BANK ",
       "suffix": ""
     },
@@ -364,7 +362,6 @@
       "y": 120,
       "size": 5,
       "color": "#6fd99b",
-      "font": "system",
       "prefix": "RIG ",
       "suffix": ""
     },
@@ -375,8 +372,7 @@
       "x": -6,
       "y": -6,
       "size": 2,
-      "color": "#ffffff",
-      "font": "system"
+      "color": "#ffffff"
     }
   ],
   "tft_fields": {
@@ -428,13 +424,6 @@
   "config_schema": {
     "key": "kemper",
     "label": "Kemper Player target",
-    "fields": {
-      "debug": {
-        "type": "bool",
-        "default": false,
-        "hidden": true,
-        "label": "debug: trace received SYSEX to console"
-      }
-    }
+    "fields": {}
   }
 }

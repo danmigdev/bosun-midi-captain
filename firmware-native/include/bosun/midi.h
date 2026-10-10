@@ -19,7 +19,6 @@ typedef struct {
     size_t sysex_length;
     uint8_t status, data[2], data_length, expected;
     bool in_sysex, sysex_overflow;
-    uint32_t discarded_sysex;
 } bosun_midi_parser;
 
 void bosun_midi_init(bosun_midi_parser *parser);
@@ -28,10 +27,8 @@ void bosun_midi_feed_byte(bosun_midi_parser *parser, uint8_t byte,
 void bosun_midi_feed(bosun_midi_parser *parser, const uint8_t *data,
     size_t length, bosun_midi_receive_fn receive, void *context);
 /* Encodes voice messages, returns 0 for invalid status/channel/capacity.
- * Data bytes are masked to seven bits, as in the original firmware. */
+ * Data bytes are masked to seven bits. */
 size_t bosun_midi_encode(uint8_t *output, size_t capacity, uint8_t channel,
     uint8_t status, uint8_t first, uint8_t second);
-size_t bosun_midi_encode_sysex(uint8_t *output, size_t capacity,
-    const uint8_t *payload, size_t length);
 
 #endif

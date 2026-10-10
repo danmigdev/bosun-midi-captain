@@ -186,7 +186,7 @@ int main(void) {
     for (size_t i = 0; i < sizeof old_data; ++i) old_data[i] = (uint8_t)(i * 17u + 3u);
     for (size_t i = 0; i < sizeof new_data; ++i) new_data[i] = (uint8_t)(i * 29u + 11u);
     for (size_t i = 0; i < sizeof large_data; ++i) large_data[i] = (uint8_t)(i * 7u + 5u);
-    /* Unknown CP/FAT-like and erased volumes must never be auto-formatted. */
+    /* Unknown FAT-like (stock firmware) and erased volumes must never be auto-formatted. */
     memset(flash, 0xa5, sizeof flash);
     memcpy(flash + 3, "MSDOS5.0", 8); flash[510] = 0x55; flash[511] = 0xaa;
     memcpy(snapshot, flash, sizeof flash);
@@ -217,6 +217,6 @@ int main(void) {
     test_power_cuts();
     test_capacity();
     test_legacy_growth();
-    puts("littlefs storage: no automatic format, static caches, CP paths/raw JSON, remount, bounded reads/lists and I/O failures passed");
+    puts("littlefs storage: no automatic format, static caches, /config paths/raw JSON, remount, bounded reads/lists and I/O failures passed");
     return 0;
 }

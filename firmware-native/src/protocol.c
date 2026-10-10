@@ -63,8 +63,8 @@ static bool object_arg(bosun_protocol_t *p, const char *name, const char **data,
         bosun_json_raw(&p->request, t, data, length);
 }
 static bool unique_arguments(const bosun_json_doc_t *d) {
-    /* Unknown application JSON keeps Python's last-key-wins semantics. A
-     * command envelope must have one unambiguous meaning before any I/O. */
+    /* Unknown application JSON keeps last-key-wins semantics. A command
+     * envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
         "table", "on", "request", "mode", "switch", "model"};
@@ -360,7 +360,7 @@ static void device_info(bosun_protocol_t *p) {
     /* Kiosk treats preset_navigation as the fast-bootstrap capability marker
      * and skips GET_GLOBAL, so it also needs bank_count and the Screen projection. */
     tft_projection(p, d);
-    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"firmware_ota\":false,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
+    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
 }
 /* The reply buffer is also the file read workspace. Validate saved JSON before
  * exposing it on wire; these handlers no longer need request tokens afterward. */
@@ -597,7 +597,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             bosun_json_quote(&p->writer, hardware->switch_names[sw]); bosun_json_puts(&p->writer, ":[");
             for (unsigned i = 0; i < 3; ++i) {
                 if (i) bosun_json_puts(&p->writer, ",");
-                /* Bottom row ring order matches Captain board.py and PySwitch. */
+                /* Bottom row ring order matches PySwitch's Captain mapping. */
                 unsigned within = sw >= hardware->row_length && i ? 3 - i : i;
                 bosun_json_write_integer(&p->writer, (int32_t)(sw * 3 + within));
             }
@@ -606,8 +606,6 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         bosun_json_puts(&p->writer, "},\"current\":{\"bank\":");
         bosun_json_write_integer(&p->writer, c->bank);
         integer(&p->writer, "slot", c->slot); bosun_json_puts(&p->writer, "}");
-    } else if (!strcmp(p->type, "LIST_FONTS")) {
-        begin(p, "FONT_LIST"); bosun_json_puts(&p->writer, ",\"fonts\":[\"system\"]");
     } else if (!strcmp(p->type, "STATS")) {
         begin(p, "STATS"); string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
         unsigned_integer(&p->writer, "uptime_ms", now_ms); unsigned_integer(&p->writer, "midi_rx_count", rt->midi_rx_count);
@@ -682,7 +680,7 @@ size_t bosun_protocol_feed(bosun_protocol_t *p, const uint8_t *data, size_t leng
                 p->rx[p->rx_length] = 0; handle(p, now_ms); p->rx_length = 0;
             }
         } else if (!p->discarding) {
-            if (p->rx_length == BOSUN_PROTOCOL_RX_BYTES) { p->discarding = true; p->rx_length = 0; ++p->oversized; }
+            if (p->rx_length == BOSUN_PROTOCOL_RX_BYTES) { p->discarding = true; p->rx_length = 0; }
             else p->rx[p->rx_length++] = (char)byte;
         }
     }
@@ -701,7 +699,7 @@ void bosun_protocol_tick(bosun_protocol_t *p, uint32_t now_ms) {
     observe_changes(p, false, 0);
     if (p->tx_length) return;
     if (p->rx_length && (uint32_t)(now_ms - p->last_rx_ms) >= BOSUN_PROTOCOL_TIMEOUT_MS) {
-        p->rx_length = 0; p->discarding = true; ++p->timeouts;
+        p->rx_length = 0; p->discarding = true;
         strcpy(p->id, "null"); p->type[0] = 0; error(p, "receive_timeout"); finish(p); return;
     }
     if (p->rx_length || p->discarding) return;

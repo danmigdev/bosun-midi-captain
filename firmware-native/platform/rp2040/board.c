@@ -217,7 +217,7 @@ bool bosun_board_init(const bosun_board_config_t *config) {
     display_delay(10);
     display_ready = true;
     bosun_board_display_rotation(rotation);
-    display_command(0x21, NULL, 0); /* panel inversion matches CP driver */
+    display_command(0x21, NULL, 0); /* panel inversion matches the stock driver */
     display_command(0x13, NULL, 0); /* normal mode */
     display_delay(10);
     display_command(0x29, NULL, 0); /* display on */

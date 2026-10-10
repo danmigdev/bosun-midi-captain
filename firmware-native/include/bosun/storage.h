@@ -18,9 +18,10 @@ typedef struct { char name[BOSUN_NAME_MAX]; bool directory; uint32_t size; } bos
  * byte strings, absolute or relative to the storage root; at most 159 bytes
  * with components at most 63 bytes. Empty components, traversal, controls,
  * backslashes, colons and the private name .bosun-atomic.tmp are rejected.
- * Bytes/JSON are preserved verbatim: the layout is the CP /config tree.
+ * Bytes/JSON are preserved verbatim under the /config tree.
  * Host root must be an existing POSIX directory; symlinks are not followed.
- * Mount NEVER formats, creates a root, or converts an unknown CP filesystem.
+ * Mount NEVER formats, creates a root, or converts an unknown filesystem such
+ * as the stock firmware's FAT volume.
  * Explicit format is destructive, and mounts the resulting empty filesystem. */
 bool bosun_store_mount(const char *host_root);
 bool bosun_store_ready(void);
