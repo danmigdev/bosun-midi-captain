@@ -24,11 +24,6 @@ const _backButtonListeners = new Set<BackButtonCallback>();
 let _currentState: LifecycleState = "active";
 let _installed = false;
 
-/** Current lifecycle state. */
-export function getLifecycleState(): LifecycleState {
-  return _currentState;
-}
-
 /** Register a callback for lifecycle state changes. Returns an unsubscribe function. */
 export function onLifecycleChange(cb: LifecycleCallback): () => void {
   _lifecycleListeners.add(cb);

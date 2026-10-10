@@ -1,12 +1,12 @@
 <script lang="ts">
-  let { text, label = "Help", disabled = false }: { text: string; label?: string; disabled?: boolean } = $props();
+  let { text, label = "Help" }: { text: string; label?: string } = $props();
 
   let open = $state(false);
   let root: HTMLSpanElement | undefined = $state();
 
-  function show() { if (!disabled) open = true; }
-  function hide() { if (!disabled) open = false; }
-  function toggle() { if (!disabled) open = !open; }
+  function show() { open = true; }
+  function hide() { open = false; }
+  function toggle() { open = !open; }
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && open) {
@@ -33,7 +33,6 @@
     class="badge"
     aria-label={label}
     aria-expanded={open}
-    {disabled}
     onclick={toggle}
     onfocus={show}
     onmouseenter={show}

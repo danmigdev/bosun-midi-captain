@@ -13,24 +13,3 @@ export const MODE_HELP: Record<BindingMode, string> = {
   double_tap:
     "Two quick presses within the double-tap window fire \"double_tap\"; a single press still fires \"press\".",
 };
-
-/** One-sentence description of a common message type, or undefined if the
- * type has no dedicated help entry. */
-export function helpForMessageType(type: string): string | undefined {
-  const HELP: Record<string, string> = {
-    cc: "Send a Control Change to set a parameter on the target device.",
-    pc: "Send a Program Change to select a preset on the target device.",
-    note_on: "Send a MIDI Note On to start a note.",
-    note_off: "Send a MIDI Note Off to stop a note.",
-    delay: "Pause for a set time before the next message in the chain.",
-    kemper_morph: "Set the Morph pedal position: 0% is Base, 100% is Morph. This sends CC11 and does not use the Kemper's button rise/fall timing.",
-    kemper_morph_trigger: "Emulate the Kemper Morph Button with CC80. Pair Press with Release; these are button actions, not Morph on/off. The rig's Morph settings control timing and momentary behaviour.",
-    captain_patch: "Load a specific Captain patch by bank and slot.",
-    captain_bank_step: "Jump to the same slot in another bank.",
-    captain_preview_step:
-      "Scroll the on-screen patch preview without loading anything - commit to jump.",
-    captain_preview_commit: "Load the patch currently shown in the preview.",
-    captain_preview_cancel: "Dismiss the preview and stay on the current patch.",
-  };
-  return HELP[type];
-}

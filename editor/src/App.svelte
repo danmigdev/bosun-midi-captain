@@ -445,9 +445,12 @@
     // Watch for a pedal that's plugged in but isn't running bosun (factory /
     // stock firmware hides its drive, so the only hint is the USB device). When
     // we spot one, auto-open the installer with a confirmation gate. Runs only
-    // while disconnected and the installer is closed.
-    await pollForUnflashedPedal();
-    unflashedPollHandle = setInterval(pollForUnflashedPedal, 2500);
+    // while disconnected and the installer is closed. Desktop only: Android has
+    // no installer and no detect_pedal command.
+    if (!IS_ANDROID) {
+      await pollForUnflashedPedal();
+      unflashedPollHandle = setInterval(pollForUnflashedPedal, 2500);
+    }
 
     // ProfilePicker fires this after sending SWITCH_PROFILE. The firmware
     // is about to reboot - we wait, then reconnect from scratch and
@@ -566,8 +569,7 @@
       if (page === "home") return false; // let the app close from home
       // Go back one logical step
       if (page === "editor" || page === "settings" || page === "tft" ||
-          page === "learn" || page === "setlist" || page === "recipes" ||
-          page === "expression" || page === "monitor" || page === "mirror" ||
+          page === "learn" || page === "setlist" || page === "monitor" ||
           page === "stage") {
         page = "patches";
         return true;

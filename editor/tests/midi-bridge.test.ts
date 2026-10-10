@@ -5,9 +5,9 @@
  *  - BosunMidiBridge.kt (android.media.midi singleton, drives the USB-MIDI
  *    hardware on the phone)
  *  - src-tauri/src/midi_android.rs (the Rust JNI wrapper, registered under
- *    cfg(target_os = "android") in lib.rs with the same four commands the
- *    desktop midi.rs exposes: midi_list_ports, midi_bridge_start,
- *    midi_bridge_stop, midi_bridge_status)
+ *    cfg(target_os = "android") in lib.rs with the same bridge commands the
+ *    desktop midi.rs exposes: midi_bridge_start, midi_bridge_stop,
+ *    midi_bridge_status)
  *
  * protocol.ts talks to whichever backend is compiled, so the TS contract is
  * identical on both platforms. These tests exercise that contract end to end
@@ -50,7 +50,6 @@ const fakeBridge = vi.hoisted(() => {
   ];
 
   let devices: string[] = [...DEFAULT_DEVICES];
-  let portLists: { inputs: string[]; outputs: string[] } | null = null;
 
   // Bridge state, mirroring the @Volatile fields of the Kotlin object.
   let active = false;
@@ -102,7 +101,6 @@ const fakeBridge = vi.hoisted(() => {
   return {
     reset: (deviceLabels: string[] = DEFAULT_DEVICES) => {
       devices = [...deviceLabels];
-      portLists = null;
       active = false;
       kemperLabel = null;
       captainLabel = null;
@@ -115,16 +113,6 @@ const fakeBridge = vi.hoisted(() => {
     setDevices: (deviceLabels: string[]) => {
       devices = [...deviceLabels];
     },
-
-    /** Independent in/out port lists for midi_list_ports; null = derive from devices. */
-    setPorts: (inputs: string[], outputs: string[]) => {
-      portLists = { inputs: [...inputs], outputs: [...outputs] };
-    },
-
-    listPorts: () => ({
-      inputs: portLists ? [...portLists.inputs] : [...devices],
-      outputs: portLists ? [...portLists.outputs] : [...devices],
-    }),
 
     start: (kemperHint: string | null, captainHint: string | null) => {
       // Idempotent: an active bridge returns its current status unchanged.
@@ -184,8 +172,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
     fakeBridge.calls.push({ cmd, args });
     switch (cmd) {
-      case "midi_list_ports":
-        return fakeBridge.listPorts();
       case "midi_bridge_start":
         return fakeBridge.start(
           (args?.kemper as string | null | undefined) ?? null,
@@ -203,12 +189,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
-  midiListPorts,
   midiBridgeStart,
   midiBridgeStop,
   midiBridgeStatus,
   type BridgeStatus,
-  type MidiPorts,
 } from "../src/lib/protocol";
 
 beforeEach(() => {
@@ -263,43 +247,7 @@ describe("BridgeStatus type", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. MidiPorts type
-// ---------------------------------------------------------------------------
-
-describe("MidiPorts type", () => {
-  it("accepts an empty port list", () => {
-    const empty: MidiPorts = { inputs: [], outputs: [] };
-    expect(empty).toEqual({ inputs: [], outputs: [] });
-  });
-
-  it("accepts a populated port list", () => {
-    const populated: MidiPorts = {
-      inputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"],
-      outputs: ["Kemper Profiler Player", "PaintAudio MIDI Captain Bosun Native"],
-    };
-    expect(populated.inputs).toHaveLength(2);
-    expect(populated.outputs).toHaveLength(2);
-  });
-
-  it("types inputs and outputs as string arrays", () => {
-    expectTypeOf<MidiPorts["inputs"]>().toEqualTypeOf<string[]>();
-    expectTypeOf<MidiPorts["outputs"]>().toEqualTypeOf<string[]>();
-  });
-
-  it("round-trips input and output lists independently", async () => {
-    fakeBridge.setPorts(["Kemper Player In"], ["Kemper Player Out", "Captain Out"]);
-    const ports = await midiListPorts();
-    expect(ports).toEqual({
-      inputs: ["Kemper Player In"],
-      outputs: ["Kemper Player Out", "Captain Out"],
-    });
-    // The backend saw the exact command the Rust side must register.
-    expect(fakeBridge.calls).toEqual([{ cmd: "midi_list_ports", args: undefined }]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3. MIDI message filtering
+// 2. MIDI message filtering
 // ---------------------------------------------------------------------------
 
 describe("MIDI message filtering", () => {
@@ -359,7 +307,7 @@ describe("MIDI message filtering", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Bridge state machine (through the protocol functions)
+// 3. Bridge state machine (through the protocol functions)
 // ---------------------------------------------------------------------------
 
 describe("bridge state machine", () => {
@@ -420,7 +368,7 @@ describe("bridge state machine", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Device name matching
+// 4. Device name matching
 // ---------------------------------------------------------------------------
 
 describe("device name matching", () => {
@@ -501,7 +449,7 @@ describe("device name matching", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Edge cases
+// 5. Edge cases
 // ---------------------------------------------------------------------------
 
 describe("edge cases", () => {
@@ -536,12 +484,6 @@ describe("edge cases", () => {
       kemper_port: null,
       pedal_port: "PaintAudio MIDI Captain Bosun Native",
     });
-  });
-
-  it("lists empty ports when the backend has no devices", async () => {
-    fakeBridge.setDevices([]);
-    const ports = await midiListPorts();
-    expect(ports).toEqual({ inputs: [], outputs: [] });
   });
 
   it("survives rapid start/stop cycles without leaking", async () => {
@@ -584,14 +526,12 @@ describe("edge cases", () => {
     expect(status.pedal_port).toBe("PaintAudio MIDI Captain Bosun Native");
   });
 
-  it("calls exactly the four commands the Android backend registers", async () => {
-    await midiListPorts();
+  it("calls exactly the three bridge commands the Android backend registers", async () => {
     await midiBridgeStart();
     await midiBridgeStatus();
     await midiBridgeStop();
     const cmds = fakeBridge.calls.map((c) => c.cmd);
     expect(cmds).toEqual([
-      "midi_list_ports",
       "midi_bridge_start",
       "midi_bridge_status",
       "midi_bridge_stop",

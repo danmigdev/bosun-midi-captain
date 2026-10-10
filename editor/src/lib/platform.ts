@@ -12,10 +12,3 @@ export const IS_ANDROID: boolean = (() => {
   } catch { /* SSR / test environment */ }
   return false;
 })();
-
-/** True when the app is running inside any Tauri shell (desktop or Android). */
-export const IS_TAURI: boolean = (() => {
-  try {
-    return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  } catch { return false; }
-})();

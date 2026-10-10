@@ -31,8 +31,6 @@ export async function invoke<T = unknown>(
       return [] as unknown as T;
 
     // MIDI bridge: the Pi does this in the kernel, not here.
-    case "midi_list_ports":
-      return { inputs: [], outputs: [] } as unknown as T;
     case "midi_bridge_status":
       return { active: false, kemper_port: null, pedal_port: null } as unknown as T;
     case "midi_bridge_start":

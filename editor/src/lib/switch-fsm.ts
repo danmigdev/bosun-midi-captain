@@ -4,13 +4,6 @@
 // with an injected clock. Keep the transitions in sync with switch_fsm.c and
 // its tests in firmware-native/tests/test_switch_fsm.c.
 
-export type SwitchMode =
-  | "tap"
-  | "latched"
-  | "momentary"
-  | "long_press_alt"
-  | "double_tap";
-
 export type ActionKey =
   | "press"
   | "release"

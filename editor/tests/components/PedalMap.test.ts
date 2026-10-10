@@ -7,7 +7,7 @@ import PedalMap from "../../src/components/PedalMap.svelte";
 import { CAPTAIN_10, MINI_6 } from "../../src/lib/hardware";
 import type { Binding } from "../../src/lib/protocol";
 
-/** The ten switches in DOM order (matches DEFAULT_LAYOUT row-major). */
+/** The ten switches in DOM order (matches CAPTAIN_10.rows row-major). */
 const SWITCH_ORDER = ["1", "2", "3", "4", "up", "A", "B", "C", "D", "down"];
 
 /** Default LED color per switch (mirrors switch-colors.ts). */

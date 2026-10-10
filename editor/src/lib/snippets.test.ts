@@ -3,8 +3,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   listSnippets,
   saveSnippet,
-  deleteSnippet,
-  renameSnippet,
   bindingFromSnippet,
 } from "./snippets";
 import type { Binding } from "./protocol";
@@ -93,43 +91,6 @@ describe("saveSnippet + listSnippets", () => {
     const list = listSnippets();
     expect(list[0].binding.label).toBe("Boost");
     expect(list[0].binding.actions.press.messages[0].value).toBe(127);
-  });
-});
-
-describe("deleteSnippet", () => {
-  it("removes the snippet with the given id", () => {
-    const a = saveSnippet("a", sampleBinding());
-    const b = saveSnippet("b", sampleBinding());
-    deleteSnippet(a.id);
-
-    const list = listSnippets();
-    expect(list).toHaveLength(1);
-    expect(list[0].id).toBe(b.id);
-  });
-
-  it("is a no-op for an unknown id", () => {
-    saveSnippet("a", sampleBinding());
-    deleteSnippet("does-not-exist");
-    expect(listSnippets()).toHaveLength(1);
-  });
-});
-
-describe("renameSnippet", () => {
-  it("updates the name in place", () => {
-    const s = saveSnippet("old", sampleBinding());
-    renameSnippet(s.id, "new");
-
-    const list = listSnippets();
-    expect(list).toHaveLength(1);
-    expect(list[0].id).toBe(s.id);
-    expect(list[0].name).toBe("new");
-  });
-
-  it("is a no-op for an unknown id", () => {
-    const s = saveSnippet("keep", sampleBinding());
-    renameSnippet("nope", "changed");
-    expect(listSnippets()[0].name).toBe("keep");
-    expect(listSnippets()[0].id).toBe(s.id);
   });
 });
 

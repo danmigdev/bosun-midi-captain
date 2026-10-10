@@ -80,13 +80,8 @@
   function colorFor(sw: string): string {
     const b = bindingFor(sw);
     if (!b) return "#2a2a2a";
-    const leds = device?.leds as { dim?: number; dim_percent?: number } | undefined;
-    // Prefer the 0-255 `dim`; fall back to a legacy percent, else the default.
-    const dim = typeof leds?.dim === "number"
-      ? leds.dim
-      : typeof leds?.dim_percent === "number"
-        ? Math.round((leds.dim_percent * 255) / 100)
-        : 64;
+    const leds = device?.leds as { dim?: number } | undefined;
+    const dim = typeof leds?.dim === "number" ? leds.dim : 64;
     return ledColorFor(b, latched[sw] ?? false, dim);
   }
 

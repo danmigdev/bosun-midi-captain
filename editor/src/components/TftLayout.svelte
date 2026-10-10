@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { cmd, type Manifest } from "../lib/protocol";
   import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";
   import ColorField from "./ColorField.svelte";
@@ -15,7 +14,6 @@
     suffix?: string;
     halign?: "left" | "center" | "right";
     valign?: "top" | "center" | "bottom";
-    font?: string;
     // Marquee: when the text is wider than the screen, scroll it horizontally
     // instead of clipping. `scroll_speed` is px/second (default 40 on device).
     scroll?: boolean;
@@ -65,7 +63,6 @@
     { id: "patch_name",  label: "Patch name",       source: "core" },
     { id: "bank",        label: "Captain bank",     source: "core" },
     { id: "slot",        label: "Captain slot",     source: "core" },
-    { id: "setlist_pos", label: "Setlist position", source: "core" },
     { id: "hold_effect", label: "Held effect",      source: "core" },
     { id: "expression_mode", label: "Expression pedal mode (VOL/WAH)", source: "core" },
   ];
@@ -102,7 +99,6 @@
       x: 0, y: 20, size: 2,
       color: "#ffffff",
       prefix: "", suffix: "",
-      font: "system",
     }];
   }
 
@@ -116,7 +112,7 @@
     layout = [...layout, {
       field: "expression_mode",
       halign: "right", valign: "bottom", x: -6, y: -6,
-      size: 2, color: "#ffffff", font: "system",
+      size: 2, color: "#ffffff",
     }];
   }
 
@@ -190,14 +186,6 @@
     finally { saving = false; }
   }
 
-  let availableFonts = $state<string[]>([]);
-  onMount(async () => {
-    try {
-      const fr = await cmd.listFonts();
-      availableFonts = fr.fonts ?? [];
-    } catch {}
-  });
-
   function resetToDefaults() {
     if (!manifest) return;
     // Prefer the plugin matching the active profile's kind. If no match,
@@ -231,7 +219,6 @@
       patch_name: "Heavy",
       bank: 1,
       slot: 4,
-      setlist_pos: "3/12",
       hold_effect: "BOOST",
     };
     if (manifest) {
@@ -378,13 +365,6 @@
             <label>Y offset<input type="number" min="-240" max="240" bind:value={e.y} /></label>
             <label title="Font scale (1 = smallest). Use a large size for a bold patch name.">Size<input type="number" min="1" max="12" bind:value={e.size} /></label>
             <label>Color<ColorField bind:value={e.color} /></label>
-            <label>Font
-              <select value={e.font ?? "system"}
-                      onchange={(ev) => e.font = (ev.target as HTMLSelectElement).value}>
-                <option value="system">system (terminalio)</option>
-                {#each availableFonts as f}<option value={f}>{f}</option>{/each}
-              </select>
-            </label>
             <label class="chk" title="Scroll the text horizontally when it is too wide for the screen">Scroll
               <input type="checkbox" checked={e.scroll ?? false}
                      onchange={(ev) => e.scroll = (ev.target as HTMLInputElement).checked} />
@@ -523,17 +503,4 @@
   .marqueeInner { display: inline-block; white-space: nowrap; will-change: transform; }
   .pedalPreview { margin-bottom: 0.5rem; }
   .prevhint { color: var(--text-dim); font-size: 0.72rem; margin: 0.4rem 0 0; max-width: 240px; }
-
-  /* ---------- mobile ---------- */
-  @media (max-width: 767px) {
-    .tft-grid { gap: 0.3rem; }
-    .tft-field { padding: 0.35rem 0.4rem; }
-    .tft-preview { max-width: 180px; margin: 0 auto; }
-    .tft-row { flex-direction: column; gap: 0.35rem; }
-    .tft-row select, .tft-row input {
-      width: 100%;
-      font-size: 0.9rem;
-      min-height: 44px;
-    }
-  }
 </style>

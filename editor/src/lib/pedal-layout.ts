@@ -11,13 +11,6 @@ import type { Binding } from "./protocol";
  *  string "" is a spacer / empty cell. */
 export type PedalLayout = string[][];
 
-/** The 10-switch Captain's switch names, the default when the firmware does
- *  not report its hardware. */
-export const ALL_SWITCHES: string[] = CAPTAIN_10.switches;
-
-/** The 10-switch Captain's schematic arrangement. */
-export const DEFAULT_LAYOUT: PedalLayout = CAPTAIN_10.rows;
-
 /** The schematic arrangement of a model's switches, top row first. */
 export function layoutFor(hardware: HardwareLayout | null | undefined): PedalLayout {
   return (hardware ?? CAPTAIN_10).rows;

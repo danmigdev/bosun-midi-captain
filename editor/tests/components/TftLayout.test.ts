@@ -7,17 +7,16 @@ import type { Manifest } from "../../src/lib/protocol";
 const commands = vi.hoisted(() => ({
   putGlobal: vi.fn(),
   getGlobal: vi.fn(),
-  listFonts: vi.fn(),
 }));
 vi.mock("../../src/lib/protocol", () => ({ cmd: commands }));
 
 const title = {
   field: "patch_name", halign: "left", valign: "top", x: 0, y: 0,
-  size: 5, color: "#ffffff", font: "system",
+  size: 5, color: "#ffffff",
 };
 const pedal = {
   field: "expression_mode", halign: "right", valign: "bottom", x: -6, y: -6,
-  size: 2, color: "#ffffff", font: "system",
+  size: 2, color: "#ffffff",
 };
 
 function deviceWith(layout: Array<Record<string, unknown>>) {
@@ -45,7 +44,6 @@ function kemperManifest(): Manifest {
 beforeEach(() => {
   commands.putGlobal.mockReset().mockResolvedValue(undefined);
   commands.getGlobal.mockReset().mockResolvedValue(undefined);
-  commands.listFonts.mockReset().mockResolvedValue({ fonts: ["custom.bdf"] });
 });
 
 describe("TftLayout expression indicator", () => {
@@ -62,7 +60,7 @@ describe("TftLayout expression indicator", () => {
     expect(original).toEqual(before);
   });
 
-  it("adds a bottom-right pedal row explicitly and edits its ordinary position and font", async () => {
+  it("adds a bottom-right pedal row explicitly and edits its ordinary position", async () => {
     const original = deviceWith([title]);
     const before = structuredClone(original);
     const { container } = render(TftLayout, { device: original, manifest: null });
@@ -90,12 +88,11 @@ describe("TftLayout expression indicator", () => {
     await fireEvent.change(row.getByLabelText("V-align"), { target: { value: "top" } });
     await fireEvent.input(row.getByLabelText("X offset"), { target: { value: "17" } });
     await fireEvent.input(row.getByLabelText("Y offset"), { target: { value: "180" } });
-    await fireEvent.change(row.getByLabelText("Font"), { target: { value: "custom.bdf" } });
     expect(commands.putGlobal).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
     await waitFor(() => expect(commands.putGlobal).toHaveBeenCalledOnce());
     const saved = commands.putGlobal.mock.calls[0][0];
-    expect(saved.tft.layout).toEqual([title, { ...pedal, halign: "left", valign: "top", x: 17, y: 180, font: "custom.bdf" }]);
+    expect(saved.tft.layout).toEqual([title, { ...pedal, halign: "left", valign: "top", x: 17, y: 180 }]);
     expect(saved.expression).toEqual(before.expression);
     expect(saved.kemper).toEqual(before.kemper);
     expect(saved.tft.brightness).toBe(87);

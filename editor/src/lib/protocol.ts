@@ -84,9 +84,6 @@ export interface PluginConfigFieldSchema {
   min?: number;
   max?: number;
   values?: Array<string | number>;
-  /** Persisted in device.json but not rendered in Settings (e.g. a debug
-   * flag flipped by hand). The whole section is hidden if no field is visible. */
-  hidden?: boolean;
 }
 
 export interface PluginConfigSchema {
@@ -397,7 +394,6 @@ export type FirmwareMessage =
   | { type: "MANIFEST"; id?: string; core_messages: Record<string, MessageSchema>; plugins: Record<string, PluginManifestEntry> }
   | ({ type: "STATS"; id?: string } & DeviceStats)
   | { type: "PROFILE_LIST"; id?: string; profiles: ProfileInfo[]; active: string }
-  | { type: "FONT_LIST"; id?: string; fonts: string[] }
   // Current rig name (and best-effort colour) read from a device that can
   // report it (Kemper). `name` is the live rig name ("" if the device hasn't
   // broadcast one yet). `rig` is the flat rig index 1..125 the name belongs to
@@ -449,15 +445,11 @@ export async function reconnectLast(): Promise<string> {
 // ---- USB-MIDI bridge (Kemper Player <-> pedal) ----
 // Relays MIDI both ways so MIDI Learn capture and the bidirectional sync work
 // without a separate bridge program. Separate from the CDC link.
-export type MidiPorts = { inputs: string[]; outputs: string[] };
 export type BridgeStatus = {
   active: boolean;
   kemper_port: string | null;
   pedal_port: string | null;
 };
-export async function midiListPorts(): Promise<MidiPorts> {
-  return invoke<MidiPorts>("midi_list_ports");
-}
 export async function midiBridgeStart(kemper?: string, pedal?: string): Promise<BridgeStatus> {
   return invoke<BridgeStatus>("midi_bridge_start", { kemper: kemper ?? null, pedal: pedal ?? null });
 }
@@ -582,7 +574,6 @@ function nextId(): string { return String(_nextId++); }
 
 type PendingResolver = (msg: FirmwareMessage) => void;
 const _pending = new Map<string, PendingResolver>();
-let _awaitListener: UnlistenFn | null = null;
 let _connectionGeneration = 0;
 const _internallyRetriedErrors = new WeakSet<object>();
 
@@ -948,10 +939,6 @@ export const cmd = {
   renameProfile:  (profile_id: string, name: string) =>
                     sendAndAwait({ type: "RENAME_PROFILE", profile_id, name }, 4000),
 
-  // ----- fonts -----
-  listFonts:      () => sendAndAwait<{ type: "FONT_LIST"; fonts: string[] }>(
-                          { type: "LIST_FONTS" }, 3000),
-
   // ----- device rig info (Kemper) -----
   // Read the current rig name (and best-effort position colour) from a device
   // that can report it. Routes to the active plugin on the firmware; ERRORs
@@ -971,11 +958,6 @@ export const cmd = {
 
 export function patchIdOf(bank: number, slot: number): string {
   return `${String(bank).padStart(2,"0")}/${String(slot).padStart(2,"0")}`;
-}
-export function parsePatchId(id: string): { bank: number; slot: number } | null {
-  const m = id.match(/^(\d+)\/(\d+)$/);
-  if (!m) return null;
-  return { bank: parseInt(m[1], 10), slot: parseInt(m[2], 10) };
 }
 
 

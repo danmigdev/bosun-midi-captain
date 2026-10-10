@@ -89,11 +89,6 @@ export function listSetlists(): Setlist[] {
   return readAll();
 }
 
-/** The setlist with the given id, or undefined if none matches. */
-export function getSetlist(id: string): Setlist | undefined {
-  return readAll().find((s) => s.id === id);
-}
-
 /** Create a setlist with `name` and (deep-copied) `items` under a fresh id,
  * persist it, and return the newly created setlist. */
 export function createSetlist(name: string, items: SetlistItem[] = []): Setlist {

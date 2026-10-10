@@ -2,13 +2,17 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import {
   listSetlists,
-  getSetlist,
   createSetlist,
   updateSetlistItems,
   renameSetlist,
   deleteSetlist,
 } from "./setlists";
 import type { SetlistItem } from "./setlists";
+
+/** The stored setlist with the given id, read back through listSetlists. */
+function getSetlist(id: string) {
+  return listSetlists().find((s) => s.id === id);
+}
 
 /** Minimal in-memory localStorage backed by a Map, matching the subset of the
  * Storage API our module touches (getItem/setItem/removeItem). */
@@ -77,21 +81,6 @@ describe("createSetlist + listSetlists", () => {
 
     const list = listSetlists();
     expect(list[0].items).toEqual(sampleItems());
-  });
-});
-
-describe("getSetlist", () => {
-  it("returns the setlist matching the id", () => {
-    const a = createSetlist("a", [{ bank: 1, slot: 1 }]);
-    const b = createSetlist("b", [{ bank: 2, slot: 2 }]);
-
-    expect(getSetlist(a.id)?.name).toBe("a");
-    expect(getSetlist(b.id)?.items).toEqual([{ bank: 2, slot: 2 }]);
-  });
-
-  it("returns undefined for an unknown id", () => {
-    createSetlist("a");
-    expect(getSetlist("nope")).toBeUndefined();
   });
 });
 

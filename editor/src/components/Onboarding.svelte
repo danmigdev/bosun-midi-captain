@@ -3,8 +3,7 @@
   import { readKemperSetup, setupProfileKind } from '../lib/setup-guide';
   import ProfilerSetupFields from './ProfilerSetupFields.svelte';
   let kemperSetup = $state(readKemperSetup());
-  import { onMount } from "svelte";
-  import { cmd, type Manifest } from "../lib/protocol";
+  import type { Manifest } from "../lib/protocol";
   import ColorField from "./ColorField.svelte";
   import HardwareModelPicker from "./HardwareModelPicker.svelte";
   import { CAPTAIN_10, type HardwareLayout } from "../lib/hardware";

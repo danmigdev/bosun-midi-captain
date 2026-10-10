@@ -13,7 +13,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/svelte";
 import StageView from "../../src/components/StageView.svelte";
-import { DEFAULT_LAYOUT } from "../../src/lib/pedal-layout";
 import { CAPTAIN_10, MINI_6, type HardwareLayout } from "../../src/lib/hardware";
 import { FONT_STACKS } from "../../src/lib/stage-theme";
 import {
@@ -97,7 +96,7 @@ type StageProps = {
   onExit: () => void;
 };
 
-/** The ten switch IDs in DOM order (matches DEFAULT_LAYOUT row-major).
+/** The ten switch IDs in DOM order (matches CAPTAIN_10.rows row-major).
  * Lowercase firmware switch names; the component DISPLAYS them upper-cased
  * (see StageView.displaySwitch), so DOM assertions use DISPLAY_ORDER. */
 const SWITCH_ORDER = ["1", "2", "3", "4", "up", "A", "B", "C", "D", "down"];
@@ -1466,15 +1465,15 @@ describe("StageView", () => {
   });
 
   describe("layout", () => {
-    it("DEFAULT_LAYOUT top row is [1, 2, 3, 4, up]", () => {
-      expect(DEFAULT_LAYOUT[0]).toEqual(["1", "2", "3", "4", "up"]);
+    it("the 10-switch top row is [1, 2, 3, 4, up]", () => {
+      expect(CAPTAIN_10.rows[0]).toEqual(["1", "2", "3", "4", "up"]);
     });
 
-    it("DEFAULT_LAYOUT bottom row is [A, B, C, D, down]", () => {
-      expect(DEFAULT_LAYOUT[1]).toEqual(["A", "B", "C", "D", "down"]);
+    it("the 10-switch bottom row is [A, B, C, D, down]", () => {
+      expect(CAPTAIN_10.rows[1]).toEqual(["A", "B", "C", "D", "down"]);
     });
 
-    it("renders rows that match DEFAULT_LAYOUT", () => {
+    it("renders rows that match the 10-switch layout", () => {
       const { container } = renderStage();
       const rows = Array.from(container.querySelectorAll(".stage__pedal-row"));
       const rendered = rows.map((row) =>

@@ -87,26 +87,6 @@ export function saveSnippet(name: string, binding: Binding): Snippet {
   return snippet;
 }
 
-/** Remove the snippet with the given id (no-op if it doesn't exist). */
-export function deleteSnippet(id: string): void {
-  const all = readAll();
-  const next = all.filter((s) => s.id !== id);
-  if (next.length !== all.length) writeAll(next);
-}
-
-/** Rename the snippet with the given id (no-op if it doesn't exist). */
-export function renameSnippet(id: string, name: string): void {
-  const all = readAll();
-  let changed = false;
-  for (const s of all) {
-    if (s.id === id) {
-      s.name = name;
-      changed = true;
-    }
-  }
-  if (changed) writeAll(all);
-}
-
 /** Produce a fresh, deep-cloned Binding from a snippet, retargeted to
  * `switchName`. The clone keeps snippets switch-agnostic: the same snippet
  * can be applied to any switch without the results aliasing each other or

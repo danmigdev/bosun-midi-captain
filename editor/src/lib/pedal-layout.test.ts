@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  DEFAULT_LAYOUT,
-  ALL_SWITCHES,
   labelForSwitch,
   isBound,
   layoutFor,
@@ -19,20 +17,20 @@ function switchesOf(layout: PedalLayout): string[] {
   return layout.flat().filter((c) => c !== "");
 }
 
-describe("DEFAULT_LAYOUT", () => {
+describe("the 10-switch Captain layout", () => {
   it("flattened (minus spacers) holds all ten switches exactly once", () => {
-    const flat = switchesOf(DEFAULT_LAYOUT);
+    const flat = switchesOf(CAPTAIN_10.rows);
     expect(flat).toHaveLength(10);
     expect(new Set(flat).size).toBe(10);
-    expect([...flat].sort()).toEqual([...ALL_SWITCHES].sort());
+    expect([...flat].sort()).toEqual([...CAPTAIN_10.switches].sort());
   });
 });
 
 describe("layoutFor", () => {
   it("draws the 10-switch Captain as two rows of five, also by default", () => {
     expect(layoutFor(CAPTAIN_10)).toEqual([["1", "2", "3", "4", "up"], ["A", "B", "C", "D", "down"]]);
-    expect(layoutFor(undefined)).toEqual(DEFAULT_LAYOUT);
-    expect(layoutFor(null)).toEqual(DEFAULT_LAYOUT);
+    expect(layoutFor(undefined)).toEqual(CAPTAIN_10.rows);
+    expect(layoutFor(null)).toEqual(CAPTAIN_10.rows);
   });
 
   it("draws the Mini 6 as two rows of three", () => {

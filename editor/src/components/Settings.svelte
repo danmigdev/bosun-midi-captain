@@ -7,7 +7,6 @@
   import { getBankCount, getRigsPerBank, MAX_BANKS, MAX_RIGS_PER_BANK } from "../lib/bank-layout";
   import { CAPTAIN_10, expressionJacks, hasSwitch, missingSwitches, type HardwareLayout } from "../lib/hardware";
   import ExpressionPedals from "./ExpressionPedals.svelte";
-  import ColorField from "./ColorField.svelte";
 
   type DeviceConfig = {
     device_name?: string;
@@ -25,7 +24,7 @@
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number; dim?: number };
     preset_navigation?: { switches?: Record<string, number>; bank_colors?: Record<string, string> };
-    tft?: { brightness?: number; theme_color?: string; rotation?: number; rowstart?: number; colstart?: number };
+    tft?: { brightness?: number; rotation?: number };
     expression?: ExpressionConfig[];
     [k: string]: unknown;
   };
@@ -79,12 +78,8 @@
     w.bank_count = getBankCount(w);
     if (!w.autosave) w.autosave = { enabled: false, debounce_ms: 2000 };
     if (!w.leds) w.leds = { brightness: 64, dim: 64 };
-    // Back-compat: migrate a legacy dim_percent (0-100) to dim (0-255).
-    if (w.leds.dim == null) {
-      const legacy = (w.leds as { dim_percent?: number }).dim_percent;
-      w.leds.dim = legacy == null ? 64 : Math.round((legacy * 255) / 100);
-    }
-    if (!w.tft) w.tft = { brightness: 80, theme_color: "#00ff88", rotation: 180, rowstart: 80, colstart: 0 };
+    if (w.leds.dim == null) w.leds.dim = 64;
+    if (!w.tft) w.tft = { brightness: 80, rotation: 180 };
     // Expression jacks: one default per jack this model has (none on a
     // pedal without jacks), each backfilled to a complete entry so the
     // editor can bind enable/invert/curve/message without null checks.
@@ -170,11 +165,6 @@
     } finally {
       saving = false;
     }
-  }
-
-  function ensure<T extends object, K extends keyof T>(o: T, k: K, def: T[K]): T[K] {
-    if (o[k] === undefined) o[k] = def;
-    return o[k]!;
   }
 
   const ROTATIONS = [0, 90, 180, 270];
@@ -500,14 +490,11 @@
       <h3>Display</h3>
       <div class="grid">
         <label>Brightness (0–100) <input type="number" min="0" max="100" bind:value={working.tft!.brightness} /></label>
-        <label>Theme color <ColorField bind:value={working.tft!.theme_color} /></label>
         <label>Rotation
           <select bind:value={working.tft!.rotation}>
             {#each ROTATIONS as r}<option value={r}>{r}°</option>{/each}
           </select>
         </label>
-        <label>rowstart <input type="number" min="0" max="320" bind:value={working.tft!.rowstart} /></label>
-        <label>colstart <input type="number" min="0" max="320" bind:value={working.tft!.colstart} /></label>
       </div>
     </section>
 
@@ -534,17 +521,17 @@
     {/if}
 
     {#each pluginConfigs as cfg (cfg.key)}
-      {@const visibleFields = Object.entries(cfg.fields).filter(([, f]) => !f.hidden)}
-      {#if visibleFields.length > 0}
+      {@const fields = Object.entries(cfg.fields)}
+      {#if fields.length > 0}
       <section class="block">
         <h3>{cfg.label}</h3>
-        {#if cfg.key === "kemper"}<KemperIdentity {connected} />{/if}
+        {#if activeKind === "kemper_head" && cfg.key === "kemper"}<KemperIdentity {connected} />{/if}
         {#if activeKind === "kemper_head" && cfg.key === "kemper" && readField(cfg.key, "mode", "performance") === "browse"}
           <BrowseProgramMap value={readField(cfg.key, "browse_program_map", {})} onChange={value => writeField(cfg.key, "browse_program_map", value)} />
         {/if}
         {#if cfg.hint}<p class="hint">{cfg.hint}</p>{/if}
         <div class="grid">
-          {#each visibleFields as [name, field] (name)}
+          {#each fields as [name, field] (name)}
             {#if field.type === "bool"}
               <label class="cb">
                 <input type="checkbox"
@@ -633,14 +620,13 @@
     .block { padding: 0.5rem; margin-bottom: 0.5rem; }
     .block h3 { font-size: 0.9rem; }
     .grid { grid-template-columns: 1fr; gap: 0.4rem; }
-    .grid input, .grid select, .grid textarea, .form input, .form select {
+    .grid input, .grid select, .form input, .form select {
       width: 100%;
       font-size: 0.9rem;
       padding: 0.45rem 0.5rem;
       min-height: 44px;
     }
     .grid input[type="checkbox"] { width: auto; min-height: auto; }
-    .grid input[type="color"] { width: 100%; min-height: 44px; }
     .cb { flex-wrap: wrap; gap: 0.35rem; }
     .orphans button { min-height: 44px; }
     .saverow { flex-direction: column; gap: 0.35rem; }

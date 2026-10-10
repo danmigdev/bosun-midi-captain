@@ -4,7 +4,7 @@
   import ProfilerSetupFields from './ProfilerSetupFields.svelte';
   let kemperSetup = $state(readKemperSetup());
   import { onMount } from "svelte";
-  import { cmd, autoConnect, disconnect, isConnected, type ProfileInfo, type Manifest } from "../lib/protocol";
+  import { cmd, type ProfileInfo, type Manifest } from "../lib/protocol";
   import ColorField from "./ColorField.svelte";
 
   type Props = { manifest?: Manifest | null };
@@ -320,21 +320,4 @@
   .createform .actions button.primary { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
 
   .hint { color: var(--text-dim); font-size: 0.7rem; margin: 0.6rem 0 0; font-style: italic; }
-
-  /* ---------- mobile ---------- */
-  @media (max-width: 767px) {
-    .profiles { gap: 0.3rem; }
-    .profile-btn { font-size: 0.72rem; padding: 0.35rem 0.5rem; }
-    .profile-modal { width: calc(100vw - 2rem); max-width: none; }
-    .profile-form { gap: 0.5rem; }
-    .profile-form input, .profile-form select {
-      width: 100%;
-      font-size: 0.9rem;
-      padding: 0.45rem 0.5rem;
-      min-height: 44px;
-    }
-    .color-swatch { width: 36px; height: 36px; }
-    .color-grid { gap: 0.3rem; }
-    .color-swatch-btn { width: 28px; height: 28px; }
-  }
 </style>
