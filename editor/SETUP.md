@@ -68,7 +68,8 @@ factory-to-Bosun installation over USB. Existing Bosun firmware can be
 updated over USB or through the Pi. See
 [firmware installation and updates](../docs/firmware-updates.md) for the
 different requirements and recovery procedures. Factory installation
-is experimental; macOS and Linux application operation remains untested.
+has been hardware-tested on Windows; macOS and Linux application operation
+remains untested.
 
 For Android requirements and APK installation, see
 [Android setup](src-tauri/android-config.md).
@@ -95,6 +96,5 @@ Old build logs, downloaded release copies and compiler output can be removed
 when no running process uses them. Keep one copy of the current release under
 `dist/`; keep recovery backups, installation journals and validation evidence
 under `recovery/`. Preserve signing keys and any uncommitted source edits.
-Previous release notes remain available in Git history and GitHub Releases.
 Generated installer resources under `editor/src-tauri/resources/` are required
 for packaging and must be rebuilt using the instructions above if removed.

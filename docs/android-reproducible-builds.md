@@ -119,7 +119,7 @@ On 2026-09-13, [pipeline 2844489018 in the F-Droid metadata
 fork](https://gitlab.com/danilo.migliarino/fdroiddata/-/pipelines/2844489018)
 passed a full build and comparison for all four Android ABIs. The tested
 source was Bosun commit `012bcdc16bb1bba1d09058cc3011b63f9a0977f3`
-(0.6.5, version code 33) with the
+(an earlier development build, version code 33) with the
 [Tauri dependency patch](https://gitlab.com/danilo.migliarino/fdroiddata/-/blob/8153ead064c69e24195dfd1de314fd1815440a5d/tools/bosun-verify/tauri-repro.patch)
 applied.
 

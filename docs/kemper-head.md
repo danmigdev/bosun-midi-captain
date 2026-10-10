@@ -1,11 +1,12 @@
 # Kemper PROFILER support (experimental)
 
-Bosun provides experimental support for the Kemper family:
+Bosun supports the Kemper family:
 **Player, Head, Rack and Stage**. Select **Kemper Player** for Player, or
 **Kemper PROFILER - Head / Rack / Stage (experimental)** for the other models.
 Head, Rack and Stage use one plugin and share the common Kemper engine with
-Player. Physical validation of Head/Rack/Stage is still pending; this is an
-experimental release, not a claim that every model/OS combination is verified.
+Player. Head, Rack and Stage support is experimental: physical validation on a
+PROFILER is still pending, and no model/OS combination is claimed as verified.
+The Player is tested on hardware (see [Tested on hardware](#tested-on-hardware)).
 
 ## Setup
 
@@ -18,10 +19,10 @@ experimental release, not a claim that every model/OS combination is verified.
    the same mode on the Kemper itself. These settings are manual: Bosun does
    not detect the hardware generation or switch the Kemper's operating mode.
 5. Connect MIDI in both directions for rig names, effect feedback and tuner
-   information. Test the controls below before using this experimental build live.
+   information. Test the controls below before using them live.
 
-Older Head profiles default to MK1 and Performance Mode. Player profiles keep
-using the Player plugin and their existing settings.
+A PROFILER profile without these settings uses MK1 and Performance Mode.
+Player profiles use the Player plugin.
 
 ## Choosing rigs
 
@@ -42,24 +43,19 @@ unrelated Bosun patch. Put a Browse selection in each Bosun patch's **On enter**
 action when you want that patch to select a particular assigned program.
 **Step Rig / Performance** steps according to the mode selected on the Kemper.
 
-Bosun bank coordinates now support **1–125** throughout firmware storage, editor,
-Stage and hub snapshots. Existing two-digit paths are preserved; banks 100-125
-use three digits. Catalogs and active navigation now support **625 configured
-patches**. Editor, Stage and update backups assemble
+Bosun bank coordinates span **1–125** throughout firmware storage, editor,
+Stage and hub snapshots; banks 100-125 use three-digit paths. Catalogs and
+active navigation hold up to **625 configured patches**. Editor, Stage and update backups assemble
 bounded pages and reject incomplete inventories. There is still a separate limit
 of 128 unsaved drafts: save in batches when creating a large setup.
 
-Configuration storage now reserves **4 MiB** on the 8 MiB Captain. Existing
-512 KiB littlefs volumes mount without writes. Their original physical blocks
-stay in place; the first configuration write atomically expands the filesystem.
-Unknown or damaged volumes are never automatically formatted. Tests cover power
-loss before, during and after each erase/program operation in the expansion.
-625 representative patches were stored and read back using the real backend;
+Configuration storage reserves **4 MiB** on the 8 MiB Captain. Unknown or
+damaged volumes are never automatically formatted. 625 representative patches were stored and read back using the real backend;
 actual capacity still depends on patch sizes and other profiles sharing flash.
 
-**Keep the full-flash backup made by Desktop before upgrading.** Once storage has
-expanded, older firmware cannot mount it. To downgrade, restore that full-flash
-backup; installing only an older UF2 is not a supported downgrade.
+**Keep the full-flash backup that Desktop makes before each update.** Restoring
+it is the supported way back to the previous installation; installing only
+another UF2 is not a supported downgrade.
 
 ## Graphical setup and identity
 
@@ -102,8 +98,8 @@ running entry actions; unmapped programs leave the Bosun patch unchanged.
   Enable rig tempo on the Kemper when using tempo-synchronised effects.
 - **Tap Tempo** sends a single CC30 value 0 event, avoiding a held tap button.
 
-Looper, Rotary, Set BPM and Tap corrections apply to the common firmware engine,
-including existing Player command IDs. A command being offered does not add a
+Looper, Rotary, Set BPM and Tap use the common firmware engine, including the
+Player command IDs. A command being offered does not add a
 feature absent from the connected Kemper or its OS. Morph displays the last
 commanded position, not measured progress of the Kemper's Morph ramp.
 
@@ -120,13 +116,24 @@ and generates C model descriptors from the same definitions. MIDI transmission,
 rig-change reconciliation, tuner, Morph and effect discovery are implemented
 once. No Stage-specific engine or copied configuration is needed.
 
-The internal profile ID remains `kemper_head` to preserve existing profiles and
-backups. Both plugins retain shared `kemper_*` commands, the `device.kemper`
-configuration block and the default screen layout.
+The internal profile ID is `kemper_head`. Both plugins share the `kemper_*`
+commands, the `device.kemper` configuration block and the default screen layout.
 
 For custom displays, context adds `kemper_mode` and `kemper_program` (0–127 in
 Browse when the identity is known, otherwise -1). In Browse, bank/slot context
 refers to the Bosun patch and `kemper_rig` is the one-based program identity.
+
+## Tested on hardware
+
+Release 0.8.2 was tested with a 10-switch Captain and a Kemper Player, both
+connected by USB to a Raspberry Pi hub. With the Kemper Player profile, every
+rig change in bank 1 was confirmed by the rig name the Kemper reported, in
+about one second, and effect switches were confirmed by the Kemper in under
+0.2 s. The initial rig name and effect states arrived on connection. Switches
+were activated through Bosun's switch-activation command, not pressed by hand.
+A PROFILER profile was also run against the same Player: that exercises the
+shared engine but is not a PROFILER hardware test. No Head, Rack or Stage was
+connected.
 
 ## Validation still needed on hardware
 

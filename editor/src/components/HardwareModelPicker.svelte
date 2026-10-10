@@ -58,8 +58,8 @@
 
 {#if options.length === 0}
   <p class="muted small">
-    This firmware always runs as the {hardwareLabel(hardware)}. Install Bosun 0.8 or
-    later to use a MIDI Captain Mini 6.
+    This firmware always runs as the {hardwareLabel(hardware)}. Update the Captain
+    firmware to use a MIDI Captain Mini 6.
   </p>
 {:else}
   <fieldset class="models" disabled={disabled || busy}>

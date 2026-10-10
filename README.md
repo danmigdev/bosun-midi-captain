@@ -6,9 +6,10 @@ Captain with RP2040 and 8 MiB flash**, with experimental support for the
 footswitches, banks, rigs, LEDs and expression pedals with Bosun Desktop or
 Android. The firmware supports **Kemper Player, Head, Rack and Stage**, plus
 **Generic MIDI**.
-Kemper support across the family is experimental: Player has previous hardware
-validation; Head/Rack/Stage validation is pending. Choose the Player profile or
-the shared [PROFILER profile](docs/kemper-head.md) for Head/Rack/Stage.
+Kemper Player support is hardware-tested. Kemper PROFILER (Head/Rack/Stage)
+support is experimental; its hardware validation is pending. Choose the Player
+profile or the shared [PROFILER profile](docs/kemper-head.md) for
+Head/Rack/Stage.
 
 **Stage** shows rig names, effect states, a tuner and Morph controls on a phone,
 tablet, computer or Raspberry Pi display. Android and Desktop can also handle
@@ -22,9 +23,9 @@ the MIDI bridge; a Pi shares the Captain connection across the local network.
 
 ## Download and install
 
-These instructions cover **Bosun 0.8.1**. Download the matching packages from
+These instructions cover **Bosun 0.8.2**. Download the matching packages from
 [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
-See [what changed in 0.8.1](docs/releases/0.8.1.md).
+See the [release notes](docs/releases/0.8.2.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
@@ -37,7 +38,7 @@ See [what changed in 0.8.1](docs/releases/0.8.1.md).
 [illustrated setup guide and FAQ](docs/first-setup.md). It covers six
 configurations, including Android as hub and a Pi with an HDMI display.
 The same wizard is available as an
-[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.1/Bosun-0.8.1-setup-guide.html).
+[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.2/Bosun-0.8.2-setup-guide.html).
 Keep the app, Captain firmware and Pi components on matching releases.
 
 ## Connections

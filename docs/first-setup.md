@@ -1,10 +1,10 @@
 # Bosun: choose your setup
 
-Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.8.1 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.8.1) includes `Bosun-0.8.1-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
+Open **Setup guide** in Bosun Desktop for the interactive version: choose a setup, see its diagram, install the Captain, prepare the host and run the final check. The [0.8.2 release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.8.2) includes `Bosun-0.8.2-setup-guide.html`, which uses the same screens and works offline in a browser. On Windows, `Setup-guide.html` is also beside `Bosun.exe`. To build the guide from source, run `npm --prefix editor run build:guide`.
 
-These instructions target the **RP2040 MIDI Captain with 8 MiB flash** (the 10-switch model, and experimentally the 6-switch [Mini 6](mini6.md)) and **Kemper Player, Head, Rack and Stage**. Kemper family support is experimental; Head/Rack/Stage hardware validation is pending. Select your model in the wizard, then the connection, host and display. Use the **Kemper Player** profile for Player and **Kemper PROFILER** for Head/Rack/Stage. For PROFILER profiles, select the matching MK1/MK2 generation and Performance/Browse mode; Bosun does not switch the Kemper's mode for you. See [PROFILER setup and limitations](kemper-head.md).
+These instructions target the **RP2040 MIDI Captain with 8 MiB flash** (the 10-switch model, and experimentally the 6-switch [Mini 6](mini6.md)) and **Kemper Player, Head, Rack and Stage**. Kemper PROFILER (Head/Rack/Stage) support is experimental; its hardware validation is pending. Select your model in the wizard, then the connection, host and display. Use the **Kemper Player** profile for Player and **Kemper PROFILER** for Head/Rack/Stage. For PROFILER profiles, select the matching MK1/MK2 generation and Performance/Browse mode; Bosun does not switch the Kemper's mode for you. See [PROFILER setup and limitations](kemper-head.md).
 
-Windows first installation from stock PaintAudio 5.15 passed a hardware test with Desktop 0.6.8 or later, including configuration restoration. See the [hardware test record](stock-installation-test.md). macOS/Linux operation, other stock versions, the Mini 6 and other Captain models, and installation on a fresh Pi card remain unverified.
+Windows first installation from stock PaintAudio 5.15 passed a hardware test with a development build of the installer, including configuration restoration. See the [hardware test record](stock-installation-test.md). macOS/Linux operation, other stock versions, the Mini 6 and other Captain models, and installation on a fresh Pi card remain unverified.
 
 ## 1. Choose what you want
 
@@ -74,11 +74,11 @@ Power the Pi and Kemper with their own supplies. HDMI supplies video, not displa
 
 ## 2. Install Bosun firmware on the Captain
 
-1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/tag/v0.8.1). On Windows, extract the entire folder and open `Bosun.exe`.
+1. Download the latest complete [Bosun Desktop release](https://github.com/danmigdev/bosun-midi-captain/releases/latest). On Windows, extract the entire folder and open `Bosun.exe`.
 2. Connect **Captain USB-B directly to the computer**, using a data cable. This temporary connection is needed even if your final setup uses Android or a Pi.
 3. Open **Setup guide → Prepare the Captain → Install Bosun firmware**. Select the device, choose your Captain model (**MIDI Captain**, 10 switches, or **MIDI Captain Mini 6**), confirm it, check the displayed Bosun version, then press **Install**. On a Mini 6, read the [Mini 6 notes](mini6.md) first.
-4. Bosun saves and verifies the full original firmware and files before writing. Keep the computer and Captain powered and the USB cable connected. Bosun installs directly; no older Bosun version is needed.
-5. Bosun requests the USB bootloader automatically. Keep the Captain on the **same USB port**. If this fails, follow your current firmware's bootloader procedure. PaintAudio 5 supplies `MIDICAPTAINBOOT.HTML`: open it in Chrome or Edge, choose **BOOT**, and select the Captain serial device. The installer continues when `RPI-RP2` appears. On **stock PaintAudio firmware**, holding footswitch **1** while powering on opens **USB Setup**, not the ROM bootloader. With Bosun 0.7.1 or later installed, hold switch 1 for three seconds at power-on to enter RPI-RP2 instead.
+4. Bosun saves and verifies the full original firmware and files before writing. Keep the computer and Captain powered and the USB cable connected. Bosun installs directly; no previous Bosun installation is needed.
+5. Bosun requests the USB bootloader automatically. Keep the Captain on the **same USB port**. If this fails, follow your current firmware's bootloader procedure. PaintAudio 5 supplies `MIDICAPTAINBOOT.HTML`: open it in Chrome or Edge, choose **BOOT**, and select the Captain serial device. The installer continues when `RPI-RP2` appears. On **stock PaintAudio firmware**, holding footswitch **1** while powering on opens **USB Setup**, not the ROM bootloader. With Bosun installed, hold switch 1 for three seconds at power-on to enter RPI-RP2 instead.
 6. Wait for **Bosun installed**, close the installer, and connect in the editor. Create the **Kemper Player** or **Kemper PROFILER** profile for your model, assign the footswitches and save.
 
 Factory settings remain in the full backup; they are not translated into Bosun profiles. Devices already running Bosun use **Update firmware (USB)** instead of first installation.
@@ -127,8 +127,8 @@ For Android or Desktop bridging USB MIDI, check **Bridge ON** and leave Bosun ru
 
 **Can I restore the stock firmware without Bosun?** Yes. Enter RPI-RP2 using
 **Maintenance → Enter bootloader** over direct USB, or hold **switch 1
-(top-left)** alone for three seconds while powering on with Bosun 0.7.1 or
-later installed. Then follow PaintAudio's official recovery procedure for your
+(top-left)** alone for three seconds while powering on with Bosun installed.
+Then follow PaintAudio's official recovery procedure for your
 exact Captain model. You are responsible for retaining and restoring your
 pre-Bosun system backup and settings; a fresh stock installation is not the
 same as restoring your previous configuration.

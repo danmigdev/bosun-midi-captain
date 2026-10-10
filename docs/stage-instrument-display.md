@@ -56,9 +56,7 @@ pedal** field.
 The settings button beside VOL/WAH opens the appearance panel. Change fonts,
 text sizes and colours for each section. Dropdown lists and the settings panel
 scroll when needed. Text sizes default to **100%**, with a range of **10% to
-500%**. The default is twice the original text size (formerly 200%). Reset
-restores this new default; existing saved sizes are converted to the new
-percentages so their visual size stays the same.
+500%**. Reset restores the default.
 
 The **VOL / WAH** section controls the expression label's font, colour and size
 (10%–500%). This indicator displays text only.

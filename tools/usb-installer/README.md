@@ -44,7 +44,7 @@ that UID in both USB enumeration and INFO/ARM. USB starts only afterwards.
 The [Windows hardware trial](../../docs/stock-installation-test.md) verified
 automatic BOOTSEL entry, RAM-helper CDC enumeration, full backup and readback,
 installation from official PaintAudio 5.15, Bosun startup and configuration
-restoration. The required Desktop discovery fix ships in 0.6.8; it is not
-present in the published 0.6.7 binaries. Interrupted-write recovery still needs a separate controlled
+restoration with a development build of the installer; it was not repeated
+with the 0.8.2 release binaries. Interrupted-write recovery still needs a separate controlled
 hardware trial with a separately retained known-good backup. Do not generalize
 the successful case to untested firmware versions, platforms or Captain models.

@@ -1,6 +1,6 @@
 # MIDI Captain Mini 6
 
-From Bosun 0.8 the firmware also runs on the 6-switch **PaintAudio MIDI
+The Bosun firmware also runs on the 6-switch **PaintAudio MIDI
 Captain Mini 6**. Support is **experimental and untested on real hardware**: it
 follows the community pin map published by
 [PySwitch](https://github.com/Tunetown/PySwitch/blob/main/content/lib/pyswitch/hardware/devices/pa_midicaptain_mini_6.py).
@@ -89,8 +89,7 @@ If you try Bosun on a Mini 6, please report:
   A missing or unreadable record means the 10-switch model.
 - `DEVICE_INFO.hardware`: `model`, `name`, `configured` (a record selected the
   model), `switches` (chain order), `rows` (top row first), `led_count`,
-  `expression_jacks` and `models` (accepted by `SET_HARDWARE`). Firmware before
-  0.8 omits it and is always the 10-switch model.
+  `expression_jacks` and `models` (accepted by `SET_HARDWARE`).
 - `SET_HARDWARE {"model":"mini6"}` replies `ACK` with `model` and `reboot`; a
   different model takes effect after a normal restart.
 - `CONTEXT.switches`, `hold_mask`, `binding_fired` and `LED_DUMP` use the

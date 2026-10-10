@@ -42,12 +42,9 @@ MIDI actions, setlist sequences and following rig changes from the Kemper remain
 available even for banks outside the navigation limit.
 
 The settings are stored as `rigs_per_bank` and `bank_count` in the profile's
-device configuration. Older firmware can store both through `PUT_GLOBAL`, but
-**the Captain needs firmware supporting `bank_count` to enforce the limit on its
-physical switches**. Update the editor and Stage as well; the Pi version receives
-the limit through the firmware's compact device information. Changing only the
-rigs-per-bank layout does not require a firmware update. Desktop and Android
-share the same editor components.
+device configuration. The Captain enforces the limit on its physical switches,
+and the Pi receives it through the firmware's compact device information.
+Desktop and Android share the same editor components.
 
 Bosun firmware supports up to 625 configured patches across banks 1–125.
 This is a catalog limit, not a promise of 125 banks of ten patches. Save in

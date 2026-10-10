@@ -1,7 +1,7 @@
 # Morph controls and display
 
-Use Bosun **0.6.9 or later** and matching Captain firmware. Update the Pi
-hub and Stage too if your setup uses a Pi. Prepare the Base and Morph sounds,
+Use matching Desktop, Captain firmware and, with a Pi, hub and Stage from the
+same release. Prepare the Base and Morph sounds,
 rise/fall times and optional Momentary setting on the Kemper or in Rig Manager.
 Bosun controls the Morph position/button; it does not edit those sound parameters.
 
@@ -58,8 +58,8 @@ appropriate actions. Always pair a press with a release. The switch LED indicate
 the button action; it does not confirm the current Morph sound.
 
 For explicit positions in macros, choose **Set Morph Position** and enter
-**Position (%)**. Existing saved `kemper_morph` values remain MIDI values 0–127;
-the editor converts the percentage without changing the configuration format.
+**Position (%)**. The configuration stores `kemper_morph` as a MIDI value 0–127;
+the editor converts the percentage.
 
 ## Expression pedal and Captain screen
 
@@ -70,7 +70,7 @@ remain available. Move the pedal to activate it. Patch-specific expression
 overrides also support this message. Stage follows the positions sent by Captain.
 
 In the Captain's **Screen** editor, add **Morph last commanded position**
-to your layout. It shows `SET 65%` or `?`. Existing screen layouts are preserved.
+to your layout. It shows `SET 65%` or `?`.
 
 ## Validation
 

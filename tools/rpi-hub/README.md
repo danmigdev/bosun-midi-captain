@@ -1,6 +1,6 @@
 # Raspberry Pi setup
 
-Connect the MIDI Captain and Kemper to a Raspberry Pi to use Bosun over the local network and show Bosun Stage on an HDMI display. Player, Head, Rack and Kemper Stage are included in the experimental Kemper support; Head/Rack/Stage hardware validation is pending. The installer sets up the hub, automatic MIDI connection, Stage startup, firmware update support and the read-only display viewer.
+Connect the MIDI Captain and Kemper to a Raspberry Pi to use Bosun over the local network and show Bosun Stage on an HDMI display. Kemper Player and Kemper PROFILER (Head, Rack, Stage) are supported; PROFILER support is experimental and its hardware validation is pending. The installer sets up the hub, automatic MIDI connection, Stage startup, firmware update support and the read-only display viewer.
 
 ## Requirements
 
@@ -89,9 +89,8 @@ without a pedal, the loading screen also shows `Waiting for the pedal…`.
 Without the optional early framebuffer screen below, there is no logo during the
 earlier OS startup. Plymouth is explicitly disabled:
 attempts to add a separate graphical boot screen failed to boot on the tested
-Pi 3 with kernel `6.18.34+rpt-rpi-v8`. The exact cause was not established. The
-installer also removes the Bosun Plymouth service and drop-ins from that earlier
-experiment. No additional display process, package installation, or initramfs
+Pi 3 with kernel `6.18.34+rpt-rpi-v8`. The exact cause was not established.
+No additional display process, package installation, or initramfs
 rebuild is involved. Brief black intervals during HDMI mode changes remain possible.
 
 The installer preserves the currently deployed Stage JavaScript/CSS: it only
@@ -170,8 +169,7 @@ adds its activation parameter. Removing `bosun.framebuffer_splash=1` from `cmdli
 disables the drawing on the next boot without removing the helper. Keep the
 known-good directory to restore previous boot files and splash assets. Subsequent runs of
 `install-boot-splash.sh` refresh the version in both the early picture and the
-browser screen; renderer changes require a new trial. A previously installed
-static framebuffer logo is preserved until the progress version has been tried.
+browser screen; renderer changes require a new trial.
 
 ### Stage output
 

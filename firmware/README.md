@@ -2,7 +2,7 @@
 
 Bosun's MIDI Captain firmware is written in C. Supported profile kinds are
 Kemper Player, Kemper PROFILER (Head/Rack/Stage), and Generic MIDI. Kemper
-family support is experimental.
+PROFILER support is experimental.
 
 The shared [experimental Kemper PROFILER plugin](../docs/kemper-head.md)
 for Head, Rack and Stage shares the Player engine and schemas. It adds MK1/MK2
@@ -22,7 +22,7 @@ A raw UF2 copied to RPI-RP2 replaces the firmware without a backup or any
 verification. Use the complete update procedure when replacing an existing
 installation.
 
-From Bosun 0.7.1, enter **RPI-RP2** by holding
+Enter **RPI-RP2** by holding
 **switch 1 (top-left)** alone while powering on and keeping it held for three
 seconds. Bosun Desktop also offers **Maintenance → Enter bootloader** over a
 direct USB connection. See [bootloader entry](../docs/firmware-updates.md#enter-the-bootloader-from-bosun)

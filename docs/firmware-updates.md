@@ -4,18 +4,9 @@ Bosun Desktop updates existing Bosun firmware directly over USB or through a
 Raspberry Pi. It supports the RP2040 MIDI Captain with **8 MiB flash** (the
 10-switch model and, experimentally, the [Mini 6](mini6.md)), using Kemper
 Player, Kemper PROFILER (Head/Rack/Stage), or Generic MIDI profiles. Kemper
-family support is experimental; see [model setup and validation](kemper-head.md).
-
-When upgrading from 0.6.x, configuration storage expands from 512 KiB to 4 MiB
-on the first configuration write. Keep the verified full-flash backup:
-after expansion, an older UF2 cannot read the filesystem. Downgrading requires
-restoring the full-flash backup. See [storage and downgrade details](kemper-head.md#choosing-rigs).
+PROFILER support is experimental; see [model setup and validation](kemper-head.md).
 
 ## Enter the bootloader from Bosun
-
-These options were added in Bosun 0.7.1. The startup shortcut requires 0.7.1 or
-later firmware on the Captain; older installed firmware does not gain it by
-updating Desktop alone.
 
 - **Bosun Desktop:** connect the Captain directly to the computer by USB, open
   **Maintenance**, and click **Enter bootloader**. Save or discard any unsaved
@@ -39,10 +30,10 @@ Open **Setup guide** in Desktop and select your configuration, then **Install
 Bosun firmware**. This installs the Bosun version bundled with the current
 Desktop release directly on a supported 8 MiB RP2040 Captain: choose the
 10-switch model or the [Mini 6](mini6.md) in the installer.
-No older Bosun release or Pi is needed. Follow the
+No previous Bosun installation or Pi is needed. Follow the
 [illustrated first-installation guide](first-setup.md#2-install-bosun-firmware-on-the-captain).
 
-This experimental path loads a temporary installer into RAM through the
+This path loads a temporary installer into RAM through the
 `RPI-RP2` drive and uses standard USB serial drivers. Loading the helper does
 not write flash. The app verifies the physical flash identity and capacity,
 reads the complete original flash twice, and durably saves a verified backup
@@ -53,10 +44,8 @@ Keep the complete backup directory, including the recovery helper and manifest.
 If writing is interrupted, reconnect the same Captain to the same USB port in
 BOOTSEL and use **Restore backup**. Recovery checks the complete restored flash;
 the original factory firmware cannot report its running state to Bosun.
-A complete Windows test from PaintAudio 5.15 passed with the corrected installer.
-Use Desktop **0.6.8 or later**, which includes the stock USB detection fix;
-0.6.7 cannot discover that stock firmware. See the
-[hardware test and release status](stock-installation-test.md).
+A complete Windows test from PaintAudio 5.15 passed with a development build of
+this installer. See the [hardware test record](stock-installation-test.md).
 
 Captains already running Bosun use the USB update below, which preserves their
 configuration.
@@ -67,9 +56,8 @@ The firmware stores the pedal model (10-switch or Mini 6) in its
 configuration storage, outside every profile. Updates through Desktop or the Pi
 keep it, and both check that the pedal reports the same model after the update.
 To change it, open **Maintenance → Pedal model**; the pedal restarts and keeps
-its profiles. A pedal without a stored model runs as the 10-switch Captain,
-which is the state of every installation made before 0.8. See the
-[Mini 6 notes](mini6.md).
+its profiles. A pedal without a stored model runs as the 10-switch Captain.
+See the [Mini 6 notes](mini6.md).
 
 ## Direct Desktop USB
 
