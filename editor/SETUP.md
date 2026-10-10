@@ -86,7 +86,7 @@ For Android requirements and APK installation, see
 | `firmware/` | Frozen CircuitPython resources, shared schemas and migration/regression references. Still required by builds. |
 | `tools/` | Packaging, release checks, USB installer and Raspberry Pi services. |
 | `docs/` | Current user guides, hardware validation, current release notes and the pinned F-Droid reference recipe. |
-| `samples/`, `fastlane/` | Example configurations (made for the 10-switch Captain) and Android store descriptions. |
+| `fastlane/` | Android store descriptions. |
 | `dist/release-0.7.1/` | Verified downloads for the current release, including SHA256SUMS.txt. |
 | `recovery/` | Private hardware backups, recovery records and archived unfinished work; see its README. |
 | `.worktrees/` | Ignored additional Git worktrees, kept inside the project folder. |

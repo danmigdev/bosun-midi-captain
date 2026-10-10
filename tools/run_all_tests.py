@@ -30,7 +30,6 @@ SUITES = [
     "provision_adafruit_bundle_test.py",  # pinned CP9 vendor bundle + exact 9-file inventory
     "verify_firmware_package_test.py",  # Android staging/APK inventory + SHA-256
     "push_firmware_test.py",        # deploy transport selection (COM + pyserial URL)
-    "verify_captain_runtime_test.py",  # bounded post-reboot hub readiness
     "write_via_repl_test.py",       # raw-REPL recovery readback + host-side SHA-256
     "remove_via_repl_test.py",      # guarded inspect-first Captain staging cleanup
     "stress_test.py",                # real-hardware smoke timeouts + response contract

@@ -14,14 +14,14 @@ The thread:
 
   - walks a list of candidate targets (auto-discovered ``/dev/ttyACM*``
     in descending order, or a single ``tcp://host:port`` address for
-    development against tools/tcp_firmware_emulator.py) and runs a
+    development against the native firmware emulator) and runs a
     PING/ACK sentinel handshake on each until one answers as the
     protocol port. The console CDC echoes bytes but never returns
     ``{"type":"ACK"}``, so it is skipped automatically.
   - discards everything received before the sentinel ACK: that is stale
     backlog from a previous session, and dropping it is what makes a
-    reconnect start from clean state (same reasoning as
-    serial/desktop.rs and serial_tcp_bridge.py).
+    reconnect start from clean state (same reasoning as the editor's
+    serial/desktop.rs).
   - reads bytes, splits on newlines, hands each complete line to
     ``on_line``.
   - drains a write queue in-order, retaining any non-blocking partial write
