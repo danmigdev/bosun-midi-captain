@@ -35,7 +35,9 @@ static void device(const char *json) {
 static void fixture(const char *device_json, const char *patch_json) {
     assert(bosun_store_format() == BOSUN_STORE_OK);
     assert(bosun_config_init(&config) == BOSUN_STORE_OK);
-    assert(bosun_config_create("test", "Test", "generic", NULL) == BOSUN_STORE_OK);
+    /* Only Kemper kinds run the Kemper engine: a kemper block marks a Player test. */
+    const char *kind = device_json && strstr(device_json, "\"kemper\"") ? "kemper_player" : "generic_midi";
+    assert(bosun_config_create("test", "Test", kind, NULL) == BOSUN_STORE_OK);
     assert(bosun_config_activate(&config, "test", false) == BOSUN_STORE_OK);
     patch(1, 1, patch_json);
     assert(bosun_config_select(&config, 1, 1) == BOSUN_STORE_OK);

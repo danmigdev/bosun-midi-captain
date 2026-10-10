@@ -107,6 +107,14 @@ export function backupHardwareNotice(backup: ConfigBackup, hardware: HardwareLay
   return `This backup comes from a ${name}. Its bindings and settings for switches or expression jacks the ${hardware.name} does not have are kept but stay inactive: review them in the patch editor and Settings.`;
 }
 
+/** Why the active profile cannot be overwritten with this backup, or "".
+ * Another kind's settings would not fit: a Kemper block on a Generic MIDI
+ * profile does nothing. Backups without a recorded kind are not checked. */
+export function overwriteKindError(backup: ConfigBackup, activeKind: string | undefined): string {
+  if (!backup.kind || !activeKind || backup.kind === activeKind) return "";
+  return `This backup is from a ${backup.kind} profile and the active profile is ${activeKind}. Import it as a new profile instead.`;
+}
+
 export function backupFilename(backup: ConfigBackup): string {
   const safeProfile = (backup.profile_label || "profile").replace(/[^\w-]+/g, "_");
   return `${safeProfile}.json`;

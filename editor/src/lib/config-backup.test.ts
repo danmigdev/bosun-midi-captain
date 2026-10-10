@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  validateBackup, backupFilename, timestampedFolderName,
+  validateBackup, backupFilename, timestampedFolderName, overwriteKindError,
   type ConfigBackup,
 } from "./config-backup";
 
@@ -69,5 +69,23 @@ describe("backupFilename + timestampedFolderName", () => {
 
   it("respects a custom prefix", () => {
     expect(timestampedFolderName("snapshot")).toMatch(/^snapshot_/);
+  });
+});
+
+describe("overwriteKindError", () => {
+  it("allows overwriting a profile of the same kind", () => {
+    expect(overwriteKindError(v2Backup(), "kemper_player")).toBe("");
+  });
+
+  it("refuses another kind's backup and points to import as a new profile", () => {
+    const error = overwriteKindError(v2Backup(), "generic_midi");
+    expect(error).toContain("kemper_player");
+    expect(error).toContain("generic_midi");
+    expect(error).toContain("Import it as a new profile");
+  });
+
+  it("does not check backups or profiles without a recorded kind", () => {
+    expect(overwriteKindError(v2Backup({ kind: undefined }), "generic_midi")).toBe("");
+    expect(overwriteKindError(v2Backup(), undefined)).toBe("");
   });
 });

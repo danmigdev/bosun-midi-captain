@@ -349,8 +349,9 @@ void bosun_runtime_config_changed(bosun_runtime_t *rt) {
         bool global_hold = bosun_config_bool(device, 0, "auto_momentary_on_hold", true);
         config->auto_momentary_on_hold = bosun_config_bool(patch_doc, binding->patch_token, "auto_momentary", global_hold);
     }
+    /* Only Kemper kinds run the engine; others keep it idle on the Player model. */
     const bosun_kemper_model *model = bosun_kemper_model_for_kind(rt->config->kind);
-    bool enabled = model || is_type(device, field(device, 0, "kemper"), BOSUN_JSON_OBJECT);
+    bool enabled = model != NULL;
     if (!model) model = bosun_kemper_model_for_kind("kemper_player");
     int kemper_config = field(device, 0, "kemper");
     bool browse_mode = model->profiler && bosun_json_equal(device, field(device, kemper_config, "mode"), "browse");

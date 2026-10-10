@@ -4,7 +4,7 @@
   import { cmd, waitForReboot, type DeviceStats, type ProfileInfo } from "../lib/protocol";
   import {
     exportConfig, backupFilename, timestampedFolderName,
-    validateBackup, importConfig, backupHardwareNotice,
+    validateBackup, importConfig, backupHardwareNotice, overwriteKindError,
     type BackupProgress, type RestoreProgress, type ConfigBackup,
   } from "../lib/config-backup";
   import { IS_ANDROID } from "../lib/platform";
@@ -298,6 +298,8 @@
         switchTo = profile_id;
         restoreMsg = `Created profile "${name}" with ${backup.patches.length} patches.`;
       } else {
+        const kindError = overwriteKindError(backup, activeProfile?.kind);
+        if (kindError) throw new Error(kindError);
         await importConfig(backup, p => (restoreProgress = p));
         // Overwrite writes patches into the ACTIVE profile's in-memory store,
         // which marks them dirty - with autosave off they'd sit unsaved until

@@ -302,7 +302,12 @@ static void monitor_and_learn(void) {
 }
 static void rig_info(void) {
     request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "ERROR"); is_error("no_rig_info");
-    request("{\"type\":\"PUT_GLOBAL\",\"device\":{\"kemper\":{},\"midi_channel\":1}}", "ACK");
+    /* Only a Kemper profile runs the Kemper engine and has rig info. */
+    assert(bosun_config_create("player", "Player", "kemper_player", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "player", false) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&config, "player", 1, 2, "{}", 2, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&config, 1, 2) == BOSUN_STORE_OK);
+    request("{\"type\":\"PUT_GLOBAL\",\"device\":{\"midi_channel\":1}}", "ACK");
     bosun_runtime_config_changed(&runtime);
     request("{\"type\":\"GET_RIG_INFO\",\"request\":false}", "RIG_INFO");
     assert(reply.tokens[bosun_json_get(&reply, 0, "rig")].type == BOSUN_JSON_NULL);
@@ -361,7 +366,7 @@ static void ui_events(void) {
     static const char active[] = "{\"name\":\"Renamed\",\"bindings\":[{\"switch\":\"1\",\"mode\":\"latched\",\"actions\":{"
         "\"toggle_on\":{\"messages\":[{\"type\":\"cc\",\"cc\":10,\"value\":127}]},"
         "\"toggle_off\":{\"messages\":[{\"type\":\"cc\",\"cc\":10,\"value\":0}]}}}]}";
-    assert(bosun_config_create("ui", "UI", "generic_midi", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_create("ui", "UI", "kemper_player", NULL) == BOSUN_STORE_OK);
     assert(bosun_config_put_patch(&config, "ui", 1, 1, active, strlen(active), 0) == BOSUN_STORE_OK);
     assert(bosun_config_put_patch(&config, "ui", 1, 2, "{\"name\":\"Two\"}", 14, 0) == BOSUN_STORE_OK);
     assert(bosun_config_activate(&config, "ui", false) == BOSUN_STORE_OK);
@@ -467,29 +472,29 @@ static void ui_events(void) {
 }
 
 static void morph_control(void) {
-    assert(bosun_config_activate(&config, "test", false) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&config, "player", false) == BOSUN_STORE_OK);
     const char device[] = "{\"kemper\":{}}";
     assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
-    assert(bosun_config_put_patch(&config, "test", 1, 1, "{}", 2, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&config, "player", 1, 1, "{}", 2, 0) == BOSUN_STORE_OK);
     assert(bosun_config_select(&config, 1, 1) == BOSUN_STORE_OK);
     bosun_runtime_init(&runtime, &config, send_midi, NULL);
     bosun_protocol_init(&protocol, &runtime); bosun_protocol_session(&protocol, true);
     protocol.read_switches = read_switches; physical_switch_mask = 0;
     runtime.kemper.state.connected = runtime.kemper.state.rig_name_fresh = true;
     sent = 0;
-    const char position[] = "{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":100}";
+    const char position[] = "{\"type\":\"MORPH_CONTROL\",\"profile\":\"player\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":100}";
     request(position, "ACK"); assert(sent == 1 && runtime.kemper.state.morph_value == 127);
     request("{\"type\":\"GET_CONTEXT\"}", "CONTEXT");
     assert(strstr(output, "\"kemper_morph_source\":\"commanded\"") && strstr(output, "\"kemper_morph_value\":127"));
-    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"trigger\"}", "ACK");
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"player\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"trigger\"}", "ACK");
     assert(sent == 3 && runtime.kemper.state.morph_value == -1);
     fail_midi = true;
     request(position, "ERROR"); is_error("midi_send_failed");
     assert(runtime.kemper.state.morph_value == -1); fail_midi = false;
     unsigned before = sent;
-    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":101}", "ERROR");
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"player\",\"bank\":1,\"slot\":1,\"generation\":0,\"action\":\"position\",\"percent\":101}", "ERROR");
     is_error("invalid_request"); assert(sent == before);
-    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"test\",\"bank\":1,\"slot\":1,\"generation\":1,\"action\":\"position\",\"percent\":0}", "ERROR");
+    request("{\"type\":\"MORPH_CONTROL\",\"profile\":\"player\",\"bank\":1,\"slot\":1,\"generation\":1,\"action\":\"position\",\"percent\":0}", "ERROR");
     is_error("stale_state"); assert(sent == before);
     physical_switch_mask = 1; request(position, "ERROR"); is_error("busy"); assert(sent == before);
     physical_switch_mask = 0; runtime.preview_active = true;
