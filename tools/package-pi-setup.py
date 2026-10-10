@@ -13,8 +13,7 @@ def setup_files():
     """Sorted repository paths the setup package ships (Stage only once built)."""
     files = set()
     for directory in ('editor/dist-stage', 'tools/rpi-hub/bosun_hub', 'tools/rpi-hub/kiosk',
-                      'tools/rpi-hub/systemd', 'tools/rpi-hub/udev', 'tools/rpi-hub/boot-splash',
-                      'firmware-native/include', 'firmware-native/third_party/littlefs'):
+                      'tools/rpi-hub/systemd', 'tools/rpi-hub/udev', 'tools/rpi-hub/boot-splash'):
         for p in (ROOT / directory).rglob('*'):
             if p.is_symlink():
                 raise ValueError(f'Symlink in setup input: {p}')
@@ -22,11 +21,8 @@ def setup_files():
                 files.add(p.relative_to(ROOT).as_posix())
     files.update(('tools/rpi-hub/README.md', 'tools/rpi-hub/requirements.txt',
                   'tools/rpi-hub/install.sh', 'tools/rpi-hub/install-native-updater.sh',
-                  'tools/rpi-hub/build-storage-image.sh',
                   'tools/rpi-hub/quick-install.sh', 'tools/rpi-hub/install-boot-splash.sh',
                   'tools/rpi-hub/prepare-framebuffer-splash.sh',
-                  'firmware-native/platform/host/storage_image.c', 'firmware-native/platform/rp2040/storage.c',
-                  'firmware-native/src/storage_path.c', 'firmware-native/src/config.c', 'firmware-native/src/json.c',
                   'editor/package.json', 'editor/src-tauri/icons/icon.png', 'LICENSE'))
     return sorted(files)
 

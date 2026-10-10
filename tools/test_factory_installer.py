@@ -59,8 +59,7 @@ class FactoryPackageTests(unittest.TestCase):
         with tarfile.open(archive) as tar:
             names=tar.getnames()
             for name in ('editor/dist-stage/index.html','tools/rpi-hub/quick-install.sh',
-                         'tools/rpi-hub/build-storage-image.sh','firmware-native/include/bosun/plugin_kinds.h',
-                         'firmware-native/platform/host/storage_image.c','editor/src-tauri/icons/icon.png'):
+                         'tools/rpi-hub/install-native-updater.sh','editor/src-tauri/icons/icon.png'):
                 self.assertIn(name,names)
             self.assertTrue(all(m.isfile() and not m.name.startswith('/') and '..' not in Path(m.name).parts for m in tar.getmembers()))
             self.assertFalse(any('hostapd.conf' in n or '.env' in n or '__pycache__' in n or '.secrets' in n for n in names))

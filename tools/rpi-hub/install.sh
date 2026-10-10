@@ -27,21 +27,12 @@ if [[ ! -f "$STAGE_BUILD/stage-kiosk.html" && ! -f "$STAGE_BUILD/index.html" &&
     echo "Build Stage first: cd editor && npm install --no-audit --no-fund && npm run build:stage" >&2
     exit 1
 fi
-# Validate native updater inputs and the kiosk input rule before package/code changes.
-# A partially copied checkout can contain the host tool but omit its headers,
-# littlefs sources, or USB rule; discovering that during compilation is too late.
+# Validate native updater inputs and the kiosk files before package/code changes.
+# A partially copied checkout must fail here, not after services were changed.
 for required in \
     tools/rpi-hub/kiosk/bosun-hdmi-recovery.py \
     tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
-    tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
-    tools/rpi-hub/build-storage-image.sh \
-    firmware-native/platform/host/storage_image.c firmware-native/platform/rp2040/storage.c \
-    firmware-native/src/storage_path.c firmware-native/src/config.c firmware-native/src/json.c \
-    firmware-native/include/bosun/board.h firmware-native/include/bosun/config.h \
-    firmware-native/include/bosun/json.h firmware-native/include/bosun/storage.h \
-    firmware-native/include/bosun/plugin_kinds.h \
-    firmware-native/third_party/littlefs/lfs.c firmware-native/third_party/littlefs/lfs_util.c \
-    firmware-native/third_party/littlefs/lfs.h firmware-native/third_party/littlefs/lfs_util.h; do
+    tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules; do
     if [[ ! -f "$REPO_ROOT/$required" ]]; then
         echo "Run the installer from a complete Bosun checkout; missing $required." >&2
         exit 1
@@ -53,7 +44,7 @@ apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     python3-serial python3-websockets alsa-utils rsync \
     cage chromium seatd wlr-randr wayvnc kanshi novnc websockify \
-    build-essential picotool
+    picotool
 
 if ! id "$HUB_USER" >/dev/null 2>&1; then
     useradd --system --create-home "$HUB_USER"

@@ -22,10 +22,7 @@ import subprocess
 import time
 from typing import Callable, Protocol
 
-from .update_package import (
-    FLASH_BASE, FLASH_BYTES, STORAGE_BYTES, STORAGE_OFFSET,
-    build_native_storage, extract_circuitpython_config, validate_update_package,
-)
+from .update_package import FLASH_BASE, FLASH_BYTES, STORAGE_OFFSET, validate_update_package
 
 
 class FirmwareInstallError(RuntimeError):
@@ -63,141 +60,6 @@ def _patch_inventory(client, profile):
             raise FirmwareInstallError("Incomplete patch inventory")
 
 
-NATIVE_MESSAGES = frozenset({
-    "cc", "pc", "note_on", "note_off", "delay", "program_change_bank", "cc_toggle",
-    "captain_patch", "captain_bank_step", "captain_preview_step", "captain_preview_commit",
-    "captain_preview_cancel", "captain_setlist_step", "kemper_rig", "kemper_step_rig",
-    "kemper_effect_toggle", "kemper_fixed_toggle", "kemper_tuner", "kemper_tap_tempo",
-    "kemper_set_tempo", "kemper_morph", "kemper_morph_trigger", "kemper_wah", "kemper_volume",
-    "kemper_looper", "kemper_rotary", "kemper_query_state", "kemper_browse_rig",
-})
-# CircuitPython Bosun only ran on the 10-switch Captain: its migrations keep
-# that model, the native firmware's default when no hardware record exists.
-NATIVE_SWITCHES = frozenset({"1", "2", "3", "4", "up", "A", "B", "C", "D", "down"})
-NATIVE_MODES = frozenset({"tap", "latched", "momentary", "long_press_alt", "double_tap"})
-NATIVE_ACTIONS = frozenset({"press", "release", "toggle_on", "toggle_off", "long_press", "double_tap"})
-NATIVE_COMMAND_LIMIT = 128
-NATIVE_NAVIGATION_LIMIT = 625
-
-
-def _require_native_compatible(snapshot: dict) -> None:
-    """Reject known behavior losses before switching a CP device to BOOTSEL.
-
-    Unknown non-behavior settings remain untouched in the raw config tree.
-    Limits/types mirror the native runtime, with source-parity regression tests.
-    The production C storage builder separately checks JSON/token/flash limits.
-    """
-    for profile_id, profile in snapshot["profiles"].items():
-        def fail(location, detail):
-            raise FirmwareInstallError(f"Profile {profile_id}, {location}: {detail}; CircuitPython was left unchanged")
-        if profile["metadata"].get("kind") not in ("kemper_player", "generic_midi", "unknown"):
-            fail("plugin", "this plugin is not supported by native firmware")
-        device, patches = profile["device"], profile["patches"]
-        kemper_enabled = profile["metadata"].get("kind") == "kemper_player" or isinstance(device.get("kemper"), dict)
-        used_types = set()
-        def message(value, location):
-            if not isinstance(value, dict) or value.get("type") not in NATIVE_MESSAGES:
-                fail(location, "unsupported MIDI message type")
-            kind = value["type"]
-            if kind == "kemper_browse_rig":
-                fail(location, "Browse programs require the native PROFILER plugin")
-            used_types.add(kind)
-            if kind.startswith("kemper_") and not kemper_enabled:
-                fail(location, "Kemper messages require the profile's Kemper configuration")
-            def number(key, low, high):
-                if key in value and (type(value[key]) is not int or not low <= value[key] <= high):
-                    fail(location, f"{key} exceeds native limits {low}..{high}")
-            def enum(key, choices):
-                if key in value and value[key] not in choices:
-                    fail(location, f"unsupported {key}")
-            number("channel", 1, 16)
-            if kind in ("cc", "cc_toggle"):
-                number("cc", 0, 127)
-                if kind == "cc": number("value", 0, 127)
-                else:
-                    enum("state", ("on", "off"))
-                    number("on_value", 0, 127); number("off_value", 0, 127)
-            elif kind in ("pc", "program_change_bank"):
-                number("program", 0, 127)
-                if kind == "program_change_bank":
-                    number("msb", 0, 127); number("lsb", 0, 127)
-            elif kind in ("note_on", "note_off"):
-                number("note", 0, 127); number("velocity", 0, 127)
-            elif kind == "delay": number("ms", 0, 60000)
-            elif kind in ("captain_patch", "kemper_rig"):
-                number("bank", 1, 125 if kind == "captain_patch" else 25)
-                number("slot" if kind == "captain_patch" else "rig", 1, 10 if kind == "captain_patch" else 5)
-            elif kind in ("captain_bank_step", "captain_preview_step", "captain_setlist_step"):
-                number("delta", -32768, 32767); enum("scope", ("patch", "bank"))
-            elif kind == "kemper_effect_toggle":
-                enum("slot", ("A", "B", "C", "D", "X", "Mod", "Delay", "Reverb")); enum("value", ("on", "off"))
-            elif kind == "kemper_fixed_toggle":
-                enum("effect", ("Compressor", "Noise Gate", "Pure Booster", "Wah", "Transpose")); enum("value", ("on", "off"))
-            elif kind == "kemper_looper":
-                enum("action", ("rec_play", "stop_erase", "trigger", "reverse", "half_speed", "cancel_overdub", "erase"))
-                enum("state", ("tap", "press", "release"))
-            elif kind == "kemper_step_rig": enum("direction", ("prev", "next"))
-            elif kind == "kemper_set_tempo": number("bpm", 40, 250)
-            elif kind in ("kemper_tuner", "kemper_morph_trigger"): enum("state", ("on", "off"))
-            elif kind == "kemper_rotary": enum("value", ("slow", "fast"))
-            elif kind in ("kemper_wah", "kemper_volume", "kemper_morph"): number("value", 0, 127)
-        def messages(values, location):
-            if not isinstance(values, list) or len(values) > NATIVE_COMMAND_LIMIT:
-                fail(location, "action exceeds the native 128-message limit")
-            for item in values:
-                message(item, location)
-            return len(values)
-        def action(value, location):
-            if not isinstance(value, dict): fail(location, "invalid action object")
-            return messages(value.get("messages", []), location)
-        def expression(document, location, *, override=False):
-            rows = document.get("expression", [])
-            if not isinstance(rows, list): fail(location, "invalid expression configuration")
-            jacks = set()
-            for row in rows:
-                if not isinstance(row, dict) or type(row.get("jack")) is not int or row["jack"] not in (1, 2) or row["jack"] in jacks:
-                    fail(location, "invalid or duplicate expression jack")
-                jacks.add(row["jack"])
-                if row.get("curve", "linear") not in ("linear", "exp", "log"):
-                    fail(location, "unsupported expression curve")
-                if "message" in row:
-                    message(row["message"], location)
-                    if (override or row.get("enabled")) and row["message"]["type"] not in ("cc", "cc_toggle", "kemper_wah", "kemper_volume", "kemper_morph"):
-                        fail(location, "unsupported continuous expression message")
-        long_actions = device.get("long_press_actions", {})
-        if not isinstance(long_actions, dict): fail("long press", "invalid action map")
-        for switch, values in long_actions.items():
-            if switch not in NATIVE_SWITCHES: fail("long press", "unsupported switch")
-            messages(values, "long press " + switch)
-        expression(device, "expression")
-        maximum_enter = maximum_exit = 0
-        for coordinate, patch in patches.items():
-            if "on_enter" in patch: maximum_enter = max(maximum_enter, action(patch["on_enter"], coordinate + " on_enter"))
-            if "on_exit" in patch: maximum_exit = max(maximum_exit, action(patch["on_exit"], coordinate + " on_exit"))
-            bindings = patch.get("bindings", [])
-            if not isinstance(bindings, list) or len(bindings) > len(NATIVE_SWITCHES):
-                fail(coordinate, "unsupported binding count")
-            switches = set()
-            for binding in bindings:
-                if not isinstance(binding, dict) or binding.get("switch") not in NATIVE_SWITCHES or binding["switch"] in switches:
-                    fail(coordinate, "invalid or duplicate switch binding")
-                switches.add(binding["switch"])
-                if binding.get("mode", "tap") not in NATIVE_MODES: fail(coordinate, "unsupported binding mode")
-                actions = binding.get("actions", {})
-                if not isinstance(actions, dict) or set(actions) - NATIVE_ACTIONS:
-                    fail(coordinate, "unsupported binding action")
-                for name, value in actions.items(): action(value, coordinate + " " + binding["switch"] + " " + name)
-            expression(patch, coordinate + " expression", override=True)
-        if maximum_enter + maximum_exit > NATIVE_COMMAND_LIMIT:
-            fail("patch transition", "combined on_exit/on_enter exceeds 128 messages")
-        if used_types & {"captain_bank_step", "captain_preview_step"} and len(patches) > NATIVE_NAVIGATION_LIMIT:
-            fail("navigation", "native navigation supports at most 625 patches")
-        if "captain_setlist_step" in used_types:
-            setlist = device.get("setlist", {})
-            if not isinstance(setlist, dict) or not isinstance(setlist.get("items", []), list) or len(setlist.get("items", [])) > NATIVE_NAVIGATION_LIMIT:
-                fail("setlist", "native navigation supports at most 625 setlist entries")
-
-
 @dataclass(frozen=True)
 class PinnedDevice:
     usb_path: str
@@ -216,7 +78,7 @@ class BootDevice:
 class InstallIO(Protocol):
     def pin(self, serial_port: str) -> PinnedDevice: ...
     def snapshot(self, device: PinnedDevice, *, save_dirty: bool, expected_info: dict | None = None) -> dict: ...
-    def enter_bootloader(self, device: PinnedDevice, family: str) -> BootDevice: ...
+    def enter_bootloader(self, device: PinnedDevice) -> BootDevice: ...
     def recover_bootloader(self, device: PinnedDevice) -> BootDevice: ...
     def save_flash(self, target: BootDevice, destination: Path) -> None: ...
     def verify(self, target: BootDevice, image: Path, address: int | None = None) -> None: ...
@@ -224,8 +86,8 @@ class InstallIO(Protocol):
     def reboot(self, target: BootDevice) -> None: ...
 
 
-def _family(info: dict) -> str:
-    return "native" if info.get("native_experimental") is True or "-native" in str(info.get("fw", "")) else "circuitpython"
+def _is_native(info: dict) -> bool:
+    return info.get("native_experimental") is True or "-native" in str(info.get("fw", ""))
 
 
 def _sync_directory(directory: Path) -> None:
@@ -323,7 +185,7 @@ def verify_prewrite_recovery(installation_dir: Path, serial_port: str, *,
         raise FirmwareInstallError("The connected Captain changed before recovery verification")
     after = io.snapshot(device, save_dirty=False, expected_info=before["info"])
     _compare_snapshot(before, after, journal["source_version"])
-    if _family(before["info"]) != _family(after["info"]) or io.pin(serial_port) != device:
+    if _is_native(before["info"]) != _is_native(after["info"]) or io.pin(serial_port) != device:
         raise FirmwareInstallError("The connected Captain changed during recovery verification")
     current_journal, current_before = read_prewrite_recovery(installation_dir)
     if current_journal != journal or current_before != before:
@@ -345,8 +207,7 @@ def verify_prewrite_recovery(installation_dir: Path, serial_port: str, *,
 class FirmwareInstaller:
     """One durable transaction. ``io`` is injectable for fault tests."""
 
-    def __init__(self, *, converter: Path, io: InstallIO | None = None):
-        self.converter = converter
+    def __init__(self, *, io: InstallIO | None = None):
         self.io = io
 
     def run(self, package_path: Path, expected_info: dict, serial_port: str,
@@ -391,6 +252,8 @@ class FirmwareInstaller:
         report("preflight")
         try:
             package = validate_update_package(Path(package_path))
+            if not _is_native(expected_info):
+                raise FirmwareInstallError("The hub updates only a Captain that runs native Bosun firmware")
             io = io or LinuxInstallIO()
             if isinstance(io, LinuxInstallIO) and expected_device is None:
                 raise FirmwareInstallError("The hub did not preserve the connected Captain's physical USB identity")
@@ -401,16 +264,14 @@ class FirmwareInstaller:
                    release=package.manifest["release"], target_version=package.manifest["firmware_version"])
             before = io.snapshot(device, save_dirty=True, expected_info=expected_info)
             _require_snapshot(before)
-            if before["info"].get("fw") != expected_info.get("fw") or _family(before["info"]) != _family(expected_info):
+            if before["info"].get("fw") != expected_info.get("fw") or _is_native(before["info"]) != _is_native(expected_info):
                 raise FirmwareInstallError("The connected firmware changed before the update began")
-            if _family(before["info"]) == "circuitpython":
-                _require_native_compatible(before)
             _write_new(job_dir / "configuration-before.json", (json.dumps(before, indent=2, sort_keys=True) + "\n").encode())
             firmware = job_dir / "firmware.uf2"
             _write_new(firmware, package.firmware_uf2)
             report("entering_bootloader", source_version=before["info"]["fw"])
             entered_bootloader = True
-            target = io.enter_bootloader(device, _family(before["info"]))
+            target = io.enter_bootloader(device)
             if target.flash_bytes != FLASH_BYTES or target.unique_id.upper() != device.serial.upper():
                 raise FirmwareInstallError("ROM flash identity/geometry does not match the pinned Captain")
             report("backing_up_flash", flash_unique_id=target.unique_id, flash_bytes=target.flash_bytes,
@@ -426,37 +287,21 @@ class FirmwareInstaller:
             digest = hashlib.sha256(raw).hexdigest()
             verified_backup = True
             report("backup_verified", backup_path=str(backup), backup_sha256=digest)
+            # Updates preserve the complete filesystem, including unknown
+            # future settings. Verify it after loading the UF2.
             storage = job_dir / "native-storage.bin"
-            if _family(before["info"]) == "circuitpython":
-                report("preparing_native_storage")
-                config = job_dir / "config"
-                extracted = extract_circuitpython_config(raw, config)
-                # The trusted host builder uses the production littlefs and
-                # native config parser, and verifies remount/readback before
-                # publishing a fresh 4 MiB image. No on-device formatting.
-                storage_bytes = build_native_storage(config, storage, builder=self.converter)
-                if len(storage_bytes) != STORAGE_BYTES:
-                    raise FirmwareInstallError("Invalid native storage image size")
-                report("storage_prepared", configuration_files=len(extracted),
-                       storage_sha256=hashlib.sha256(storage_bytes).hexdigest())
-            else:
-                # Native upgrades preserve the complete filesystem, including
-                # unknown future settings. Verify it after loading the UF2.
-                _write_new(storage, raw[STORAGE_OFFSET:])
+            _write_new(storage, raw[STORAGE_OFFSET:])
             writes_started = True
             report("flashing_firmware", flash_may_be_modified=True)
             io.load(target, firmware)
             io.verify(target, firmware)
-            if _family(before["info"]) == "circuitpython":
-                report("flashing_configuration")
-                io.load(target, storage, FLASH_BASE + STORAGE_OFFSET)
             io.verify(target, storage, FLASH_BASE + STORAGE_OFFSET)
             report("rebooting")
             io.reboot(target)
             report("verifying_configuration")
             after = io.snapshot(device, save_dirty=False)
             _compare_snapshot(before, after, package.manifest["firmware_version"])
-            if _family(after["info"]) != "native":
+            if not _is_native(after["info"]):
                 raise FirmwareInstallError("The device did not boot native firmware")
             _write_new(job_dir / "configuration-after.json", (json.dumps(after, indent=2, sort_keys=True) + "\n").encode())
             report("complete", status="complete", configuration_verified=True)
@@ -642,14 +487,14 @@ class LinuxInstallIO:
         client = self._open_runtime_client(device)
         try:
             info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
-            if expected_info is not None and (info.get("fw") != expected_info.get("fw") or _family(info) != _family(expected_info)):
+            if expected_info is not None and (info.get("fw") != expected_info.get("fw") or _is_native(info) != _is_native(expected_info)):
                 raise FirmwareInstallError("The connected firmware changed before saving pending edits")
             dirty = client.request("GET_DIRTY", "DIRTY").get("patches")
             if not isinstance(dirty, list):
                 raise FirmwareInstallError("Cannot verify unsaved device changes")
             if dirty:
                 # Preserve the saved/unsaved distinction. Even SAVE_NOW is a
-                # flash write, so a migration preflight never commits edits.
+                # flash write, so an update preflight never commits edits.
                 raise FirmwareInstallError("Save edits before updating firmware" if save_dirty else
                                            "Unexpected unsaved changes after the update")
             listing = client.request("LIST_PROFILES", "PROFILE_LIST")
@@ -737,53 +582,29 @@ class LinuxInstallIO:
                 raise FirmwareInstallError("The pinned Captain did not enumerate in BOOTSEL")
             time.sleep(0.15)
 
-    def enter_bootloader(self, device: PinnedDevice, family: str) -> BootDevice:
-        if family == "native":
-            client = self._open_runtime_client(device)
+    def enter_bootloader(self, device: PinnedDevice, *, timeout: float = 20) -> BootDevice:
+        client = self._open_runtime_client(device, timeout)
+        try:
+            info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
+            if not _is_native(info) or "bootloader" not in info.get("reboot_modes", []):
+                raise FirmwareInstallError("This native firmware cannot enter BOOTSEL remotely")
             try:
-                info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
-                if _family(info) != "native" or "bootloader" not in info.get("reboot_modes", []):
-                    raise FirmwareInstallError("This native firmware cannot enter BOOTSEL remotely")
-                try:
-                    client.request("REBOOT", "ACK", mode="bootloader")
-                except (OSError, FirmwareResponseTimeout):
-                    # USB can disappear before the queued ACK reaches the Pi.
-                    # Success still requires the same physical device, flash
-                    # UID and capacity to appear in BOOTSEL below. A correlated
-                    # refusal or malformed response must remain an error.
-                    pass
-            finally:
-                client.close()
-        else:
-            import serial
-            # Touch only the console paired with the pinned data interface.
-            # Never broadcast control bytes to other MIDI/serial devices.
-            console = self._runtime_port(device, "00")
-            with serial.Serial(console, 1200, timeout=0.1, write_timeout=2, exclusive=True) as port:
-                port.dtr = False
-                time.sleep(0.25)
-            try:
-                return self._boot_device(device, timeout=3)[0]
-            except FirmwareInstallError:
-                console = self._runtime_port(device, "00", timeout=2)
-                with serial.Serial(console, 115200, timeout=0.1, write_timeout=2, exclusive=True) as port:
-                    port.dtr = True
-                    port.write(b"\x03\x03")
-                    time.sleep(0.4)
-                    port.write(b"\r\nimport microcontroller\r\nmicrocontroller.on_next_reset(getattr(microcontroller.RunMode,'UF2',microcontroller.RunMode.BOOTLOADER))\r\nmicrocontroller.reset()\r\n")
-                    port.flush()
+                client.request("REBOOT", "ACK", mode="bootloader")
+            except (OSError, FirmwareResponseTimeout):
+                # USB can disappear before the queued ACK reaches the Pi.
+                # Success still requires the same physical device, flash
+                # UID and capacity to appear in BOOTSEL below. A correlated
+                # refusal or malformed response must remain an error.
+                pass
+        finally:
+            client.close()
         return self._boot_device(device)[0]
 
     def recover_bootloader(self, device: PinnedDevice) -> BootDevice:
         try:
             return self._boot_device(device, timeout=0.3)[0]
         except FirmwareInstallError:
-            client = self._open_runtime_client(device, timeout=10)
-            try:
-                info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
-            finally:
-                client.close()
-            return self.enter_bootloader(device, _family(info))
+            return self.enter_bootloader(device, timeout=10)
 
     def _target_arguments(self, target: BootDevice) -> list[str]:
         current, selection = self._boot_device(target.device, timeout=1)

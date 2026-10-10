@@ -156,13 +156,13 @@ def test_returned_firmware_and_every_configuration_component_must_match(recovery
 
 
 def test_same_version_but_different_firmware_family_is_rejected(recovery):
-    # The family must independently agree, even if the reported fw is unchanged.
-    recovery.before["info"] = {"fw": "0.6.4", "native_experimental": False}
-    recovery.journal["source_version"] = "0.6.4"
+    # The native flag must independently agree, even if the reported fw is unchanged.
+    recovery.before["info"] = {"fw": "0.7.0", "native_experimental": True}
+    recovery.journal["source_version"] = "0.7.0"
     write_json(recovery.directory / "journal.json", recovery.journal)
     write_json(recovery.directory / "configuration-before.json", recovery.before)
     recovery.io = ReadOnlyIO(recovery.device, recovery.before)
-    recovery.io.after["info"]["native_experimental"] = True
+    recovery.io.after["info"]["native_experimental"] = False
     with pytest.raises(install.FirmwareInstallError, match="Captain changed during"):
         verify(recovery)
     assert_no_record(recovery)

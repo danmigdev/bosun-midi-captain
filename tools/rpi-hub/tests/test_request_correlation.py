@@ -301,56 +301,6 @@ def test_original_id_value_is_restored_exactly_even_when_not_a_string():
     _run(body())
 
 
-def test_profile_management_legacy_id_target_survives_private_correlation():
-    async def body():
-        hub, sent = _isolated_hub()
-        sub = hub.subscribe()
-        try:
-            kinds = (
-                "CREATE_PROFILE", "SWITCH_PROFILE",
-                "DELETE_PROFILE", "RENAME_PROFILE",
-            )
-            for kind in kinds:
-                sub.send(json.dumps({
-                    "type": kind, "id": "legacy-profile", "name": "Legacy",
-                }))
-
-            assert len(sent) == len(kinds)
-            for upstream, kind in zip(sent, kinds):
-                assert upstream["type"] == kind
-                assert upstream["profile_id"] == "legacy-profile"
-                assert upstream["id"].startswith(hub._request_id_prefix)
-                assert upstream["id"] != "legacy-profile"
-                hub._dispatch(json.dumps({
-                    "type": "ACK", "id": upstream["id"],
-                    "profile_id": upstream["profile_id"],
-                }))
-                assert await _message(sub) == {
-                    "type": "ACK", "id": "legacy-profile",
-                    "profile_id": "legacy-profile",
-                }
-        finally:
-            hub.stop()
-
-    _run(body())
-
-
-def test_falsey_legacy_profile_id_is_forwarded_without_semantic_rewrite():
-    async def body():
-        hub, sent = _isolated_hub()
-        sub = hub.subscribe()
-        try:
-            request = {"type": "SWITCH_PROFILE", "id": None}
-            sub.send(json.dumps(request))
-            assert sent == [request]
-            assert not hub._request_pending
-            assert not hub._request_ids_by_sub
-        finally:
-            hub.stop()
-
-    _run(body())
-
-
 def test_link_disconnect_fails_all_pending_privately_and_cleans_timers():
     async def body():
         hub, sent = _isolated_hub(request_timeout_s=60)

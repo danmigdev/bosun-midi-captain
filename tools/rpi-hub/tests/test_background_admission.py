@@ -1,13 +1,12 @@
-"""Response-coupled admission tests for Captain background generators.
+"""Response-coupled admission tests for expensive Captain reads.
 
-The RP2040 firmware has room for one active generator plus eight queued
-generators.  These tests make sure neither TCP/WebSocket fan-in nor unusual
-request shapes can make the hub exceed the deliberately smaller safe window.
+The Captain answers one request at a time, so the hub bounds how many large
+background replies it keeps outstanding.  These tests make sure neither
+TCP/WebSocket fan-in nor unusual request shapes can exceed that window.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import sys
@@ -21,7 +20,6 @@ from bosun_hub.hub import (  # noqa: E402
     Hub,
     REQUESTS_MAX,
     REQUESTS_PER_SUB_MAX,
-    _BACKGROUND_CLASS_BY_TYPE,
     _BACKGROUND_CLASS_LIMITS,
 )
 
@@ -424,65 +422,3 @@ def test_ordinary_global_cap_is_exact_across_clients_and_never_silent():
             hub.stop()
 
     _run(body())
-
-
-def test_hub_background_type_inventory_matches_firmware_dispatch():
-    """Fail CI when firmware adds a generator without an admission class."""
-
-    source_path = (
-        Path(__file__).resolve().parents[3]
-        / "firmware" / "lib" / "captain" / "protocol.py"
-    )
-    tree = ast.parse(source_path.read_text(encoding="utf-8"))
-    methods = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "Protocol"
-        for node in node.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-
-    def self_calls(node: ast.AST) -> set[str]:
-        return {
-            call.func.attr
-            for call in ast.walk(node)
-            if isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Attribute)
-            and isinstance(call.func.value, ast.Name)
-            and call.func.value.id == "self"
-        }
-
-    reaches_background = {
-        name for name, node in methods.items()
-        if "_start_background" in self_calls(node)
-    }
-    changed = True
-    while changed:
-        before = len(reaches_background)
-        reaches_background.update(
-            name for name, node in methods.items()
-            if self_calls(node) & reaches_background
-        )
-        changed = len(reaches_background) != before
-
-    handle = methods["handle"]
-    discovered: set[str] = set()
-    for branch in ast.walk(handle):
-        if not isinstance(branch, ast.If):
-            continue
-        compare = branch.test
-        if not (
-            isinstance(compare, ast.Compare)
-            and isinstance(compare.left, ast.Name)
-            and compare.left.id == "t"
-            and len(compare.ops) == len(compare.comparators) == 1
-            and isinstance(compare.ops[0], ast.Eq)
-            and isinstance(compare.comparators[0], ast.Constant)
-            and isinstance(compare.comparators[0].value, str)
-        ):
-            continue
-        calls = set().union(*(self_calls(statement) for statement in branch.body))
-        if "_start_background" in calls or calls & reaches_background:
-            discovered.add(compare.comparators[0].value)
-
-    assert discovered == set(_BACKGROUND_CLASS_BY_TYPE)

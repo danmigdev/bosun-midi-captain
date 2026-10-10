@@ -42,7 +42,6 @@ BOOTSTRAP = r"""(() => {
   window.__stageInvoke = command => {
     if (command === 'is_connected') return true;
     if (['list_ports','tcp_list_ports','discover_hubs'].includes(command)) return [];
-    if (command === 'bundled_firmware_version') return '0.6.5';
     if (command === 'midi_bridge_status') return {active:false,kemper_port:null,pedal_port:null};
     return null;
   };

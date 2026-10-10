@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
-# Install the trusted converter and RP2040 ROM access for hub-owned updates.
+# Install RP2040 ROM access for hub-owned native firmware updates.
 # Run from a Bosun checkout on the Pi. This never opens or flashes a Captain.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [[ $EUID -ne 0 ]]; then
-    printf 'Run with sudo; this installs a converter and a USB access rule.\n' >&2
+    printf 'Run with sudo; this installs a USB access rule.\n' >&2
     exit 1
 fi
-command -v cc >/dev/null || { printf 'Install build-essential first.\n' >&2; exit 1; }
 command -v picotool >/dev/null || { printf 'Install picotool first.\n' >&2; exit 1; }
 id bosun >/dev/null
 getent group plugdev >/dev/null
-build="$(mktemp -d)"
-trap 'rm -f -- "$build/bosun_storage_image"; rmdir -- "$build"' EXIT
-bash "$root/tools/rpi-hub/build-storage-image.sh" "$build/bosun_storage_image"
-install -d -m 755 /opt/bosun-hub/bin
-install -m 755 "$build/bosun_storage_image" /opt/bosun-hub/bin/bosun_storage_image
 usermod --append --groups plugdev bosun
 install -m 644 "$root/tools/rpi-hub/udev/60-bosun-update.rules" /etc/udev/rules.d/60-bosun-update.rules
 udevadm control --reload-rules

@@ -4,6 +4,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/boot-splash"
 [[ $EUID -eq 0 ]] || { echo 'Run with sudo' >&2; exit 1; }
 [[ -f /boot/firmware/initramfs8 ]] || { echo 'Requires the tested 64-bit Pi boot layout' >&2; exit 1; }
+command -v cc >/dev/null || { echo 'Install build-essential first' >&2; exit 1; }
 python3 -c 'from PIL import Image, ImageFont'
 BUILD="$(mktemp -d /var/tmp/bosun-splash-trial.XXXXXX)"
 echo "Preparing splash in $BUILD"

@@ -6,7 +6,7 @@ This is the whole "MIDI hub": once the two USB-MIDI devices are
 connected in the kernel sequencer, MIDI (including the Kemper SysEx
 beacon and its sensing frames) flows between them with no userspace
 process in the path. The Captain firmware generates the beacon itself
-(firmware/lib/plugins/kemper.py tick()), so nothing here has to.
+(bosun_kemper_tick() in firmware-native/src/kemper.c), so nothing here has to.
 
 Run it from udev on every sound-card add/change and, as a backstop,
 from a short systemd timer. ``aconnect`` of an already-connected pair
@@ -26,9 +26,11 @@ import sys
 
 log = logging.getLogger("bosun_hub.midi_connect")
 
-# Substring/regex patterns for the two endpoints, case-insensitive.
+# Substring/regex patterns for the two endpoints, case-insensitive. The
+# Captain's ALSA client is named after its USB product string
+# (firmware-native/platform/rp2040/usb_descriptors.c).
 KEMPER_PAT = re.compile(r"profiler|kemper", re.I)
-CAPTAIN_PAT = re.compile(r"circuitpython|midi ?captain|\bcaptain\b|bosun|pico|rp2040", re.I)
+CAPTAIN_PAT = re.compile(r"midi ?captain|bosun", re.I)
 # Never treat these as an endpoint.
 EXCLUDE_PAT = re.compile(r"through|bcm2835|system|announce|timer", re.I)
 

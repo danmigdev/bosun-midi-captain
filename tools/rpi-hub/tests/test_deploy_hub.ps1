@@ -204,7 +204,6 @@ try {
         'apt-get',
         'install.sh',
         'deploy-stage.ps1',
-        'deploy-captain.ps1',
         'bosun-kiosk.service',
         'bosun-midi.service',
         'bosun-midi.timer'

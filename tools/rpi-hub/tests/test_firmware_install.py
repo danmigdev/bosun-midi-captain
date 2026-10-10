@@ -1,11 +1,10 @@
-"""Fault injection for firmware migration; no serial, USB or flash is opened."""
+"""Fault injection for native firmware updates; no serial, USB or flash is opened."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 from types import SimpleNamespace
 
@@ -32,7 +31,7 @@ def test_paginated_backup_reads_all_625_slots_and_rejects_changes():
         install._patch_inventory(client, "head")
 
 
-def snapshot(firmware="0.6.4"):
+def snapshot(firmware="0.6.5-native"):
     return {
         "info": {"type": "DEVICE_INFO", "fw": firmware,
                  "native_experimental": "native" in firmware},
@@ -53,8 +52,8 @@ def snapshot(firmware="0.6.4"):
 
 
 class FakeIO:
-    def __init__(self, *, source="0.6.4", failure=None):
-        self.original = bytes(b"O" * install.STORAGE_OFFSET + b"S" * install.STORAGE_BYTES)
+    def __init__(self, *, source="0.6.5-native", failure=None):
+        self.original = bytes(b"O" * install.STORAGE_OFFSET + b"S" * (install.FLASH_BYTES - install.STORAGE_OFFSET))
         self.flash = bytearray(self.original)
         self.before = snapshot(source)
         self.current_version = source
@@ -86,7 +85,7 @@ class FakeIO:
             result["profiles"]["backup"]["device"]["lost_setting"] = True
         return result
 
-    def enter_bootloader(self, device, family):
+    def enter_bootloader(self, device):
         self.hit("bootloader")
         return self.target
 
@@ -139,14 +138,6 @@ def environment(tmp_path, monkeypatch):
     package = SimpleNamespace(manifest={"release": "0.7.0", "firmware_version": "0.7.0-native"},
                               firmware_uf2=b"validated UF2", firmware_pages={})
     monkeypatch.setattr(install, "validate_update_package", lambda path: package)
-    def extract(raw, destination):
-        destination.mkdir()
-        return ["active_profile.json", "profiles/live/device.json"]
-    def build(config, output, *, builder):
-        output.write_bytes(b"L" * install.STORAGE_BYTES)
-        return output.read_bytes()
-    monkeypatch.setattr(install, "extract_circuitpython_config", extract)
-    monkeypatch.setattr(install, "build_native_storage", build)
     # fsync(directory) is a POSIX durability operation, unavailable on Windows
     # hosts running these offline tests. The worker's real Linux path uses it.
     if sys.platform == "win32":
@@ -155,12 +146,12 @@ def environment(tmp_path, monkeypatch):
 
 
 def run_job(root, io, progress=None):
-    return install.FirmwareInstaller(converter=Path("/trusted/bosun_storage_image"), io=io).run(
+    return install.FirmwareInstaller(io=io).run(
         root / "package.zip", copy.deepcopy(io.before["info"]), "/dev/ttyACM1",
         root / "installation", progress or (lambda state: None))
 
 
-def test_cp_migration_preserves_every_profile_and_verified_full_backup(environment):
+def test_update_keeps_existing_filesystem_and_verified_full_backup(environment):
     io = FakeIO()
     states = []
     result = run_job(environment, io, states.append)
@@ -168,23 +159,24 @@ def test_cp_migration_preserves_every_profile_and_verified_full_backup(environme
     assert result["configuration_verified"] is True
     assert Path(result["backup_path"]).read_bytes() == io.original
     assert result["backup_sha256"] == hashlib.sha256(io.original).hexdigest()
-    assert bytes(io.flash[install.STORAGE_OFFSET:]) == b"L" * install.STORAGE_BYTES
+    assert "load_storage" not in io.calls
+    assert bytes(io.flash[install.STORAGE_OFFSET:]) == io.original[install.STORAGE_OFFSET:]
     assert io.calls.index("verify_backup") < io.calls.index("load_firmware")
-    assert io.calls.index("load_firmware") < io.calls.index("load_storage")
-    assert io.calls.index("verify_storage") < io.calls.index("reboot")
+    assert io.calls.index("verify_firmware") < io.calls.index("verify_storage") < io.calls.index("reboot")
     journal = json.loads((environment / "installation/journal.json").read_text())
     assert journal == result
     assert all(state["backup_sha256"] == result["backup_sha256"] for state in states if state["flash_may_be_modified"])
 
 
-def test_native_update_does_not_write_or_convert_existing_filesystem(environment, monkeypatch):
-    io = FakeIO(source="0.1.0-native")
-    monkeypatch.setattr(install, "extract_circuitpython_config", lambda *_: pytest.fail("FAT extraction on native"))
-    result = run_job(environment, io)
-    assert result["status"] == "complete"
-    assert "load_storage" not in io.calls
-    assert "verify_storage" in io.calls
-    assert bytes(io.flash[install.STORAGE_OFFSET:]) == io.original[install.STORAGE_OFFSET:]
+def test_non_native_firmware_is_refused_before_opening_the_device(environment):
+    io = FakeIO()
+    result = install.FirmwareInstaller(io=io).run(
+        environment / "package.zip", {"fw": "1.0.0"}, "/dev/ttyACM1", environment / "installation",
+        lambda state: None)
+    assert result["status"] == "failed"
+    assert result["flash_may_be_modified"] is False
+    assert "native Bosun firmware" in result["error"]
+    assert io.calls == []
 
 
 @pytest.mark.parametrize("failure", ["pin", "snapshot_before", "bootloader", "backup", "short_backup", "verify_backup"])
@@ -197,20 +189,7 @@ def test_preflight_or_backup_failure_never_changes_flash(environment, failure):
     assert bytes(io.flash) == io.original
 
 
-@pytest.mark.parametrize("operation", ["extract_circuitpython_config", "build_native_storage"])
-def test_incompatible_or_full_storage_aborts_before_first_flash(environment, monkeypatch, operation):
-    io = FakeIO()
-    def fail(*args, **kwargs):
-        raise ValueError("incompatible configuration or insufficient space")
-    monkeypatch.setattr(install, operation, fail)
-    result = run_job(environment, io)
-    assert result["status"] == "failed"
-    assert "load_firmware" not in io.calls
-    assert bytes(io.flash) == io.original
-    assert Path(result["backup_path"]).read_bytes() == io.original
-
-
-@pytest.mark.parametrize("failure", ["load_firmware", "verify_firmware", "load_storage", "verify_storage", "reboot", "snapshot_after", "configuration_mismatch"])
+@pytest.mark.parametrize("failure", ["load_firmware", "verify_firmware", "verify_storage", "reboot", "snapshot_after", "configuration_mismatch"])
 def test_partial_write_or_verification_failure_restores_entire_original_flash(environment, failure):
     io = FakeIO(failure=failure)
     result = run_job(environment, io)
@@ -583,7 +562,7 @@ def test_changed_firmware_is_rejected_at_first_readonly_response(monkeypatch):
     monkeypatch.setattr(io, "_open_runtime_client", lambda _: Client("/dev/pinned-captain"))
     with pytest.raises(install.FirmwareInstallError, match="firmware changed"):
         io.snapshot(install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"),
-                    save_dirty=True, expected_info={"fw": "0.6.4"})
+                    save_dirty=True, expected_info={"fw": "0.6.5-native"})
     assert calls == ["GET_DEVICE_INFO"]
 
 
@@ -602,17 +581,17 @@ def test_native_reboot_ack_loss_requires_verified_bootsel(monkeypatch, failure, 
             return {"fw": "0.1.0-native", "reboot_modes": ["bootloader"]}
     monkeypatch.setattr(install, "_ProtocolClient", Client)
     io = object.__new__(install.LinuxInstallIO)
-    monkeypatch.setattr(io, "_open_runtime_client", lambda _: Client("/dev/pinned"))
+    monkeypatch.setattr(io, "_open_runtime_client", lambda _device, _timeout: Client("/dev/pinned"))
     def boot(actual):
         assert actual == device and calls[-1] == "close"
         if not boot_matches: raise install.FirmwareInstallError("Pinned device not in BOOTSEL")
         return target, []
     monkeypatch.setattr(io, "_boot_device", boot)
     if boot_matches:
-        assert io.enter_bootloader(device, "native") == target
+        assert io.enter_bootloader(device) == target
     else:
         with pytest.raises(install.FirmwareInstallError, match="Pinned device"):
-            io.enter_bootloader(device, "native")
+            io.enter_bootloader(device)
     assert calls == ["GET_DEVICE_INFO", "REBOOT", "close"]
 
 
@@ -625,10 +604,10 @@ def test_native_reboot_refusal_is_not_treated_as_ack_loss(monkeypatch):
             return {"fw": "0.1.0-native", "reboot_modes": ["bootloader"]}
     monkeypatch.setattr(install, "_ProtocolClient", Client)
     io = object.__new__(install.LinuxInstallIO)
-    monkeypatch.setattr(io, "_open_runtime_client", lambda _: Client("/dev/pinned"))
+    monkeypatch.setattr(io, "_open_runtime_client", lambda _device, _timeout: Client("/dev/pinned"))
     monkeypatch.setattr(io, "_boot_device", lambda _: pytest.fail("Explicit refusal must not be ignored"))
     with pytest.raises(install.FirmwareInstallError, match="refused"):
-        io.enter_bootloader(install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"), "native")
+        io.enter_bootloader(install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"))
 
 
 def test_full_state_disk_after_first_flash_write_does_not_prevent_rollback(environment, monkeypatch):
@@ -657,10 +636,13 @@ def test_full_state_disk_after_first_flash_write_does_not_prevent_rollback(envir
 
 def test_failed_return_from_bootsel_before_flashing_requires_recovery(environment, monkeypatch):
     io = FakeIO()
-    def incompatible(*args, **kwargs):
-        io.failure = "recovery_bootloader"
-        raise ValueError("unsupported configuration")
-    monkeypatch.setattr(install, "extract_circuitpython_config", incompatible)
+    normal_write = install._write_new
+    def storage_copy_fails(path, data):
+        if path.name == "native-storage.bin":
+            io.failure = "recovery_bootloader"
+            raise OSError("state disk is full")
+        normal_write(path, data)
+    monkeypatch.setattr(install, "_write_new", storage_copy_fails)
     result = run_job(environment, io)
     assert result["status"] == "manual_recovery"
     assert result["flash_may_be_modified"] is False
@@ -671,7 +653,7 @@ def test_failed_return_from_bootsel_before_flashing_requires_recovery(environmen
 def test_reassigned_tty_cannot_replace_the_device_pinned_by_the_hub(environment):
     io = FakeIO()
     previously_owned = install.PinnedDevice(io.device.usb_path, "FFFFFFFFFFFFFFFF")
-    result = install.FirmwareInstaller(converter=Path("/trusted/builder"), io=io).run(
+    result = install.FirmwareInstaller(io=io).run(
         environment / "package.zip", io.before["info"], "/dev/ttyACM1", environment / "installation",
         lambda state: None, expected_device=previously_owned)
     assert result["status"] == "failed"
@@ -682,72 +664,11 @@ def test_reassigned_tty_cannot_replace_the_device_pinned_by_the_hub(environment)
 def test_real_linux_installer_requires_identity_captured_by_the_owned_link(environment, monkeypatch):
     io = object.__new__(install.LinuxInstallIO)
     monkeypatch.setattr(io, "pin", lambda _: pytest.fail("Late pinning without an owned-link anchor"))
-    result = install.FirmwareInstaller(converter=Path("/trusted/builder"), io=io).run(
-        environment / "package.zip", {"fw": "0.6.4"}, "/dev/ttyACM1", environment / "installation",
+    result = install.FirmwareInstaller(io=io).run(
+        environment / "package.zip", {"fw": "0.6.5-native"}, "/dev/ttyACM1", environment / "installation",
         lambda state: None)
     assert result["status"] == "failed"
     assert "physical USB identity" in result["error"]
-
-
-@pytest.mark.parametrize("case", ["plugin", "message", "switch", "duplicate", "mode", "action",
-                                  "macro", "transition", "expression", "channel", "cc", "navigation"])
-def test_behavior_incompatible_cp_configuration_is_rejected_before_bootsel(environment, case):
-    io = FakeIO()
-    profile = io.before["profiles"]["live"]
-    patch = profile["patches"]["01/01"]
-    midi = {"type": "cc", "channel": 1, "cc": 7, "value": 1}
-    binding = {"switch": "1", "mode": "tap", "actions": {"press": {"messages": [midi]}}}
-    patch["bindings"] = [binding]
-    if case == "plugin": profile["metadata"]["kind"] = "ampero_ii_stage"
-    elif case == "message": midi["type"] = "unsupported_future_type"
-    elif case == "switch": binding["switch"] = "5"
-    elif case == "duplicate": patch["bindings"].append(copy.deepcopy(binding))
-    elif case == "mode": binding["mode"] = "unsupported_mode"
-    elif case == "action": binding["actions"]["held"] = {"messages": [midi]}
-    elif case == "macro": binding["actions"]["press"]["messages"] = [midi] * 129
-    elif case == "transition":
-        patch["on_enter"] = {"messages": [midi] * 65}
-        patch["on_exit"] = {"messages": [midi] * 64}
-    elif case == "expression":
-        profile["device"]["expression"] = [{"jack": 1, "enabled": True, "message": {"type": "pc"}}]
-    elif case == "channel": midi["channel"] = 17
-    elif case == "cc": midi["cc"] = 128
-    elif case == "navigation":
-        midi["type"] = "captain_bank_step"
-        profile["patches"].update({f"{i // 10 + 1:02}/{i % 10 + 1:02}": {"bindings": []} for i in range(1, 626)})
-    result = run_job(environment, io)
-    assert result["status"] == "failed", result
-    assert "CircuitPython was left unchanged" in result["error"]
-    assert "bootloader" not in io.calls
-    assert "backup" not in io.calls
-    assert bytes(io.flash) == io.original
-
-
-def test_supported_kemper_actions_global_long_press_and_expression_are_accepted(environment):
-    io = FakeIO()
-    profile = io.before["profiles"]["live"]
-    profile["device"].update({
-        "kemper": {},
-        "long_press_actions": {"1": [{"type": "kemper_tuner", "state": "on"}]},
-        "expression": [{"jack": 1, "enabled": True, "curve": "log", "message": {"type": "kemper_wah", "value": 0}}],
-    })
-    profile["patches"]["01/01"]["bindings"] = [{
-        "switch": "1", "mode": "latched", "actions": {
-            "toggle_on": {"messages": [{"type": "kemper_effect_toggle", "slot": "X", "value": "on"}]},
-            "toggle_off": {"messages": [{"type": "kemper_effect_toggle", "slot": "X", "value": "off"}]},
-        },
-    }]
-    assert run_job(environment, io)["status"] == "complete"
-
-
-def test_player_migration_accepts_typed_profile_but_rejects_profiler_only_programs():
-    before = snapshot()
-    profile = before["profiles"]["live"]
-    profile["patches"]["01/01"]["on_enter"] = {"messages": [{"type": "kemper_rig"}]}
-    install._require_native_compatible(before)
-    profile["patches"]["01/01"]["on_enter"] = {"messages": [{"type": "kemper_browse_rig"}]}
-    with pytest.raises(install.FirmwareInstallError, match="native PROFILER plugin"):
-        install._require_native_compatible(before)
 
 
 def test_snapshot_comparison_keeps_the_hardware_model():
@@ -765,23 +686,6 @@ def test_snapshot_comparison_keeps_the_hardware_model():
     lost["info"]["hardware"] = {"model": "captain10", "configured": False}
     with pytest.raises(install.FirmwareInstallError, match="different MIDI Captain model"):
         install._compare_snapshot(mini, lost, "0.8.1-native")
-
-
-def test_cp_preflight_limits_and_names_match_the_native_runtime_source():
-    root = Path(__file__).resolve().parents[3]
-    runtime = (root / "firmware-native/src/runtime.c").read_text(encoding="utf-8")
-    hardware = (root / "firmware-native/src/hardware.c").read_text(encoding="utf-8")
-    header = (root / "firmware-native/include/bosun/runtime.h").read_text(encoding="utf-8")
-    # CircuitPython Bosun only ran on the 10-switch Captain, so migrations
-    # are checked against that model's switch names.
-    for name, actual, source in (("supported", install.NATIVE_MESSAGES, runtime),
-                                 ("captain10_names", install.NATIVE_SWITCHES, hardware),
-                                 ("mode_names", install.NATIVE_MODES, runtime),
-                                 ("action_names", install.NATIVE_ACTIONS, runtime)):
-        body = re.search(r"\b" + name + r"\[[^]]*\]\s*=\s*\{([^}]+)\}", source).group(1)
-        assert set(re.findall(r'"([^"]+)"', body)) == actual
-    assert int(re.search(r"#define BOSUN_RUNTIME_COMMANDS (\d+)u", header).group(1)) == install.NATIVE_COMMAND_LIMIT
-    assert int(re.search(r"#define BOSUN_PATCH_CATALOG_MAX (\d+)u", (root / "firmware-native/include/bosun/config.h").read_text()).group(1)) == install.NATIVE_NAVIGATION_LIMIT
 
 
 def test_rp2040_picotool_serial_filter_uses_flash_uid_not_rom_usb_serial(tmp_path, monkeypatch):

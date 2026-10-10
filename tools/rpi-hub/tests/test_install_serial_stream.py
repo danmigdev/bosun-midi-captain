@@ -138,7 +138,7 @@ def test_complete_malformed_frame_queued_after_reply_is_not_discarded(client_fac
 def test_boot_junk_is_accepted_only_before_correlated_startup_ack(client_factory):
     def handle(request, stream):
         if request["type"] == "PING":
-            stream.queue(b"CircuitPython boot output\r\n\xff invalid boot bytes\n",
+            stream.queue(b"stale boot output\r\n\xff invalid boot bytes\n",
                          frame({"type": "ACK", "id": "another-client"}), reply(request, "ACK"))
         else:
             stream.queue(b"CORRUPT_AFTER_STARTUP\n", reply(request, "DEVICE_INFO", fw="0.6.5-native"))

@@ -45,12 +45,12 @@ CONTEXT_SINGLE_FLIGHT_TIMEOUT_S = 12.0
 CONTEXT_WAITERS_MAX = 512
 CONTEXT_WAITERS_PER_SUB_MAX = 64
 PATCH_SINGLE_FLIGHT_TIMEOUT_S = 12.0
-# The Captain can retain only one active background response plus eight
-# queued generators.  Never use the ninth slot from the hub: it is deliberate
-# headroom for a command which was already in the CDC/RX path when our last
-# correlated reply arrived.  The class limits add up to the global bound and
-# reserve enough capacity for Stage's DEVICE_INFO + PATCH_LIST + CONTEXT and
-# current/post-switch PATCH snapshots even while editor diagnostics are busy.
+# The Captain answers one request at a time; later requests wait in its USB
+# receive path while a large reply drains.  Bound the expensive reads the hub
+# keeps outstanding so diagnostics cannot queue far ahead of interactive
+# commands.  The class limits add up to the global bound and reserve enough
+# capacity for Stage's DEVICE_INFO + PATCH_LIST + CONTEXT and current/
+# post-switch PATCH snapshots even while editor diagnostics are busy.
 BACKGROUND_INFLIGHT_MAX = 8
 BACKGROUND_BULK_MAX = 3
 BACKGROUND_PATCH_MAX = 2
@@ -62,10 +62,9 @@ PATCH_FLIGHTS_MAX = BACKGROUND_PATCH_MAX
 PATCH_WAITERS_MAX = 512
 PATCH_WAITERS_PER_SUB_MAX = 64
 REQUEST_TIMEOUT_S = 30.0
-# A streamed background line makes every immediate ACK/ERROR wait in the
-# Captain's 128-chunk deferred-output queue. Keep ordinary correlated fan-in
-# to at most half that physical bound, with a per-client fairness limit, so
-# unsolicited Stage/Kemper events retain substantial headroom too.
+# The Captain emits unsolicited Stage/Kemper events only between replies.
+# Bound ordinary correlated fan-in, with a per-client fairness limit, so a
+# burst of requests cannot monopolise that single reply path.
 REQUESTS_MAX = 64
 REQUESTS_PER_SUB_MAX = 32
 
@@ -108,20 +107,12 @@ _CONTEXT_BARRIER_EVENTS = {"patch_switched", "binding_fired"}
 _PATCH_LOCATION_MUTATIONS = {"PUT_PATCH", "PUT_BINDING", "DELETE_PATCH", "DISCARD"}
 _PATCH_RESET_MUTATIONS = {
     "SWITCH_PROFILE", "DELETE_PROFILE", "CREATE_PROFILE", "RENAME_PROFILE",
-    "PUT_FILE_BEGIN", "PUT_FILE_CHUNK", "PUT_FILE_END", "FACTORY_RESET",
     # SET_HARDWARE restarts the pedal when the model changes.
-    "REBOOT", "SET_HARDWARE",
+    "FACTORY_RESET", "REBOOT", "SET_HARDWARE",
 }
 _PATCH_ORDERED_MUTATIONS = (
     _PATCH_LOCATION_MUTATIONS | _PATCH_RESET_MUTATIONS | {"SWITCH_PATCH"}
 )
-# Legacy profile-management callers used ``id`` as both the request id and
-# the profile identifier.  The firmware still implements that fallback.  A
-# private correlation id must therefore be accompanied by the original value
-# in ``profile_id`` or it would target the hub's random private namespace.
-_PROFILE_ID_FALLBACK_TYPES = {
-    "CREATE_PROFILE", "SWITCH_PROFILE", "DELETE_PROFILE", "RENAME_PROFILE",
-}
 
 
 class Subscription:
@@ -277,10 +268,10 @@ class Hub:
         self._request_id_prefix = _REQUEST_ID_STEM + secrets.token_hex(8) + "_"
         self._request_timeout_s = request_timeout_s
         # Requests in this table have reached (or may already have reached)
-        # the Captain and still occupy one of its tiny background-generator
-        # slots.  This is intentionally independent of downstream waiter
-        # state: closing a browser or timing out its promise does not cancel
-        # work which is already queued in CircuitPython.
+        # the Captain and still wait for their reply there.  This is
+        # intentionally independent of downstream waiter state: closing a
+        # browser or timing out its promise does not withdraw a request which
+        # is already queued on the Captain.
         self._background_tokens: dict[str, str] = {}
 
     # -- lifecycle -------------------------------------------------------
@@ -361,11 +352,11 @@ class Hub:
     def _reserve_background(
         self, private_id: str, kind: str
     ) -> bool:
-        """Reserve one response-generator slot for an upstream request.
+        """Reserve one background admission token for an upstream request.
 
         A token lives until its private-id reply is observed or the upstream
         session ends.  In particular, a client timeout/disconnect cannot free
-        it: neither event removes the already queued generator from Captain.
+        it: neither event withdraws the request already queued on the Captain.
         """
 
         request_class = _BACKGROUND_CLASS_BY_TYPE.get(kind)
@@ -388,11 +379,11 @@ class Hub:
             self._background_tokens.pop(private_id, None)
 
     def _orphan_background(self, private_id: Optional[str]) -> None:
-        """Keep physical occupancy without consuming a live class quota.
+        """Keep counting a queued request without consuming a live class quota.
 
         This lets a retry use (for example) the one live CONTEXT reservation
         after its predecessor timed out, while the orphan still counts toward
-        the hard global eight-generator ceiling until its late reply/down.
+        the global BACKGROUND_INFLIGHT_MAX ceiling until its late reply/down.
         """
 
         if private_id in self._background_tokens:
@@ -509,13 +500,6 @@ class Hub:
             return True  # late send from a socket which has already closed
 
         request_id = msg.get("id")
-        if (kind in _PROFILE_ID_FALLBACK_TYPES
-                and not msg.get("profile_id") and not request_id):
-            # ``profile_id or id`` in legacy firmware cannot be preserved by
-            # rewriting a false-y id: even an explicit false-y profile_id
-            # would fall through to the new private id. Keep this malformed/
-            # legacy edge transparent instead of changing its target.
-            return False
         if not self.link.connected:
             self._offer_correlated(
                 sub, has_id, request_id,
@@ -564,8 +548,6 @@ class Hub:
             )
 
         upstream = dict(msg)
-        if kind in _PROFILE_ID_FALLBACK_TYPES and not upstream.get("profile_id"):
-            upstream["profile_id"] = request_id
         upstream["id"] = private_id
         accepted = self.link.send(json.dumps(upstream, separators=(",", ":")))
         if accepted is False:
@@ -656,7 +638,7 @@ class Hub:
 
         # Release even if the downstream waiter timed out/closed and its
         # correlation record is already gone.  The late reply is the first
-        # proof that Captain no longer owns this physical background slot.
+        # proof that the Captain has finished this request.
         self._release_background(response_id)
         pending = self._take_request(response_id)
         if pending is None:
@@ -787,8 +769,8 @@ class Hub:
             "GET_PATCH single flight %s key=%r timed out with %d waiter(s)",
             flight_id, key, len(flight.waiters),
         )
-        # The client deadline cannot cancel the generator which is already in
-        # Captain. Keep its admission token until a late reply or link-down.
+        # The client deadline cannot withdraw the request already queued on
+        # the Captain. Keep its admission token until late reply/link-down.
         self._orphan_background(flight_id)
         self._fail_patch_flight(
             flight, "patch_timeout", release_background=False,
@@ -912,7 +894,7 @@ class Hub:
         ):
             return False
         # A timed-out generation no longer has a _PatchFlight entry, but its
-        # eventual private reply still proves that the Captain slot is free.
+        # eventual private reply still proves that the Captain has finished it.
         self._release_background(response_id)
         flight = self._patch_flight_ids.get(response_id)
         if flight is None:
@@ -921,24 +903,15 @@ class Hub:
 
         kind = msg.get("type")
         response_key = self._patch_key(msg) if kind == "PATCH" else None
-        # Legacy firmware did not understand cross-profile reads and omitted
-        # (or returned an empty) profile. Preserve that response for callers
-        # which implement the legacy-active-profile fallback, but never cache
-        # it under the named profile because its provenance is ambiguous.
-        legacy_profile_reply = bool(
-            response_key is not None
-            and flight.key[0]
-            and response_key == ("", flight.key[1], flight.key[2])
-        )
         if kind == "PATCH" and (
             not isinstance(msg.get("patch"), dict)
             or msg.get("partial") is True
-            or (response_key != flight.key and not legacy_profile_reply)
+            or response_key != flight.key
         ):
             log.warning("malformed/mismatched reply for GET_PATCH flight %s", response_id)
             self._fail_patch_flight(flight, "patch_protocol")
         elif kind == "PATCH":
-            if not flight.sealed and not legacy_profile_reply:
+            if not flight.sealed:
                 snapshot = dict(msg)
                 snapshot.pop("id", None)
                 self._patch_cache[flight.key] = snapshot
@@ -1052,8 +1025,8 @@ class Hub:
             flight_id,
             len(self._context_waiters),
         )
-        # Timing out the downstream snapshot does not cancel its already
-        # queued Captain generator. Its token remains until late reply/down.
+        # A downstream snapshot timeout does not withdraw the request queued on
+        # the Captain. Its token remains until late reply/down.
         self._orphan_background(flight_id)
         self._fail_context_flight(
             "context_timeout", release_background=False,
@@ -1215,7 +1188,7 @@ class Hub:
                 self._fail_all_patch_waiters("link_down")
                 self._fail_all_requests("link_down")
                 # Session teardown is the only cancellation barrier which
-                # proves every queued Captain generator has been discarded.
+                # proves the Captain has discarded every queued request.
                 self._background_tokens.clear()
         except (AttributeError, TypeError, ValueError):
             pass

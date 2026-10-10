@@ -1,7 +1,6 @@
 """Run the real appliance installers offline with isolated files and fake OS tools."""
 from __future__ import annotations
 
-import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -11,7 +10,6 @@ import pytest
 
 
 SOURCE = Path(__file__).resolve().parents[1]
-REPOSITORY = SOURCE.parents[1]
 
 
 def shell_path(path: Path) -> str:
@@ -60,18 +58,6 @@ install)
         cp "$source" "$destination"
     fi
     ;;
-cc)
-    [[ "${FAIL_CONVERTER:-0}" != 1 ]] || exit 42
-    output=''
-    previous=''
-    for argument in "$@"; do
-        [[ "$previous" != -o ]] || output="$argument"
-        if [[ "$argument" == *.c && ! -f "$argument" ]]; then exit 43; fi
-        previous="$argument"
-    done
-    safe_destination "$output"
-    printf 'offline converter artifact\n' > "$output"
-    ;;
 picotool)
     echo 'installer attempted to access a Captain' >&2
     exit 99
@@ -101,7 +87,7 @@ def appliance(tmp_path):
     system = tmp_path / "system"
     for path in ("etc/systemd/system", "etc/udev/rules.d", "opt", "var/lib"):
         (system / path).mkdir(parents=True, exist_ok=True)
-    for filename in ("install.sh", "install-native-updater.sh", "build-storage-image.sh"):
+    for filename in ("install.sh", "install-native-updater.sh"):
         script = (SOURCE / filename).read_text(encoding="utf-8")
         # Execute the installer logic, but give it a simulated root identity and
         # redirect every fixed installation destination into this temporary tree.
@@ -123,23 +109,11 @@ def appliance(tmp_path):
     (source / "bosun_hub/__main__.py").write_text("# installed module fixture\n")
     (source / "requirements.txt").write_text("# offline fixture\n")
     (source / "README.md").write_text("Offline installer fixture.\n")
-    native = checkout / "firmware-native"
-    for filename in (
-        "platform/host/storage_image.c", "platform/rp2040/storage.c",
-        "src/storage_path.c", "src/config.c", "src/json.c",
-        "third_party/littlefs/lfs.c", "third_party/littlefs/lfs_util.c",
-        "third_party/littlefs/lfs.h", "third_party/littlefs/lfs_util.h",
-        "include/bosun/board.h", "include/bosun/config.h",
-        "include/bosun/json.h", "include/bosun/storage.h", "include/bosun/plugin_kinds.h",
-    ):
-        target = native / filename
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("/* compiler input fixture */\n")
     binary = tmp_path / "fake-bin"
     binary.mkdir()
     for name in (
         "apt-get", "id", "useradd", "getent", "usermod", "rsync", "install",
-        "chown", "cc", "picotool", "udevadm", "systemctl", "stat", "runuser",
+        "chown", "picotool", "udevadm", "systemctl", "stat", "runuser",
     ):
         command = binary / name
         command.write_text(FAKE_TOOL, encoding="utf-8", newline="\n")
@@ -174,20 +148,15 @@ def appliance(tmp_path):
 
     instance = Appliance()
     instance.system = system
-    instance.native = native
     instance.source = source
     return instance
 
 
-@pytest.mark.parametrize("missing", [
-    "stage", "kiosk/bosun-hdmi-recovery.py", "platform/host/storage_image.c", "src/config.c",
-    "include/bosun/config.h", "include/bosun/plugin_kinds.h", "third_party/littlefs/lfs.c",
-])
+@pytest.mark.parametrize("missing", ["stage", "kiosk/bosun-hdmi-recovery.py", "udev/60-bosun-update.rules"])
 def test_missing_build_or_checkout_fails_before_any_appliance_mutation(appliance, missing):
     if missing != "stage":
         appliance.build_stage()
-        base = appliance.source if missing.startswith("kiosk/") else appliance.native
-        (base / missing).unlink()
+        (appliance.source / missing).unlink()
     result, events = appliance.run()
     assert result.returncode != 0
     assert events == []
@@ -199,17 +168,17 @@ def test_fresh_install_sets_access_and_native_support_before_starting_services(a
     result, events = appliance.run(EXISTING_USER="0")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (appliance.installed_stage / "index.html").read_text() == "<p>new Stage</p>\n"
-    assert (appliance.system / "opt/bosun-hub/bin/bosun_storage_image").is_file()
     assert (appliance.system / "etc/udev/rules.d/60-bosun-update.rules").is_file()
+    assert (appliance.system / "etc/systemd/system/bosun-hub.service.d/update-timeout.conf").read_text() == (
+        "[Service]\nTimeoutStopSec=3600\n")
     assert (appliance.system / "etc/udev/rules.d/99-bosun-kiosk-input.rules").is_file()
     first_restart = next(i for i, line in enumerate(events) if line.startswith("systemctl restart "))
     before_start = events[:first_restart]
     assert before_start.index("udevadm control --reload") < before_start.index(
         "udevadm trigger --action=change --subsystem-match=input"
     ) < before_start.index("udevadm settle --timeout=10")
-    assert any(line.startswith("apt-get install ") and "build-essential" in line
-               and "picotool" in line and "seatd" in line for line in before_start)
-    assert any(line.startswith("cc ") for line in before_start)
+    assert any(line.startswith("apt-get install ") and "picotool" in line and "seatd" in line
+               for line in before_start)
     for group in ("audio", "video", "input", "render", "plugdev", "dialout"):
         assert f"usermod --append --groups {group} bosun" in before_start
     assert "systemctl enable --now seatd.service" in before_start
@@ -226,47 +195,8 @@ def test_existing_stage_is_preserved_without_replacement_build(appliance):
     assert (appliance.installed_stage / "retained.js").read_text() == "existing bundle\n"
 
 
-def test_converter_build_failure_does_not_restart_running_services(appliance):
-    appliance.build_stage()
-    result, events = appliance.run(FAIL_CONVERTER="1")
-    assert result.returncode == 42
-    assert not any(line.startswith("systemctl restart ") for line in events)
-    assert not any(line.startswith("systemctl enable --now ") for line in events)
-
-
 @pytest.mark.parametrize("failed_service", ["bosun-hub.service", "bosun-kiosk.service"])
 def test_inactive_service_is_reported_as_failed_install(appliance, failed_service):
     appliance.build_stage()
     result, _ = appliance.run(FAIL_SERVICE=failed_service)
     assert result.returncode != 0
-
-
-def test_converter_compiles_from_the_shipped_sources_alone(tmp_path):
-    """The Pi builds the converter with plain cc: no CMake, Python or generated headers.
-
-    The installer tests above fake cc, so this is the check that the real compile
-    works from exactly the files the setup package ships.
-    """
-    bash, compiler = shutil.which("bash"), shutil.which("cc")
-    if os.name == "nt" or not bash or not compiler:
-        pytest.skip("Compiling the converter needs bash and a C compiler")
-    spec = importlib.util.spec_from_file_location("package_pi_setup", REPOSITORY / "tools/package-pi-setup.py")
-    package = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(package)
-    shipped = [name for name in package.setup_files()
-               if name.startswith("firmware-native/") or name == "tools/rpi-hub/build-storage-image.sh"]
-    for name in shipped:
-        target = tmp_path / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = (REPOSITORY / name).read_bytes()
-        # The package strips CR from scripts the same way.
-        target.write_bytes(data.replace(b"\r\n", b"\n") if name.endswith(".sh") else data)
-    converter = tmp_path / "bosun_storage_image"
-    build = subprocess.run([bash, str(tmp_path / "tools/rpi-hub/build-storage-image.sh"), str(converter)],
-                           text=True, capture_output=True, timeout=300)
-    assert build.returncode == 0, build.stderr
-    image = tmp_path / "empty.bin"
-    provision = subprocess.run([str(converter), "--empty", "--output", str(image)],
-                               text=True, capture_output=True, timeout=60)
-    assert provision.returncode == 0, provision.stderr
-    assert image.stat().st_size == 4 * 1024 * 1024

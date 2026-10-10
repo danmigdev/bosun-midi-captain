@@ -16,8 +16,8 @@ The thread:
     in descending order, or a single ``tcp://host:port`` address for
     development against the native firmware emulator) and runs a
     PING/ACK sentinel handshake on each until one answers as the
-    protocol port. The console CDC echoes bytes but never returns
-    ``{"type":"ACK"}``, so it is skipped automatically.
+    protocol port. The console CDC only prints status lines and never
+    returns ``{"type":"ACK"}``, so it is skipped automatically.
   - discards everything received before the sentinel ACK: that is stale
     backlog from a previous session, and dropping it is what makes a
     reconnect start from clean state (same reasoning as the editor's
@@ -34,7 +34,7 @@ The thread:
     direction for ``STALL_S``, or on several writes in a row with no
     intervening read (the "write-only black hole" the Android backend
     also had to special-case). Closing a serial port drops DTR, which
-    resets the RP2040 and forces re-enumeration.
+    ends the firmware's data session and discards its buffered traffic.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ from typing import Callable, Optional
 log = logging.getLogger("bosun_hub.link")
 
 BAUD = 115200
-SYNC_TIMEOUT_SERIAL = 12.0  # the RP2040 reboots on the DTR edge when we open
+SYNC_TIMEOUT_SERIAL = 12.0  # a just-enumerated pedal may still be booting
 SYNC_TIMEOUT_TCP = 8.0
 KEEPALIVE_S = 6.0
 STALL_S = 20.0
@@ -200,8 +200,8 @@ class SerialTransport(Transport):
         # which lets UpstreamLink retain and resume the remaining suffix while
         # continuing to drain the Captain's opposite-direction CDC traffic.
         self._s.write_timeout = 0
-        # CircuitPython's CDC needs DTR asserted to treat the host as
-        # "connected"; the DTR edge also soft-resets the RP2040.
+        # The firmware opens a data session only while DTR is asserted and
+        # discards its buffered traffic whenever DTR changes.
         self._s.dtr = True
         self._s.rts = True
         identity = _serial_usb_identity(path)
@@ -376,7 +376,7 @@ def discover_candidates(explicit: Optional[str]) -> list[str]:
     as-is. Otherwise every ``/dev/ttyACM*`` is a candidate, highest
     number first: on the Captain's composite CDC the data interface
     enumerates after the console, so the higher ``ttyACMx`` is the one
-    we want, and opening the console CDC would reset CircuitPython.
+    we want.
     """
 
     if explicit:

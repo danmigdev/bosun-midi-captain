@@ -54,7 +54,8 @@ class Installer:
 def setup(root, installer=None):
     hub = Hub(None)
     hub.link = Link()
-    hub._update_device_info = {"type": "DEVICE_INFO", "fw": "0.6.4", "device": "midi_captain"}
+    hub._update_device_info = {"type": "DEVICE_INFO", "fw": "0.6.5-native", "native_experimental": True,
+                               "device": "midi_captain"}
     hub.updates = UpdateService(hub, root=root, installer=installer or Installer())
     hub.updates.supported = lambda: True
     hub._restart_update_link = lambda: setattr(hub.link, "connected", True)

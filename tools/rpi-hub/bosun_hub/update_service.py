@@ -22,15 +22,13 @@ import time
 MAX_ARCHIVE = 4 * 1024 * 1024
 MAX_CHUNK = 16 * 1024
 TERMINAL = {"done", "error", "rolled-back", "recovery-required", "aborted"}
-DEFAULT_CONVERTER = Path("/opt/bosun-hub/bin/bosun_storage_image")
 log = logging.getLogger("bosun_hub.updates")
 
 
 class UpdateService:
-    def __init__(self, hub, *, root=None, converter=DEFAULT_CONVERTER, installer=None, recovery_verifier=None):
+    def __init__(self, hub, *, root=None, installer=None, recovery_verifier=None):
         self.hub = hub
         self.root = Path(root or Path.home() / ".local/state/bosun/updates")
-        self.converter = Path(converter)
         self.installer = installer
         self.recovery_verifier = recovery_verifier
         self.active = None
@@ -76,8 +74,7 @@ class UpdateService:
         return bool(self._recovery_jobs)
 
     def supported(self):
-        return (sys.platform == "linux" and self.converter.is_file()
-                and os.access(self.converter, os.X_OK) and shutil.which("picotool") is not None
+        return (sys.platform == "linux" and shutil.which("picotool") is not None
                 and (self.hub.link.port_name or "").startswith("/dev/"))
 
     def _directory(self, job):
@@ -368,11 +365,9 @@ class UpdateService:
                 raw_phase = snapshot.get("phase", "verifying")
                 phase = {"preflight": "validating", "reading_configuration": "backing-up",
                          "entering_bootloader": "backing-up", "backing_up_flash": "backing-up",
-                         "backup_verified": "backing-up", "preparing_native_storage": "migrating",
-                         "storage_prepared": "migrating", "flashing_firmware": "flashing",
-                         "flashing_configuration": "flashing", "verifying_configuration": "verifying",
-                         "rolling_back": "verifying", "complete": "verifying",
-                         "failed": "verifying", "rolled_back": "verifying",
+                         "backup_verified": "backing-up", "flashing_firmware": "flashing",
+                         "verifying_configuration": "verifying", "rolling_back": "verifying",
+                         "complete": "verifying", "failed": "verifying", "rolled_back": "verifying",
                          "manual_recovery": "verifying"}.get(raw_phase, raw_phase)
                 state.update(phase=phase, detail=snapshot.get("detail", raw_phase.replace("_", " ")))
                 if snapshot.get("backup_path"):
@@ -407,7 +402,7 @@ class UpdateService:
             stopped = True
             if self.hub.link._thread is not None:
                 raise ValueError("The hub could not release the Captain serial port")
-            installer = self.installer or FirmwareInstaller(converter=self.converter)
+            installer = self.installer or FirmwareInstaller()
             result = await asyncio.to_thread(installer.run, package_path, info, port,
                                             self._directory(state["job"]) / "installation", progress,
                                             expected_device=PinnedDevice(*identity))

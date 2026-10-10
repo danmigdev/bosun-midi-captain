@@ -99,8 +99,8 @@ def test_patch_same_key_coalesces_and_preserves_all_id_forms_then_caches():
         assert len(requests) == 1
         assert requests[0]["id"].startswith("__bosun_patch_")
 
-        # A foreign/legacy response is still a broadcast, but cannot settle
-        # or poison the cache for the private flight.
+        # A foreign response is still a broadcast, but cannot settle or
+        # poison the cache for the private flight.
         foreign = {
             "type": "PATCH", "id": "foreign", "bank": 2, "slot": 3,
             "profile": "", "patch": {"name": "Foreign"},
@@ -229,24 +229,24 @@ def test_patch_noncanonical_requests_are_private_and_admission_limited():
     _run(body())
 
 
-def test_patch_legacy_named_profile_reply_is_delivered_but_not_cached():
+def test_patch_named_profile_reply_without_profile_is_rejected_and_not_cached():
     async def body():
         hub = Hub(None, patch_timeout_s=1.0)
         link = RecordingLink()
         hub.link = link
         sub = hub.subscribe()
-        sub.send('{"type":"GET_PATCH","id":"legacy","bank":2,"slot":1,"profile":"clean"}')
+        sub.send('{"type":"GET_PATCH","id":"named","bank":2,"slot":1,"profile":"clean"}')
         request = _patch_requests(link.sent)[0]
-        legacy = _patch_response(request, "Legacy active")
-        legacy.pop("profile")
-        hub._dispatch(json.dumps(legacy))
+        unscoped = _patch_response(request, "Active store")
+        unscoped.pop("profile")
+        hub._dispatch(json.dumps(unscoped))
         reply = await _message(sub)
-        assert reply["id"] == "legacy"
-        assert reply["patch"]["name"] == "Legacy active"
-        assert ("clean", 2, 1) not in hub._patch_cache
+        assert reply["id"] == "named"
+        assert reply["error"] == "patch_protocol"
+        assert not hub._patch_cache
 
-        # Since provenance was ambiguous, the same named request must reach
-        # upstream again instead of receiving a falsely scoped cache hit.
+        # The same named request must reach upstream again instead of
+        # receiving a cache hit scoped to the wrong profile.
         sub.send('{"type":"GET_PATCH","id":"again","bank":2,"slot":1,"profile":"clean"}')
         assert len(_patch_requests(link.sent)) == 2
         hub.stop()

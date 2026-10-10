@@ -243,7 +243,7 @@ async def run(args):
             await wait_for(inner, """(() => {
               const bank = document.querySelector('.stage__bank-readout');
               const title = document.querySelector('.stage__rig-name')?.textContent.trim();
-              return bank && !bank.disabled && title && !/^[-—]+$/.test(title)
+              return bank && !bank.disabled && title && !/^-+$/.test(title)
                 && document.querySelectorAll('.stage__switch').length === 10;
             })()""", 'Connected current live rig')
         else:
