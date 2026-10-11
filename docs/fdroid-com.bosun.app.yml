@@ -18,15 +18,7 @@ Builds:
     subdir: editor/src-tauri/gen/android
     sudo:
       - apt-get update
-      - apt-get install -y build-essential gcc-13 g++-13 xz-utils
-      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | HOME=/home/vagrant
-        sh -s -- -y --profile minimal --default-toolchain 1.97.1
-      - curl -fL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz
-        && mkdir -p /home/vagrant/node-v22.23.2-linux-x64 && tar -xJf /tmp/node.tar.xz
-        -C /home/vagrant/node-v22.23.2-linux-x64 --strip-components=1 && rm /tmp/node.tar.xz
-      - chown -R vagrant:vagrant /home/vagrant/.cargo /home/vagrant/.rustup /home/vagrant/node-v22.23.2-linux-x64
-      - HOME=/home/vagrant /home/vagrant/.cargo/bin/rustup target add aarch64-linux-android
-        armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - apt-get install -y build-essential gcc-13 g++-13 nodejs npm rustup
     output: app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
     prebuild:
       - cd ../../../..
@@ -36,7 +28,10 @@ Builds:
       - bosun-stand
       - editor/src-tauri/vendor/picotool/flash_id.bin
     build:
-      - export PATH="/home/vagrant/node-v22.23.2-linux-x64/bin:$HOME/.cargo/bin:$PATH"
+      - rustup set profile minimal
+      - rustup default 1.97.1
+      - rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android
+        x86_64-linux-android
       - export CC=gcc-13 CXX=g++-13 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc-13
       - export RUSTFLAGS="--remap-path-prefix=$HOME=/build"
       - export NDK_HOME=$$NDK$$
