@@ -29,6 +29,7 @@
   import ProfilePicker from "./components/ProfilePicker.svelte";
   import TftLayout from "./components/TftLayout.svelte";
   import QuickSetup from "./components/QuickSetup.svelte";
+  import { applyRecipe } from "./lib/recipes";
   import PedalSimulator from "./components/PedalSimulator.svelte";
   import DeviceImport from "./components/DeviceImport.svelte";
   import SetlistView from "./components/SetlistView.svelte";
@@ -62,6 +63,7 @@
     onReconnected,
     onFirmwareMessage,
     patchIdOf,
+    sendAndAwait,
     type FirmwareMessage,
     type Manifest,
     type Binding,
@@ -1319,20 +1321,29 @@
   // QuickSetup so the user can assign recipe roles to switches.
   let switchNames = $derived(hardware.switches);
 
-  // Apply a recipe's generated bindings to the currently-open patch. Each
-  // binding is written straight to the firmware, then we re-read the patch and
-  // refresh the list so the editor and grid reflect the new switches.
-  function applyRecipeBindings(bindings: Binding[]) {
+  // Apply a recipe's generated bindings to the currently-open patch and to
+  // the patches its locked column links it to. Each write waits for the
+  // pedal's ACK, so success is reported only once every binding landed;
+  // either way the patch is re-read so the editor and grid show the truth.
+  async function applyRecipeBindings(bindings: Binding[]) {
     if (!currentPatch) return;
     const { bank, slot } = currentPatch;
-    for (const b of bindings) cmd.putBinding(bank, slot, b);
-    cmd.getPatch(bank, slot);
-    cmd.listPatches();
-    // Jump back to the switch list so the user sees the bindings just written.
-    editorTab = "switches";
-    window.dispatchEvent(new CustomEvent("bosun-toast", {
-      detail: { level: "ok", message: `Applied ${bindings.length} binding${bindings.length === 1 ? "" : "s"}` },
-    }));
+    try {
+      const written = await applyRecipe(currentPatch, bindings, patches,
+        globalDevice?.patch_link as LinkConfig | undefined,
+        (b, s, binding) => sendAndAwait({ type: "PUT_BINDING", bank: b, slot: s, binding }, 8000));
+      // Jump back to the switch list so the user sees the bindings just written.
+      editorTab = "switches";
+      const count = `${bindings.length} binding${bindings.length === 1 ? "" : "s"}`;
+      showToast("ok", written > 1 ? `Applied ${count} to ${written} linked patches` : `Applied ${count}`);
+    } catch (e) {
+      // "not connected" already raised the reconnect flow in send().
+      const msg = String(e);
+      if (!msg.toLowerCase().includes("not connected")) showToast("error", "Quick setup failed: " + msg);
+    } finally {
+      cmd.getPatch(bank, slot).catch(() => {});
+      cmd.listPatches().catch(() => {});
+    }
   }
 
   // Persist a setlist onto the pedal. The ordered (bank, slot) list lives under

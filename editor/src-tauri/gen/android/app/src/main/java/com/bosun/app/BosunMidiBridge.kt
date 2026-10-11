@@ -411,41 +411,27 @@ object BosunMidiBridge {
         return kemper to captain
     }
 
-    /**
-     * A device matches if its label (manufacturer + product name)
-     * contains the hint when one is given, or any of the default name
-     * patterns otherwise. Falls back to vendor-ID matching when the label
-     * came back empty (string descriptors unavailable) - this can only
-     * narrow to "the right kind of device", so it's a fallback, not the
-     * primary signal, and does not apply when a hint was given (an
-     * explicit hint that doesn't match a nameless device isn't a match).
-     */
+    /** See UsbDeviceMatcher.matches. Matches on the raw label: the VID/PID
+     * tag deviceLabel() shows for a nameless device is never blank, so
+     * matching on it left the vendor-ID fallback unreachable. */
     private fun matches(
         device: UsbDevice,
         hint: String?,
         vendorIds: Set<Int>,
         vararg patterns: String
-    ): Boolean {
-        val label = deviceLabel(device)
-        if (label.isNotBlank()) {
-            if (!hint.isNullOrBlank()) return label.contains(hint, ignoreCase = true)
-            return patterns.any { label.contains(it, ignoreCase = true) }
-        }
-        return hint.isNullOrBlank() && device.vendorId in vendorIds
-    }
+    ): Boolean = UsbDeviceMatcher.matches(
+        UsbDeviceMatcher.label(device.manufacturerName, device.productName),
+        device.vendorId, hint, vendorIds, patterns.toList(),
+    )
 
     /** Human-readable identity of a device: manufacturer + product name,
      * falling back to a VID/PID tag when USB string descriptors are empty
      * (can happen transiently right after attach, before enumeration
-     * settles). */
-    private fun deviceLabel(device: UsbDevice): String {
-        val parts = listOfNotNull(device.manufacturerName, device.productName)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        return parts.joinToString(" ").ifEmpty {
+     * settles). For logs and status only, never for matching. */
+    private fun deviceLabel(device: UsbDevice): String =
+        UsbDeviceMatcher.label(device.manufacturerName, device.productName).ifEmpty {
             "USB device VID:%04X PID:%04X".format(device.vendorId, device.productId)
         }
-    }
 
     private fun closeEverything() {
         kemperDevice?.close()

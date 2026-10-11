@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use super::android_helpers::{
-    call_with_timeout, is_transient_error, is_write_only_stall, marker_found,
+    call_with_timeout, is_transient_error, is_write_only_stall, marker_found, take_lines, OutboundLine,
 };
 use super::android_native::{available_ports, close, open, read, write};
 
@@ -326,7 +326,7 @@ pub async fn connect(
                 // loop's write()/read() - wrap both calls so a wedged PING
                 // or ACK read can't freeze the thread before it ever
                 // reaches the instrumented main loop.
-                let ping_line_for_call = ping_line.clone();
+                let ping_line_for_call = ping_line.clone().into_bytes();
                 let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
                     write(ping_line_for_call, WRITE_TIMEOUT_MS, generation)
                 });
@@ -338,7 +338,7 @@ pub async fn connect(
                     let read_result = call_with_timeout(IO_CALL_TIMEOUT, move || read(100, 4096, generation));
                     match read_result {
                         Ok(Ok(data)) if !data.is_empty() => {
-                            append_bounded(&mut accum, data.as_bytes());
+                            append_bounded(&mut accum, &data);
                             if marker_found(&accum, &sync_id) {
                                 synced = true;
                             }
@@ -360,15 +360,10 @@ pub async fn connect(
             }
             if synced {
                 let mut pushed = 0;
-                while let Some(pos) = accum.iter().position(|b| *b == b'\n') {
-                    let mut line: Vec<u8> = accum.drain(..=pos).collect();
-                    while matches!(line.last(), Some(b'\n') | Some(b'\r')) { line.pop(); }
-                    if line.is_empty() { continue; }
-                    if let Ok(s) = std::str::from_utf8(&line) {
-                        if let Ok(mut q) = inbox_for_thread.lock() {
-                            push_bounded(&mut q, s.to_string(), MAX_INBOX_LINES);
-                            pushed += 1;
-                        }
+                for s in take_lines(&mut accum) {
+                    if let Ok(mut q) = inbox_for_thread.lock() {
+                        push_bounded(&mut q, s, MAX_INBOX_LINES);
+                        pushed += 1;
                     }
                 }
                 if pushed > 0 {
@@ -406,6 +401,10 @@ pub async fn connect(
             // confirmed live via logcat - GET_CONTEXT sent every 2 s for
             // 5+ minutes, zero read activity, self-heal never triggered).
             let mut writes_since_last_read: u32 = 0;
+            // The line being written. A partial write leaves its tail here,
+            // sent before any other command. A reconnect drops it: reopening
+            // starts a fresh firmware session, which discards a partial line.
+            let mut outbound = OutboundLine::default();
             'main: loop {
                 if *stop_for_thread.lock().unwrap() { break 'connection; }
 
@@ -428,41 +427,44 @@ pub async fn connect(
                 // stalls and the response is truncated.  Received data
                 // within the last 500 ms = stream in flight.
                 if last_ok.elapsed() > Duration::from_millis(500) {
-                    let queued: Option<String> = outbox_for_thread.lock().unwrap().pop_front();
-                    let (cmd, is_keepalive) = match queued {
-                        Some(data) => (Some(data), false),
-                        None if last_ok.elapsed() > KEEPALIVE_IDLE => {
-                            (Some("{\"type\":\"PING\",\"id\":\"__keepalive\"}".to_string()), true)
+                    if outbound.is_idle() {
+                        let queued: Option<String> = outbox_for_thread.lock().unwrap().pop_front();
+                        match queued {
+                            Some(data) => outbound.start(&data, false),
+                            None if last_ok.elapsed() > KEEPALIVE_IDLE => {
+                                outbound.start("{\"type\":\"PING\",\"id\":\"__keepalive\"}", true)
+                            }
+                            None => {}
                         }
-                        None => (None, false),
-                    };
-                    if let Some(data) = cmd {
-                        let mut line = data;
-                        if !line.ends_with('\n') { line.push('\n'); }
-                        let line_for_retry = line.trim_end().to_string();
+                    }
+                    if !outbound.is_idle() {
+                        let bytes = outbound.unsent().to_vec();
                         let write_result = call_with_timeout(IO_CALL_TIMEOUT, move || {
-                            write(line, WRITE_TIMEOUT_MS, generation)
+                            write(bytes, WRITE_TIMEOUT_MS, generation)
                         });
                         match write_result {
-                            Ok(Ok(_)) => {
-                                last_ok = std::time::Instant::now();
-                                writes_since_last_read += 1;
-                                if is_keepalive {
+                            Ok(Ok(sent)) => {
+                                if sent > 0 { last_ok = std::time::Instant::now(); }
+                                let is_keepalive = outbound.is_keepalive();
+                                if !outbound.advance(sent) {
+                                    eprintln!("[io] partial write, {} bytes left", outbound.unsent().len());
+                                } else if is_keepalive {
+                                    writes_since_last_read += 1;
                                     eprintln!("[io] keepalive ping sent");
                                 } else {
+                                    writes_since_last_read += 1;
                                     eprintln!("[io] write ok, writes_since_last_read={}", writes_since_last_read);
                                 }
                             }
                             Ok(Err(e)) => {
+                                // A transient error leaves `outbound` as it
+                                // is: the same bytes go out next cycle.
                                 let msg = format!("{}", e);
                                 if !is_transient_error(&msg) {
                                     let reason = format!("io write: {}", msg);
                                     *last_dead_reason.lock().unwrap() = Some(reason.clone());
                                     eprintln!("[io] fatal write error: {}", reason);
                                     break 'main;
-                                }
-                                if !is_keepalive {
-                                    outbox_for_thread.lock().unwrap().push_front(line_for_retry);
                                 }
                             }
                             Err(timeout_msg) => {
@@ -505,32 +507,27 @@ pub async fn connect(
                             writes_since_last_read = 0;
                             chunk_seq += 1;
                             eprintln!("[chunk] #{} {} bytes", chunk_seq, data.len());
-                            append_bounded(&mut accum, data.as_bytes());
-                            while let Some(pos) = accum.iter().position(|b| *b == b'\n') {
-                                let mut line: Vec<u8> = accum.drain(..=pos).collect();
-                                while matches!(line.last(), Some(b'\n') | Some(b'\r')) { line.pop(); }
-                                if line.is_empty() { continue; }
-                                if let Ok(s) = std::str::from_utf8(&line) {
-                                    // Compact type-only log for diagnosing
-                                    // which responses arrive.
-                                    match serde_json::from_str::<serde_json::Value>(&s) {
-                                        Ok(v) => {
-                                            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                                            eprintln!("[io] {} ({} bytes) accum={}", ty, s.len(), accum.len());
-                                            if ty == "CONTEXT" {
-                                                let rig = v.get("context").and_then(|c| c.get("kemper_rig_name"));
-                                                let blk = v.get("context").and_then(|c| c.get("kemper_block_Delay"));
-                                                eprintln!("[io] ctx rig_name={:?} delay={:?}", rig, blk);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[io] BAD JSON ({} bytes): {} | tail: {}", s.len(), e, &s[s.len().saturating_sub(40)..]);
+                            append_bounded(&mut accum, &data);
+                            for s in take_lines(&mut accum) {
+                                // Compact type-only log for diagnosing
+                                // which responses arrive.
+                                match serde_json::from_str::<serde_json::Value>(&s) {
+                                    Ok(v) => {
+                                        let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                                        eprintln!("[io] {} ({} bytes) accum={}", ty, s.len(), accum.len());
+                                        if ty == "CONTEXT" {
+                                            let rig = v.get("context").and_then(|c| c.get("kemper_rig_name"));
+                                            let blk = v.get("context").and_then(|c| c.get("kemper_block_Delay"));
+                                            eprintln!("[io] ctx rig_name={:?} delay={:?}", rig, blk);
                                         }
                                     }
-                                    if let Ok(mut q) = inbox_for_thread.lock() {
-                                        push_bounded(&mut q, s.to_string(), MAX_INBOX_LINES);
-                                        new_lines += 1;
+                                    Err(e) => {
+                                        eprintln!("[io] BAD JSON ({} bytes): {} | tail: {}", s.len(), e, &s[s.len().saturating_sub(40)..]);
                                     }
+                                }
+                                if let Ok(mut q) = inbox_for_thread.lock() {
+                                    push_bounded(&mut q, s, MAX_INBOX_LINES);
+                                    new_lines += 1;
                                 }
                             }
                         }

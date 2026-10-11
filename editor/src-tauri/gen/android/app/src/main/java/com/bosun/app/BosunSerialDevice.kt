@@ -203,8 +203,7 @@ class BosunSerialDevice private constructor(
      * e.g. if a timeout lands mid-transfer) until every byte is sent or the
      * overall `timeoutMs` budget runs out. Returns the total byte count
      * written - equal to data.size on full success, less if the deadline
-     * ran out first (BosunSerialBridge.write() turns that into a "timeout"
-     * exception so android.rs's is_transient_error() retries it rather
+     * ran out first (android.rs then sends only the unsent tail, rather
      * than treating a partial send as either full success or a fatal
      * error). A negative bulkTransfer result is treated the same as a
      * plain 0 - see read()'s doc comment for why: Android does not

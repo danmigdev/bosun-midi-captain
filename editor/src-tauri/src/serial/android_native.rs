@@ -211,10 +211,10 @@ pub fn close(_path: String, generation: u64) -> Result<(), String> {
 }
 
 /// Reads up to `max_len` bytes, blocking at most `timeout_ms`. An empty
-/// string means a normal timeout with nothing available (matches the old
-/// plugin path's contract, which `android.rs`'s `Ok(data) if
-/// !data.is_empty()` check already expects).
-pub fn read(timeout_ms: u64, max_len: usize, generation: u64) -> Result<String, String> {
+/// result means a normal timeout with nothing available. The bytes are
+/// returned raw: a read can end inside a multi-byte character, so text is
+/// decoded only once a whole line has arrived (`android_helpers::take_lines`).
+pub fn read(timeout_ms: u64, max_len: usize, generation: u64) -> Result<Vec<u8>, String> {
     with_jni(move |env, _activity| {
         let class = bridge_class(env, _activity)?;
         let value = env
@@ -226,18 +226,17 @@ pub fn read(timeout_ms: u64, max_len: usize, generation: u64) -> Result<String, 
         take_pending_exception(env)?;
         let value = value.map_err(|e| format!("read: {e}"))?;
         let array = JByteArray::from(value);
-        let bytes = env.convert_byte_array(&array).map_err(|e| format!("read decode: {e}"))?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        env.convert_byte_array(&array).map_err(|e| format!("read decode: {e}"))
     })
 }
 
 /// Writes `data`, blocking at most `timeout_ms`. Returns the byte count
-/// written.
-pub fn write(data: String, timeout_ms: u64, generation: u64) -> Result<usize, String> {
+/// written, which is short of `data.len()` when the time ran out part-way:
+/// the caller sends the rest (`android_helpers::OutboundLine`).
+pub fn write(data: Vec<u8>, timeout_ms: u64, generation: u64) -> Result<usize, String> {
     with_jni(move |env, _activity| {
         let class = bridge_class(env, _activity)?;
-        let bytes = data.as_bytes();
-        let array = env.byte_array_from_slice(bytes).map_err(|e| format!("write encode: {e}"))?;
+        let array = env.byte_array_from_slice(&data).map_err(|e| format!("write encode: {e}"))?;
         let value = env.call_static_method(
             class, "write", WRITE_SIG,
             &[JValue::Long(generation as i64), JValue::Object(&array), JValue::Int(timeout_ms as i32)],

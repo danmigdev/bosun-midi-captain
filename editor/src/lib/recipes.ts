@@ -4,7 +4,10 @@ import {
   type Manifest,
   type MessageSchema,
   type MidiMessage,
+  type Patch,
+  type PatchSummary,
 } from "./protocol";
+import { resolveLinkedPatches, type LinkConfig } from "./patch-links";
 
 // --------------------- recipe model ---------------------
 
@@ -252,3 +255,29 @@ export const RECIPES: Recipe[] = [
     },
   },
 ];
+
+// --------------------- applying a recipe ---------------------
+
+/** Writes one binding and resolves once the pedal acknowledged it. */
+export type PutBinding = (bank: number, slot: number, binding: Binding) => Promise<unknown>;
+
+/** Write a recipe's bindings to the open patch and to every patch its locked
+ * column links it to, the same targets PatchEditor propagates an edit to.
+ * Writes run one at a time and stop at the first failure, which rejects.
+ * Resolves with the number of patches written. */
+export async function applyRecipe(
+  current: { bank: number; slot: number; patch: Patch },
+  bindings: Binding[],
+  allPatches: PatchSummary[],
+  linkConfig: LinkConfig | undefined,
+  put: PutBinding,
+): Promise<number> {
+  const targets = [
+    { bank: current.bank, slot: current.slot },
+    ...resolveLinkedPatches(current, current.patch, allPatches, linkConfig),
+  ];
+  for (const target of targets) {
+    for (const binding of bindings) await put(target.bank, target.slot, binding);
+  }
+  return targets.length;
+}

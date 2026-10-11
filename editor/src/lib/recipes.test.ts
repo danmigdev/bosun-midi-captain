@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Manifest } from "./protocol";
-import { RECIPES, type Recipe, type RecipeCtx } from "./recipes";
+import type { Binding, Manifest, Patch, PatchSummary } from "./protocol";
+import { RECIPES, applyRecipe, type Recipe, type RecipeCtx } from "./recipes";
 
 // --------------------- fakes ---------------------
 
@@ -204,5 +204,57 @@ describe("tap_tempo recipe", () => {
       type: "kemper_tap_tempo",
       channel: 1,
     });
+  });
+});
+
+describe("applyRecipe", () => {
+  const tuner: Binding = { switch: "1", mode: "tap", actions: { press: { messages: [{ type: "kemper_tuner", state: "on" }] } } };
+  const tap: Binding = { switch: "2", mode: "tap", actions: { press: { messages: [{ type: "kemper_tap_tempo" }] } } };
+  const patch = { name: "Clean", bindings: [] } as unknown as Patch;
+  const summaries = [
+    { bank: 1, slot: 2 }, { bank: 2, slot: 2 }, { bank: 3, slot: 2 }, { bank: 2, slot: 3 },
+  ] as PatchSummary[];
+
+  it("writes every binding to the open patch only when its column is unlocked", async () => {
+    const writes: string[] = [];
+    const written = await applyRecipe({ bank: 1, slot: 2, patch }, [tuner, tap], summaries, undefined,
+      async (bank, slot, binding) => { writes.push(`${bank}/${slot}:${binding.switch}`); });
+    expect(written).toBe(1);
+    expect(writes).toEqual(["1/2:1", "1/2:2"]);
+  });
+
+  it("also writes the patches a locked column links to", async () => {
+    const writes: string[] = [];
+    const written = await applyRecipe({ bank: 2, slot: 2, patch }, [tuner], summaries, { locked_slots: [2] },
+      async (bank, slot, binding) => { writes.push(`${bank}/${slot}:${binding.switch}`); });
+    expect(written).toBe(3);
+    expect(writes).toEqual(["2/2:1", "1/2:1", "3/2:1"]);
+  });
+
+  it("waits for each write and stops at the first failure", async () => {
+    const started: string[] = [];
+    let release!: () => void;
+    const first = new Promise<void>(resolve => { release = resolve; });
+    const result = applyRecipe({ bank: 1, slot: 2, patch }, [tuner, tap], summaries, undefined,
+      (bank, slot, binding) => {
+        started.push(binding.switch);
+        if (binding.switch === "1") return first;
+        return Promise.reject(new Error("error: storage_error"));
+      });
+    await Promise.resolve();
+    expect(started).toEqual(["1"]);
+    release();
+    await expect(result).rejects.toThrow("storage_error");
+    expect(started).toEqual(["1", "2"]);
+  });
+
+  it("stops before the linked patches when the open patch fails", async () => {
+    const writes: string[] = [];
+    await expect(applyRecipe({ bank: 2, slot: 2, patch }, [tuner], summaries, { locked_slots: [2] },
+      async (bank, slot) => {
+        writes.push(`${bank}/${slot}`);
+        throw new Error("error: limit_exceeded");
+      })).rejects.toThrow("limit_exceeded");
+    expect(writes).toEqual(["2/2"]);
   });
 });

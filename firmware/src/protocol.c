@@ -514,7 +514,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         int token = get(p, "request");
         if (token >= 0 && !bosun_json_boolean(&p->request, token, &probe)) r = BOSUN_STORE_INVALID;
         else if (!rt->kemper_enabled) { error(p, "no_rig_info"); goto done; }
-        else if (probe && !bosun_kemper_request_identity(&rt->kemper, now_ms)) r = BOSUN_STORE_IO;
+        else if (probe && !bosun_kemper_request_identity(&rt->kemper, now_ms)) { error(p, "midi_send_failed"); goto done; }
         else {
             begin(p, "KEMPER_IDENTITY");
             string(&p->writer, "profile", c->profile);

@@ -35,7 +35,7 @@ describe("restoring a backup that still has a midi_learn section", () => {
   it("writes the device and patches and skips the retired table", async () => {
     await importConfig(validateBackup(JSON.parse(JSON.stringify(legacyBackup))));
     const sent = mocks.sendAndAwait.mock.calls.map(([message]) => message.type);
-    expect(sent).toEqual(["PUT_GLOBAL", "LIST_PATCHES", "PUT_PATCH"]);
+    expect(sent).toEqual(["PUT_GLOBAL", "LIST_PATCHES", "PUT_PATCH", "SAVE_NOW"]);
   });
 
   it("does the same when importing as a new profile", async () => {

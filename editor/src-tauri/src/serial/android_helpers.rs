@@ -19,12 +19,12 @@ pub fn marker_found(buf: &[u8], id: &str) -> bool {
     })
 }
 
-/// Classify a transport error message.  BosunSerialBridge reports a write
-/// that runs out of time as "write timeout: sent N/M bytes", which is worth
-/// a retry; a stale session or a missing device is fatal.  Read timeouts
-/// never get here: the bridge returns an empty read instead.  Treating
-/// timeouts as fatal killed the connection on the very first idle I/O
-/// (2026-08-12 regression).
+/// Classify a transport error message.  A timeout is worth a retry; a stale
+/// session or a missing device is fatal.  BosunSerialBridge reports a write
+/// that runs out of time as a short byte count rather than an error (see
+/// `OutboundLine`), and a read timeout as an empty read, so this guards the
+/// remaining timeout paths.  Treating timeouts as fatal killed the
+/// connection on the very first idle I/O (2026-08-12 regression).
 #[cfg(any(target_os = "android", test))]
 pub fn is_transient_error(msg: &str) -> bool {
     msg.contains("timeout") || msg.contains("timed out")
@@ -79,6 +79,68 @@ where
         .map_err(|_| format!("timed out after {:?}", timeout))
 }
 
+/// Take every complete line out of `accum`, decoded as UTF-8 one whole line
+/// at a time. USB reads end at arbitrary byte boundaries, so a multi-byte
+/// character can be split across two reads: decoding each read on its own
+/// turned such a character into U+FFFD replacement characters, and an
+/// accented patch name could then be written back corrupted. A partial line
+/// stays in `accum` for the next read; a line that is not valid UTF-8 is
+/// dropped.
+#[cfg(any(target_os = "android", test))]
+pub fn take_lines(accum: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = accum.iter().position(|b| *b == b'\n') {
+        let mut line: Vec<u8> = accum.drain(..=pos).collect();
+        while matches!(line.last(), Some(b'\n') | Some(b'\r')) { line.pop(); }
+        if line.is_empty() { continue; }
+        if let Ok(s) = String::from_utf8(line) { lines.push(s); }
+    }
+    lines
+}
+
+/// The line currently being written to the pedal. A bulk transfer can stop
+/// part-way through a line; the rest must go out before anything else.
+/// Re-sending the whole line instead made the firmware receive the first
+/// part twice, glued into one invalid line, so the command was lost.
+#[cfg(any(target_os = "android", test))]
+#[derive(Debug, Default)]
+pub struct OutboundLine {
+    unsent: Vec<u8>,
+    keepalive: bool,
+}
+
+#[cfg(any(target_os = "android", test))]
+impl OutboundLine {
+    /// Nothing is owed to the pedal: the next command may start.
+    pub fn is_idle(&self) -> bool {
+        self.unsent.is_empty()
+    }
+
+    /// Start writing `line`, newline-terminated.
+    pub fn start(&mut self, line: &str, keepalive: bool) {
+        self.unsent = line.as_bytes().to_vec();
+        if !line.ends_with('\n') { self.unsent.push(b'\n'); }
+        self.keepalive = keepalive;
+    }
+
+    /// The bytes still to send.
+    pub fn unsent(&self) -> &[u8] {
+        &self.unsent
+    }
+
+    pub fn is_keepalive(&self) -> bool {
+        self.keepalive
+    }
+
+    /// Record a write that accepted `sent` bytes. True once the whole line
+    /// has gone out.
+    pub fn advance(&mut self, sent: usize) -> bool {
+        let sent = sent.min(self.unsent.len());
+        self.unsent.drain(..sent);
+        self.unsent.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,8 +182,8 @@ mod tests {
 
     #[test]
     fn write_timeout_is_transient() {
-        // BosunSerialBridge.write throws this when bulkTransfer runs out
-        // of time part-way through a line.
+        // Messages of the shape BosunSerialBridge.write used to throw when
+        // bulkTransfer ran out of time part-way through a line.
         assert!(is_transient_error("write timeout: sent 12/40 bytes"));
         assert!(is_transient_error("exchange timed out after 5000 ms"));
     }
@@ -201,5 +263,71 @@ mod tests {
             "ok"
         });
         assert_eq!(result, Ok("ok"));
+    }
+
+    // Regressions for the 2026-10-11 audit of the Android serial path.
+
+    #[test]
+    fn a_character_split_across_two_reads_decodes_intact() {
+        let line = "{\"type\":\"PATCH\",\"name\":\"Città\"}\n".as_bytes();
+        let split = line.iter().position(|b| *b == 0xc3).unwrap() + 1;
+        let mut accum = line[..split].to_vec();
+        assert!(take_lines(&mut accum).is_empty(), "half a character is not a line yet");
+        accum.extend_from_slice(&line[split..]);
+        assert_eq!(take_lines(&mut accum), vec!["{\"type\":\"PATCH\",\"name\":\"Città\"}".to_string()]);
+        assert!(accum.is_empty());
+    }
+
+    #[test]
+    fn lines_are_split_and_a_partial_tail_is_kept() {
+        let mut accum = b"{\"a\":1}\r\n\n{\"b\":2}\n{\"c\"".to_vec();
+        assert_eq!(take_lines(&mut accum), vec!["{\"a\":1}".to_string(), "{\"b\":2}".to_string()]);
+        assert_eq!(accum, b"{\"c\"".to_vec());
+    }
+
+    #[test]
+    fn an_invalid_utf8_line_is_dropped_without_losing_the_next_one() {
+        let mut accum = b"\xff\xfe\n{\"ok\":true}\n".to_vec();
+        assert_eq!(take_lines(&mut accum), vec!["{\"ok\":true}".to_string()]);
+    }
+
+    #[test]
+    fn a_partial_write_sends_only_the_rest_of_the_line() {
+        let mut out = OutboundLine::default();
+        assert!(out.is_idle());
+        out.start("{\"type\":\"PING\"}", false);
+        assert_eq!(out.unsent(), b"{\"type\":\"PING\"}\n");
+        assert!(!out.advance(5));
+        assert_eq!(out.unsent(), b"e\":\"PING\"}\n");
+        assert!(!out.is_idle());
+        assert!(!out.advance(0), "a write that sent nothing keeps the same bytes");
+        assert_eq!(out.unsent(), b"e\":\"PING\"}\n");
+        assert!(out.advance(11));
+        assert!(out.is_idle());
+    }
+
+    #[test]
+    fn the_pedal_receives_each_line_exactly_once_across_partial_writes() {
+        let mut out = OutboundLine::default();
+        let mut wire = Vec::new();
+        for (line, chunks) in [("{\"type\":\"GET_PATCH\"}", vec![3, 0, 4, 100]), ("{\"type\":\"STATS\"}\n", vec![100])] {
+            out.start(line, false);
+            for chunk in chunks {
+                let sent = chunk.min(out.unsent().len());
+                wire.extend_from_slice(&out.unsent()[..sent]);
+                if out.advance(sent) { break; }
+            }
+            assert!(out.is_idle());
+        }
+        assert_eq!(wire, b"{\"type\":\"GET_PATCH\"}\n{\"type\":\"STATS\"}\n".to_vec());
+    }
+
+    #[test]
+    fn a_keepalive_is_marked_so_it_is_never_counted_as_a_command() {
+        let mut out = OutboundLine::default();
+        out.start("{\"type\":\"PING\",\"id\":\"__keepalive\"}", true);
+        assert!(out.is_keepalive());
+        out.start("{\"type\":\"STATS\"}", false);
+        assert!(!out.is_keepalive());
     }
 }

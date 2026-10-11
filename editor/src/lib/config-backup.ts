@@ -210,6 +210,11 @@ export async function importConfig(
     report({ phase: "patches", total: backup.patches.length, done,
              current: `${String(bank).padStart(2, "0")}/${String(slot).padStart(2, "0")}` });
     await putRetry({ type: "PUT_PATCH", bank, slot, patch, ...profileArg });
+    // A write to the active profile is an unsaved draft, and the firmware
+    // holds at most 128 of them: save each one so a larger backup is not cut
+    // short, and so a later Discard cannot drop what was restored. Writes to
+    // another profile go straight to its saved files.
+    if (!targetProfile) await putRetry({ type: "SAVE_NOW", bank, slot });
     done += 1;
   }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createConfiguredProfile } from '../lib/create-profile';
+  import { createConfiguredProfile, profileIdFromName } from '../lib/create-profile';
   import { readKemperSetup, setupProfileKind } from '../lib/setup-guide';
   import ProfilerSetupFields from './ProfilerSetupFields.svelte';
   let kemperSetup = $state(readKemperSetup());
@@ -147,14 +147,10 @@
     finally { busy = false; }
   }
 
-  function slugify(s: string): string {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32);
-  }
-
   // Auto-fill id from name unless user typed something already.
   let idTouched = $state(false);
   $effect(() => {
-    if (!idTouched && newName) newId = slugify(newName);
+    if (!idTouched && newName) newId = profileIdFromName(newName);
   });
 </script>
 

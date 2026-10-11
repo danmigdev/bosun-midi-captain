@@ -113,11 +113,12 @@ object BosunSerialBridge {
         return if (n == 0) ByteArray(0) else buf.copyOf(n)
     }
 
-    /** Writes data, blocking at most timeoutMs. Returns data.size on full
-     * success. Throws with a message containing "timeout" on a partial or
-     * zero send (android.rs's is_transient_error() matches that substring
-     * and re-queues the command for retry, rather than treating a partial
-     * send as either silent success or a fatal, connection-killing error). */
+    /** Writes data, blocking at most timeoutMs. Returns the byte count sent:
+     * data.size on full success, less (possibly 0) when the time ran out
+     * part-way. The caller sends the remaining bytes next, before anything
+     * else (android_helpers.rs's OutboundLine): re-sending the whole line
+     * would hand the firmware its first part twice. Only "not connected"
+     * throws. */
     @JvmStatic
     fun write(generation: Long, data: ByteArray, timeoutMs: Int): Int {
         val dev = device?.takeIf { generations.owns(generation) }
@@ -126,25 +127,19 @@ object BosunSerialBridge {
         if (!generations.owns(generation) || device !== dev) {
             throw IllegalStateException("stale session completed after reconnect")
         }
-        if (n < data.size) throw java.io.IOException("write timeout: sent $n/${data.size} bytes")
         return n
     }
 
     private fun usbManager(context: Context): UsbManager? =
         context.applicationContext.getSystemService(Context.USB_SERVICE) as? UsbManager
 
-    /** Same matching approach as BosunMidiBridge.matches(): device label
-     * (manufacturer + product name) contains a known pattern, falling back
-     * to vendor-ID matching when string descriptors are unavailable. No
-     * hint parameter here - there is only ever one Captain on this
-     * connection, unlike the MIDI bridge's Kemper-vs-pedal disambiguation. */
-    private fun matchesCaptain(usbDevice: UsbDevice): Boolean {
-        val label = listOfNotNull(usbDevice.manufacturerName, usbDevice.productName)
-            .joinToString(" ").trim()
-        if (label.isNotBlank()) {
-            return listOf("bosun", "captain")
-                .any { label.contains(it, ignoreCase = true) }
-        }
-        return usbDevice.vendorId in CAPTAIN_VENDOR_IDS
-    }
+    /** Same matching as BosunMidiBridge.matches() (UsbDeviceMatcher): device
+     * label (manufacturer + product name) contains a known pattern, falling
+     * back to vendor-ID matching when string descriptors are unavailable. No
+     * hint here - there is only ever one Captain on this connection, unlike
+     * the MIDI bridge's Kemper-vs-pedal disambiguation. */
+    private fun matchesCaptain(usbDevice: UsbDevice): Boolean = UsbDeviceMatcher.matches(
+        UsbDeviceMatcher.label(usbDevice.manufacturerName, usbDevice.productName),
+        usbDevice.vendorId, null, CAPTAIN_VENDOR_IDS, listOf("bosun", "captain"),
+    )
 }

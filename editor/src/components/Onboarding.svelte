@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createConfiguredProfile } from '../lib/create-profile';
+  import { createConfiguredProfile, profileIdFromName } from '../lib/create-profile';
   import { readKemperSetup, setupProfileKind } from '../lib/setup-guide';
   import ProfilerSetupFields from './ProfilerSetupFields.svelte';
   let kemperSetup = $state(readKemperSetup());
@@ -90,11 +90,10 @@
     }
   }
 
-  // Auto-fill id from name
+  // Auto-fill id from name until the user edits the id field.
+  let idTouched = $state(false);
   $effect(() => {
-    if (!profileId && profileName) {
-      profileId = profileName.toLowerCase().replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "");
-    }
+    if (!idTouched) profileId = profileIdFromName(profileName);
   });
 </script>
 
@@ -173,7 +172,7 @@
           <input type="text" bind:value={profileName} placeholder="e.g. Live rig" />
         </label>
         <label>Profile id
-          <input type="text" bind:value={profileId} placeholder="auto from name" />
+          <input type="text" bind:value={profileId} oninput={() => idTouched = true} placeholder="auto from name" />
           <span class="hint">letters, numbers, dashes</span>
         </label>
         <label class="colorrow">Colour

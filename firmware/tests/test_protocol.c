@@ -501,6 +501,68 @@ static void morph_control(void) {
     assert(runtime.kemper.state.morph_value == -1);
 }
 
+static void request_at(const char *json, const char *type, uint32_t now) {
+    size_t n = strlen(json);
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)json, n, now) == n);
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)"\n", 1, now) == 1);
+    read_reply(type, NULL);
+}
+static void identity_status_is(const char *status) {
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "status"), status));
+}
+static void use_profile(const char *id) {
+    assert(bosun_config_activate(&config, id, false) == BOSUN_STORE_OK);
+    bosun_runtime_init(&runtime, &config, send_midi, NULL);
+    bosun_protocol_init(&protocol, &runtime); bosun_protocol_session(&protocol, true);
+    sent = 0;
+}
+static void kemper_identity(void) {
+    /* Pending inside the 2 s window, unavailable after it, received once the
+     * Kemper answered. A probe that cannot be sent is a MIDI failure. */
+    const char *probe = "{\"type\":\"GET_KEMPER_IDENTITY\",\"request\":true}";
+    const char *read = "{\"type\":\"GET_KEMPER_IDENTITY\"}";
+    use_profile("player");
+    request_at(probe, "KEMPER_IDENTITY", 1000); identity_status_is("pending"); assert(sent == 1);
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "profile"), "player"));
+    request_at(read, "KEMPER_IDENTITY", 2999); identity_status_is("pending"); assert(sent == 1);
+    request_at(read, "KEMPER_IDENTITY", 3000); identity_status_is("unavailable");
+    request_at(probe, "KEMPER_IDENTITY", 4000); identity_status_is("pending");
+    const uint8_t answer[] = {0x7e,0,6,2,0,0x20,0x33,1,2,3,4,5,6,7,8};
+    bosun_kemper_handle(&runtime.kemper, 0, 0xf0, answer, sizeof answer, 4001);
+    request_at(read, "KEMPER_IDENTITY", 4002); identity_status_is("received");
+    assert(strstr(output, "\"raw\":[1,2,3,4,5,6,7,8]"));
+    fail_midi = true;
+    request_at(probe, "ERROR", 5000); is_error("midi_send_failed");
+    fail_midi = false;
+    request_at(read, "KEMPER_IDENTITY", 5001); identity_status_is("unavailable");
+    use_profile("test");
+    request(probe, "ERROR"); is_error("no_rig_info");
+}
+static void draft_limit(void) {
+    /* The active profile holds at most BOSUN_DIRTY_PATCHES unsaved drafts.
+     * Saving one frees its entry; explicit-profile writes go to saved files
+     * and never take one. A backup restore depends on both. */
+    char command[160];
+    request("{\"type\":\"CREATE_PROFILE\",\"profile_id\":\"drafts\",\"name\":\"Drafts\",\"kind\":\"generic_midi\"}", "ACK");
+    use_profile("drafts");
+    for (unsigned i = 0; i < BOSUN_DIRTY_PATCHES; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"PUT_PATCH\",\"bank\":%u,\"slot\":%u,\"patch\":{}}", i / 10 + 1, i % 10 + 1);
+        request(command, "ACK");
+    }
+    assert(config.dirty_count == BOSUN_DIRTY_PATCHES);
+    request("{\"type\":\"PUT_PATCH\",\"bank\":13,\"slot\":9,\"patch\":{}}", "ERROR"); is_error("limit_exceeded");
+    request("{\"type\":\"PUT_PATCH\",\"bank\":1,\"slot\":1,\"patch\":{\"name\":\"again\"}}", "ACK");
+    request("{\"type\":\"PUT_PATCH\",\"profile\":\"drafts\",\"bank\":13,\"slot\":10,\"patch\":{}}", "ACK");
+    assert(config.dirty_count == BOSUN_DIRTY_PATCHES && !bosun_config_dirty(&config, 13, 10));
+    request("{\"type\":\"SAVE_NOW\",\"bank\":1,\"slot\":1}", "SAVED");
+    assert(config.dirty_count == BOSUN_DIRTY_PATCHES - 1 && !bosun_config_dirty(&config, 1, 1));
+    request("{\"type\":\"PUT_PATCH\",\"bank\":13,\"slot\":9,\"patch\":{}}", "ACK");
+    assert(config.dirty_count == BOSUN_DIRTY_PATCHES);
+    use_profile("test");
+    request("{\"type\":\"DELETE_PROFILE\",\"profile_id\":\"drafts\"}", "ACK");
+    assert(bosun_config_dirty(&config, 1, 1));
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-protocol-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -645,6 +707,7 @@ int main(void) {
     assert(sent == 0);
     full_catalog();
     monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
+    kemper_identity(); draft_limit();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));

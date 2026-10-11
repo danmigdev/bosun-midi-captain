@@ -1,6 +1,12 @@
 import { cmd, sendAndAwait } from './protocol';
 import { readKemperSetup, type KemperSetup } from './setup-guide';
 
+/** Profile id suggested for a profile name: lowercase letters, digits and
+ *  dashes, within the firmware's 32-byte id limit. */
+export function profileIdFromName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32).replace(/^-+|-+$/g, '');
+}
+
 export async function createConfiguredProfile(id: string, name: string, kind: string, color: string,
   setup: KemperSetup = readKemperSetup()): Promise<void> {
   await cmd.createProfile(id, name, kind, color);
