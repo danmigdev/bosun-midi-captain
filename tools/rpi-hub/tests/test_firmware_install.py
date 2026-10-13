@@ -710,6 +710,47 @@ def test_rp2040_picotool_serial_filter_uses_flash_uid_not_rom_usb_serial(tmp_pat
     assert calls == [["info", "-a", *arguments]]
 
 
+def _bootsel_sysfs(path, devnum="6"):
+    for name, value in {"idVendor": "2e8a", "idProduct": "0003", "busnum": "1", "devnum": devnum,
+                        "serial": "E0C9125B0D9B"}.items():
+        (path / name).write_text(value)
+
+
+def test_bootsel_device_listed_before_picotool_can_open_it_is_polled(tmp_path, monkeypatch):
+    # Pi 3 rig, 2026-10-13: 10 ms after enumeration picotool could not open
+    # the ROM device; the same command worked 0.3 s later. That must not
+    # fail the update before any backup.
+    device = install.PinnedDevice(str(tmp_path), "1234567890ABCDEF")
+    _bootsel_sysfs(tmp_path)
+    io = object.__new__(install.LinuxInstallIO)
+    calls = []
+    def command(arguments, **kwargs):
+        calls.append(arguments)
+        if len(calls) < 3:
+            raise install.FirmwareInstallError("picotool failed: No accessible RP-series device in BOOTSEL mode was found at bus 1, address 6.")
+        return "Device Information\n flash size: 8192K\n flash id: 0x1234567890ABCDEF\n"
+    monkeypatch.setattr(io, "_command", command)
+    monkeypatch.setattr(install.time, "sleep", lambda _: None)
+    target, arguments = io._boot_device(device, timeout=5)
+    assert target.unique_id == device.serial
+    assert arguments == ["--bus", "1", "--address", "6", "--ser", device.serial]
+    assert len(calls) == 3
+
+
+def test_bootsel_device_that_never_opens_reports_picotool_error_at_deadline(tmp_path, monkeypatch):
+    device = install.PinnedDevice(str(tmp_path), "1234567890ABCDEF")
+    _bootsel_sysfs(tmp_path)
+    io = object.__new__(install.LinuxInstallIO)
+    calls = []
+    def command(arguments, **kwargs):
+        calls.append(arguments)
+        raise install.FirmwareInstallError("picotool failed: No accessible RP-series device in BOOTSEL mode was found at bus 1, address 6.")
+    monkeypatch.setattr(io, "_command", command)
+    with pytest.raises(install.FirmwareInstallError, match="No accessible RP-series device"):
+        io._boot_device(device, timeout=0.4)
+    assert len(calls) >= 2
+
+
 def test_changed_rom_serial_blocks_next_flash_command_even_with_same_flash_id(tmp_path, monkeypatch):
     device = install.PinnedDevice(str(tmp_path), "1234567890ABCDEF")
     original = install.BootDevice(device, device.serial, install.FLASH_BYTES, "E0C912D24340")

@@ -556,6 +556,7 @@ class LinuxInstallIO:
     def _boot_device(self, device: PinnedDevice, timeout: float = 15) -> tuple[BootDevice, list[str]]:
         deadline = time.monotonic() + timeout
         path = Path(device.usb_path)
+        picotool_error = None
         while True:
             try:
                 if (self._read(path / "idVendor").lower(), self._read(path / "idProduct").lower()) == ("2e8a", "0003"):
@@ -572,7 +573,21 @@ class LinuxInstallIO:
                     selection = ["--bus", str(int(self._read(path / "busnum"))),
                                  "--address", str(int(self._read(path / "devnum"))),
                                  "--ser", device.serial]
-                    text = self._command(["info", "-a", *selection], timeout=20)
+                    try:
+                        text = self._command(["info", "-a", *selection], timeout=20)
+                    except FirmwareInstallError as error:
+                        # sysfs lists the ROM device before it can be opened:
+                        # 10 ms after enumeration picotool reported "No
+                        # accessible RP-series device in BOOTSEL mode was
+                        # found at bus 1, address 6" and the same command
+                        # succeeded 0.3 s later (Pi 3 rig, 2026-10-13). Keep
+                        # polling until the deadline; an identity mismatch
+                        # below still fails at once.
+                        picotool_error = error
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.15)
+                        continue
                     unique = re.search(r"(?im)^\s*(?:flash\s+)?(?:unique\s+)?(?:device\s+)?id\s*:\s*(?:0x)?([0-9a-f]{16})\b", text)
                     size = re.search(r"(?im)^\s*flash\s+size\s*:\s*(\d+)\s*([KM])(?:i?B)?\b", text)
                     if not unique or not size:
@@ -585,7 +600,7 @@ class LinuxInstallIO:
             except (FileNotFoundError, OSError):
                 pass
             if time.monotonic() >= deadline:
-                raise FirmwareInstallError("The pinned Captain did not enumerate in BOOTSEL")
+                raise picotool_error or FirmwareInstallError("The pinned Captain did not enumerate in BOOTSEL")
             time.sleep(0.15)
 
     def enter_bootloader(self, device: PinnedDevice, *, timeout: float = 20) -> BootDevice:
