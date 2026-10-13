@@ -1,7 +1,14 @@
 // Version comparison behind the firmware update offers (see unified-update.ts).
 
-/** Semver-ish compare. Strips any pre-release suffix (`-native`, `-rc.1`,
- * …) so a firmware build like `0.6.5-native` is treated as `0.6.5`.
+/** A firmware version as the user sees it. Captains on 0.8.3 or older report
+ *  "X.Y.Z-native", a leftover from the retired CircuitPython firmware; the
+ *  release is just "X.Y.Z". */
+export function firmwareLabel(version: string | null | undefined): string {
+  return (version ?? "").replace(/-native(?=-|$)/i, "");
+}
+
+/** Semver-ish compare. Strips any pre-release suffix (`-rc.1`, the legacy
+ * `-native`, …) so a firmware build like `0.6.5-native` is treated as `0.6.5`.
  * Positive when `a > b`, negative when `a < b`, zero on equal. */
 export function compareVersions(a: string, b: string): number {
   const sanitize = (v: string) => v.split("-")[0];

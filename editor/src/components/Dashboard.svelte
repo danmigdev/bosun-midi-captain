@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { firmwareLabel } from "../lib/firmware-update";
   import {
     cmd,
     type DeviceStats,
@@ -108,7 +109,7 @@
       {#if connected && deviceInfo}
         <dl>
           <div><dt>Port</dt><dd>{connectedPortName || "-"}</dd></div>
-          <div><dt>Firmware</dt><dd>v{deviceInfo.fw}</dd></div>
+          <div><dt>Firmware</dt><dd>v{firmwareLabel(deviceInfo.fw)}</dd></div>
           <div><dt>Current patch</dt><dd>{String(deviceInfo.bank).padStart(2,"0")}/{String(deviceInfo.slot).padStart(2,"0")}</dd></div>
           {#if stats}
             <div><dt>Uptime</dt><dd>{humanMs(stats.uptime_ms)}</dd></div>

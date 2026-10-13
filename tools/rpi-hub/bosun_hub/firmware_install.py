@@ -406,7 +406,7 @@ class LinuxInstallIO:
                  dev: Path = Path("/dev")):
         tool = str(picotool) if picotool is not None else shutil.which("picotool")
         if not tool:
-            raise FirmwareInstallError("Native updates require the installed picotool helper")
+            raise FirmwareInstallError("Firmware updates require the installed picotool helper")
         self.picotool = str(Path(tool).resolve(strict=True))
         self.sysfs, self.dev = sysfs, dev
 
@@ -429,7 +429,7 @@ class LinuxInstallIO:
     def pin(self, serial_port: str) -> PinnedDevice:
         parent, interface = self._usb_parent(serial_port)
         if (self._read(parent / "idVendor").lower(), self._read(parent / "idProduct").lower(), interface) != ("239a", "80f4", "02"):
-            raise FirmwareInstallError("Native updates require the selected MIDI Captain data interface")
+            raise FirmwareInstallError("Firmware updates require the selected MIDI Captain data interface")
         serial = self._read(parent / "serial").upper()
         if not re.fullmatch(r"[0-9A-F]{16}", serial):
             raise FirmwareInstallError("Captain USB serial does not provide a usable flash identity")

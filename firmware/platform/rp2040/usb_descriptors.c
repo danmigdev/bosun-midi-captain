@@ -42,7 +42,7 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     static uint16_t descriptor[33];
     static char serial[2 * PICO_UNIQUE_BOARD_ID_SIZE_BYTES + 1];
     static const char *const strings[] = {
-        NULL, "PaintAudio", "MIDI Captain Bosun Native", NULL,
+        NULL, "PaintAudio", "MIDI Captain Bosun", NULL,
         "Bosun console", "Bosun data", "Bosun MIDI",
     };
     size_t count = 0;

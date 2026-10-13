@@ -1,4 +1,4 @@
-//! Durable, exclusive native-to-native USB update. Only this worker touches
+//! Durable, exclusive Bosun-to-Bosun USB update. Only this worker touches
 //! the selected device between the runtime preflight and the final readback.
 use crate::{
     firmware_package::{self, NativePackage, FLASH_BYTES},
@@ -246,12 +246,7 @@ impl Worker {
         let runtime = Runtime::open_retry(&self.job.port)?;
         let info = runtime.request("GET_DEVICE_INFO", "DEVICE_INFO")?;
         let version = info["fw"].as_str().ok_or("Missing firmware version")?;
-        if !version.contains("-native")
-            || info["native_experimental"] != true
-            || !info["reboot_modes"]
-                .as_array()
-                .is_some_and(|v| v.contains(&json!("bootloader")))
-        {
+        if !restartable_bosun(&info) {
             return Err("Direct USB updates require Bosun firmware that can restart into its USB bootloader.".into());
         }
         let dirty = runtime.request("GET_DIRTY", "DIRTY")?;
@@ -526,6 +521,16 @@ impl Worker {
         helper.reboot()?;
         self.publish("restored",100,"Original firmware and files restored. Every flash byte was verified before reboot. The factory firmware does not report its startup status to Bosun.")
     }
+}
+
+/// Running Bosun firmware that can restart into its USB bootloader. The hidden
+/// `native_experimental` key identifies every Bosun firmware; the version is
+/// not checked because it ended in "-native" only before 0.8.4.
+fn restartable_bosun(info: &Value) -> bool {
+    info["native_experimental"] == true
+        && info["reboot_modes"]
+            .as_array()
+            .is_some_and(|v| v.contains(&json!("bootloader")))
 }
 
 fn touch_bootloader(identity: &UsbIdentity, port: &str) {
@@ -967,7 +972,19 @@ pub async fn factory_install_start(
 mod tests {
     use super::*;
     #[test]
-    fn supported_models_match_the_native_firmware_table() {
+    fn recognises_bosun_firmware_with_or_without_the_old_version_suffix() {
+        let info = |fw: &str, bosun: bool, modes: Value| {
+            json!({ "fw": fw, "native_experimental": bosun, "reboot_modes": modes })
+        };
+        let modes = json!(["normal", "bootloader"]);
+        assert!(restartable_bosun(&info("0.8.4", true, modes.clone())));
+        assert!(restartable_bosun(&info("0.8.3-native", true, modes.clone())));
+        assert!(!restartable_bosun(&info("0.8.4", false, modes)));
+        assert!(!restartable_bosun(&info("0.8.4", true, json!(["normal"]))));
+        assert!(!restartable_bosun(&json!({ "fw": "5.15" })));
+    }
+    #[test]
+    fn supported_models_match_the_firmware_table() {
         // The installer must offer exactly the models SET_HARDWARE accepts.
         let firmware = include_str!("../../../firmware/src/hardware.c");
         let defined: Vec<&str> = firmware
@@ -1082,8 +1099,8 @@ mod tests {
                 ports: vec![1],
             },
             port: "COM1".into(),
-            previous_version: "old-native".into(),
-            version: "new-native".into(),
+            previous_version: "old".into(),
+            version: "new".into(),
             backup_path: String::new(),
             backup_sha256: String::new(),
             write_started: true,

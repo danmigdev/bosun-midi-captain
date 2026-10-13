@@ -8,7 +8,17 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { compareVersions } from "../src/lib/firmware-update";
+import { compareVersions, firmwareLabel } from "../src/lib/firmware-update";
+
+describe("firmwareLabel", () => {
+  it("shows the release without the pre-0.8.4 -native suffix", () => {
+    expect(firmwareLabel("0.8.3-native")).toBe("0.8.3");
+    expect(firmwareLabel("0.8.4")).toBe("0.8.4");
+    expect(firmwareLabel("0.1.0-native-experimental")).toBe("0.1.0-experimental");
+    expect(firmwareLabel("0.9.0-rc.1")).toBe("0.9.0-rc.1");
+    expect(firmwareLabel(undefined)).toBe("");
+  });
+});
 
 describe("compareVersions", () => {
   it("orders by major, then minor, then patch", () => {

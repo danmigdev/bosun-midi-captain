@@ -328,7 +328,7 @@ static void hardware_info(bosun_protocol_t *p) {
 }
 static void device_info(bosun_protocol_t *p) {
     bosun_config_t *c = p->runtime->config; const bosun_json_doc_t *d = &c->device_doc;
-    begin(p, "DEVICE_INFO"); string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
+    begin(p, "DEVICE_INFO"); string(&p->writer, "fw", BOSUN_FIRMWARE_VERSION);
     field(&p->writer, "device");
     if (!raw(&p->writer, d, bosun_json_get(d, 0, "device_name"))) bosun_json_quote(&p->writer, layout(p)->name);
     hardware_info(p);
@@ -384,7 +384,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     if (*profile && strcmp(p->type, "ACTIVATE_SWITCH") && !bosun_config_profile_exists(profile))
         { error(p, "no_such_profile"); goto done; }
     begin(p, "ACK");
-    if (!strcmp(p->type, "PING")) string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
+    if (!strcmp(p->type, "PING")) string(&p->writer, "fw", BOSUN_FIRMWARE_VERSION);
     else if (!strcmp(p->type, "GET_DEVICE_INFO")) device_info(p);
     else if (!strcmp(p->type, "MORPH_CONTROL")) {
         char action[16]; int32_t generation, percent = 0;
@@ -576,7 +576,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         bosun_json_write_integer(&p->writer, c->bank);
         integer(&p->writer, "slot", c->slot); bosun_json_puts(&p->writer, "}");
     } else if (!strcmp(p->type, "STATS")) {
-        begin(p, "STATS"); string(&p->writer, "fw", BOSUN_NATIVE_VERSION);
+        begin(p, "STATS"); string(&p->writer, "fw", BOSUN_FIRMWARE_VERSION);
         unsigned_integer(&p->writer, "uptime_ms", now_ms); unsigned_integer(&p->writer, "midi_rx_count", rt->midi_rx_count);
         unsigned_integer(&p->writer, "midi_tx_count", rt->midi_tx_count); unsigned_integer(&p->writer, "midi_tx_failed", rt->midi_tx_failed);
         unsigned_integer(&p->writer, "queue_overflows", rt->queue_overflows); unsigned_integer(&p->writer, "unsupported_messages", rt->unsupported_messages);

@@ -149,10 +149,11 @@ describe("App direct USB firmware update", () => {
     });
   });
   it.each([
-    { installed: "0.6.4-native", available: true },
-    { installed: "0.6.5-native", available: false },
-    { installed: "0.6.6-native", available: false },
-  ])("only advertises a USB update newer than $installed", async ({ installed, available }) => {
+    { installed: "0.6.4-native", available: true, shown: "0.6.4" },
+    { installed: "0.6.5-native", available: false, shown: "0.6.5" },
+    { installed: "0.6.5", available: false, shown: "0.6.5" },
+    { installed: "0.6.6-native", available: false, shown: "0.6.6" },
+  ])("only advertises a USB update newer than $installed", async ({ installed, available, shown }) => {
     render(App);
     await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledOnce());
     await screen.findByTitle("Connected on COM9");
@@ -161,7 +162,8 @@ describe("App direct USB firmware update", () => {
     if (available) expect(button).toBeEnabled();
     else {
       expect(button).not.toBeInTheDocument();
-      expect(screen.getByText(`Bosun firmware · v${installed}`)).toBeInTheDocument();
+      // Versions before 0.8.4 end in "-native"; the app shows the release only.
+      expect(screen.getByText(`Bosun firmware · v${shown}`)).toBeInTheDocument();
     }
     expect(mocks.invoke.mock.calls.filter(([c]) => c === "usb_update_start")).toHaveLength(0);
   });

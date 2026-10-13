@@ -1,4 +1,4 @@
-"""Offline validation of native RP2040 firmware update packages.
+"""Offline validation of Bosun RP2040 firmware update packages.
 
 Nothing in this module opens a device or writes flash. Package digests establish
 integrity, not publisher identity: the caller must select a trusted release.
@@ -125,7 +125,7 @@ def validate_update_package(path: Path) -> ValidatedPackage:
     if type(manifest["schema"]) is not int or manifest["schema"] != 1:
         _fail("Unsupported firmware manifest schema")
     if manifest["board"] != "midi-captain-rp2040" or manifest["family"] != "native":
-        _fail("Package does not target native MIDI Captain RP2040 firmware")
+        _fail("Package does not target Bosun MIDI Captain RP2040 firmware")
     if type(manifest["flash_bytes"]) is not int or manifest["flash_bytes"] != FLASH_BYTES:
         _fail("Package has unsupported flash geometry")
     for key in ("release", "firmware_version"):

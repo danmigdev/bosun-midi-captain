@@ -18,7 +18,7 @@ def main():
         f'Bosun-{version}-portable-x64.zip', f'Bosun_{version}_aarch64.dmg',
         f'Bosun_{version}_amd64.AppImage', 'bosun.apk',
         f'Bosun-{version}-setup-guide.html', f'Bosun-{version}-pi-setup.tar.gz',
-        f'Bosun-{version}-native-update.zip', f'Bosun-{version}-stage.zip',
+        f'Bosun-{version}-firmware-update.zip', f'Bosun-{version}-stage.zip',
     ]
     lines = []
     for name in sorted(names):

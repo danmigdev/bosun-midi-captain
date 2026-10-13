@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { firmwareLabel } from "../lib/firmware-update";
   import {
     abortUnifiedUpload, checkUnifiedRecovery, forgetUpdate, isTerminalUpdate, readPendingUpdate,
     resumeUnifiedUpdate, startUnifiedUpdate, UnifiedUpdateConnectionError,
@@ -120,7 +121,7 @@
   <header><h2 id="bosun-update-title">{waiting ? "Waiting for Raspberry Pi" : status.phase === "error" && status.recovery_verified ? "Pedal recovery verified" : labels[status.phase] ?? "Updating Bosun"}</h2></header>
   <div class="content" aria-live="polite">
     {#if status.phase === "review" && !hasPendingHere()}
-      <p>Update Bosun {installed ? `from ${installed} ` : ""}to <strong>{manifest?.release}</strong>.</p>
+      <p>Update Bosun {installed ? `from ${firmwareLabel(installed)} ` : ""}to <strong>{manifest?.release}</strong>.</p>
       <p>Your profiles and settings are backed up and preserved automatically. The pedal will be unavailable until the update finishes.</p>
       <p class="muted">Keep the pedal and Raspberry Pi powered on until the update is complete.</p>
     {:else if waiting}

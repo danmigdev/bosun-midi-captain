@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { firmwareLabel } from "./lib/firmware-update";
   import PatchEditor from "./components/PatchEditor.svelte";
   import Installer from "./components/Installer.svelte";
   import UnifiedFirmwareUpdate from "./components/UnifiedFirmwareUpdate.svelte";
@@ -1480,12 +1481,12 @@
         {:else if hasUnifiedUpdate}
           <button class="topbtn primary" onclick={openUnifiedUpdate}
                   title="Updates Bosun through the Raspberry Pi and preserves your profiles automatically.">
-            Update Bosun ({deviceInfo?.fw} -> {bundledUpdate?.release})
+            Update Bosun ({firmwareLabel(deviceInfo?.fw)} -> {bundledUpdate?.release})
           </button>
         {:else if hasUsbUpdate}
           <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled Bosun firmware over USB with a full recovery backup.">Update firmware (USB)</button>
         {:else if deviceInfo?.fw}
-          <span class="fwstatus muted" title="Firmware installed on the pedal">Bosun firmware · v{deviceInfo.fw}</span>
+          <span class="fwstatus muted" title="Firmware installed on the pedal">Bosun firmware · v{firmwareLabel(deviceInfo.fw)}</span>
         {:else}
           <span class="fwstatus muted">Reading firmware information…</span>
         {/if}

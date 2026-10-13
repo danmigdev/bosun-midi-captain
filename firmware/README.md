@@ -77,7 +77,7 @@ release=$(python3 -c 'import json; print(json.load(open("editor/package.json"))[
 python3 tools/package-native-update.py \
   --uf2 firmware/build-rp2040/bosun_native.uf2 \
   --output editor/src-tauri/resources/update/bosun-update.zip \
-  --release "$release" --firmware-version "${release}-native"
+  --release "$release" --firmware-version "$release"
 python3 tools/verify-release-version.py \
   --package editor/src-tauri/resources/update/bosun-update.zip
 ```

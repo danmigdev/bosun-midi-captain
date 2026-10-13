@@ -115,14 +115,14 @@ Set-VersionLine `
 
 Set-VersionLine `
     -Path (Join-Path $native "include\bosun\protocol.h") `
-    -Pattern '(?m)^(#define BOSUN_NATIVE_VERSION )"\d+\.\d+\.\d+-native(?:-experimental)?"' `
-    -Replacement "`${1}`"${Version}-native`"" `
+    -Pattern '(?m)^(#define BOSUN_FIRMWARE_VERSION )"\d+\.\d+\.\d+"' `
+    -Replacement "`${1}`"$Version`"" `
     -ExpectedMatches 1
 
 Set-VersionLine `
     -Path (Join-Path $native "platform\rp2040\CMakeLists.txt") `
-    -Pattern '(?m)^(\s*pico_set_program_version\(\$\{target\} )"\d+\.\d+\.\d+-native(?:-experimental)?"(\))' `
-    -Replacement "`${1}`"${Version}-native`"`${2}" `
+    -Pattern '(?m)^(\s*pico_set_program_version\(\$\{target\} )"\d+\.\d+\.\d+"(\))' `
+    -Replacement "`${1}`"$Version`"`${2}" `
     -ExpectedMatches 1
 
 # Android's versionName is READ AT GRADLE BUILD TIME from gen/android's own

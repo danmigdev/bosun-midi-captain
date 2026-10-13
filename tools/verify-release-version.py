@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check release identities and an optional native update archive."""
+"""Check release identities and an optional firmware update archive."""
 import argparse
 import json
 from pathlib import Path
@@ -20,13 +20,13 @@ def verify(root=ROOT, *, tag=None, package=None):
         raise ValueError("Unknown release channel")
     if not isinstance(release, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", release):
         raise ValueError("Editor release must be a plain X.Y.Z version")
-    firmware_version = release + "-native"
+    firmware_version = release
     expected = {
         "editor/src-tauri/tauri.conf.json": (json.loads((root / "editor/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"], release),
         "editor/src-tauri/Cargo.toml": (tomllib.loads((root / "editor/src-tauri/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"], release),
     }
     patterns = {
-        "firmware/include/bosun/protocol.h": (r'^#define BOSUN_NATIVE_VERSION\s+"([^"]+)"\s*$', firmware_version, 1),
+        "firmware/include/bosun/protocol.h": (r'^#define BOSUN_FIRMWARE_VERSION\s+"([^"]+)"\s*$', firmware_version, 1),
         "firmware/CMakeLists.txt": (r'project\(BosunNative\s+VERSION\s+(\S+)\s+LANGUAGES\b', release, 2),
         "firmware/platform/rp2040/CMakeLists.txt": (r'pico_set_program_version\(\$\{target\}\s+"([^"]+)"\)', firmware_version, 1),
     }
@@ -45,18 +45,25 @@ def verify(root=ROOT, *, tag=None, package=None):
         validated = validate_update_package(Path(package))
         for key, wanted in (("release", release), ("firmware_version", firmware_version)):
             if validated.manifest[key] != wanted:
-                raise ValueError(f"Native update manifest {key}: expected {wanted}, found {validated.manifest[key]}")
+                raise ValueError(f"Firmware update manifest {key}: expected {wanted}, found {validated.manifest[key]}")
         binary = b"".join(validated.firmware_pages[address] for address in sorted(validated.firmware_pages))
-        versions = set(re.findall(rb"[0-9]+\.[0-9]+\.[0-9]+-native(?:-[A-Za-z0-9.-]+)?\x00", binary))
-        if versions != {firmware_version.encode("ascii") + b"\0"}:
-            raise ValueError(f"Native UF2 must embed only firmware version {firmware_version}, found {versions}")
+        # Every NUL-delimited version string in the image, so a stale build
+        # cannot hide behind a fresh manifest. Besides the firmware's own
+        # version, binary info carries the pinned Pico SDK version.
+        sdk = re.search(r"Pico SDK ([0-9]+\.[0-9]+\.[0-9]+)",
+                        (root / "firmware/cmake/pico_sdk.cmake").read_text(encoding="utf-8"))
+        own = firmware_version.encode("ascii")
+        allowed = {own} | ({sdk[1].encode("ascii")} if sdk else set())
+        versions = set(re.findall(rb"(?<=\x00)[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?=\x00)", binary))
+        if own not in versions or not versions <= allowed:
+            raise ValueError(f"Firmware UF2 must embed only firmware version {firmware_version}, found {sorted(versions)}")
     return {"release": release, "firmware_version": firmware_version, "prerelease": str(channel == "experimental").lower()}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Require the selected release tag to match the checkout")
-    parser.add_argument("--package", type=Path, help="Require a valid native package from this release")
+    parser.add_argument("--package", type=Path, help="Require a valid firmware package from this release")
     parser.add_argument("--github-output", type=Path, help="Append checked release versions to GITHUB_OUTPUT")
     args = parser.parse_args()
     try:

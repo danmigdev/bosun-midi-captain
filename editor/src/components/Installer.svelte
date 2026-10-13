@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { firmwareLabel } from "../lib/firmware-update";
   import { KNOWN_HARDWARE, hardwareLabel, knownHardware } from "../lib/hardware";
   type Candidate = { id: string; label: string; port: string };
   type Discovery = { devices: Candidate[]; version: string | null; problem: string | null };
@@ -25,7 +26,7 @@
 </script>
 <dialog bind:this={dialog} aria-labelledby="install-title" oncancel={event => { event.preventDefault(); onClose(); }}>
   <h2 id="install-title">Install Bosun</h2>
-  <p>Connect your MIDI Captain directly to the computer with a USB data cable. Bosun will install version <strong>{discovery?.version || "checking..."}</strong> in place of the factory firmware.</p>
+  <p>Connect your MIDI Captain directly to the computer with a USB data cable. Bosun will install version <strong>{firmwareLabel(discovery?.version) || "checking..."}</strong> in place of the factory firmware.</p>
   {#if discovery?.problem}<p role="alert">Installer package unavailable: {discovery.problem}</p><p>Download and extract the complete latest Bosun Desktop release.</p>{/if}
   {#if discovery?.devices.length}
     <label>Captain to install<select bind:value={selected} onchange={() => confirmed = false}><option value="">Select a device</option>{#each discovery.devices as d}<option value={d.id}>{d.label}</option>{/each}</select></label>

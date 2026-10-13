@@ -710,6 +710,17 @@ def test_rp2040_picotool_serial_filter_uses_flash_uid_not_rom_usb_serial(tmp_pat
     assert calls == [["info", "-a", *arguments]]
 
 
+@pytest.mark.parametrize("info,bosun", [
+    ({"fw": "0.8.4", "native_experimental": True}, True),       # 0.8.4 and later
+    ({"fw": "0.8.3-native", "native_experimental": True}, True),
+    ({"fw": "0.1.0-native"}, True),                             # before the hidden key
+    ({"fw": "0.8.4"}, False),
+    ({"fw": "5.15"}, False),                                    # stock PaintAudio
+])
+def test_bosun_firmware_is_recognised_with_or_without_the_old_suffix(info, bosun):
+    assert install._is_native(info) is bosun
+
+
 def _bootsel_sysfs(path, devnum="6"):
     for name, value in {"idVendor": "2e8a", "idProduct": "0003", "busnum": "1", "devnum": devnum,
                         "serial": "E0C9125B0D9B"}.items():

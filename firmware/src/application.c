@@ -250,7 +250,7 @@ static void console_status(bosun_application_t *app, uint32_t now) {
         bosun_board_usb_diagnostics_t usb;
         bosun_board_usb_diagnostics(&usb);
         int count = snprintf(app->console, sizeof app->console,
-            "Bosun native experimental storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u usb_session=%lu requests=%lu cdc_rx_bytes=%lu cdc_rx_fnv=%08lx cdc_tx_bytes=%lu cdc_tx_fnv=%08lx\r\n",
+            "Bosun storage=%s boot=%u ticks=%lu rx=%lu tx=%lu rejected=%lu abandoned=%lu display=%u usbq=%u dinq=%u usb_session=%lu requests=%lu cdc_rx_bytes=%lu cdc_rx_fnv=%08lx cdc_tx_bytes=%lu cdc_tx_fnv=%08lx\r\n",
             bosun_store_ready() ? "ready" : "unavailable", (unsigned)app->boot_result,
             (unsigned long)app->ticks, (unsigned long)app->runtime.midi_rx_count,
             (unsigned long)app->runtime.midi_tx_count, (unsigned long)app->midi_rejected,

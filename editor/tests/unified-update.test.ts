@@ -439,9 +439,9 @@ async function renderConnectedApp(fw: string) {
 }
 
 describe("App unified update entry points", () => {
-  it.each(["0.6.4-native", "0.1.0-native-experimental"])("offers the same Bosun update flow to %s", async fw => {
+  it.each([["0.6.4-native", "0.6.4"], ["0.1.0-native-experimental", "0.1.0-experimental"], ["0.6.4", "0.6.4"]])("offers the same Bosun update flow to %s", async (fw, shown) => {
     await renderConnectedApp(fw);
-    const button = await screen.findByRole("button", { name: `Update Bosun (${fw} -> 0.6.5)` });
+    const button = await screen.findByRole("button", { name: `Update Bosun (${shown} -> 0.6.5)` });
     expect(screen.queryByRole("button", { name: /^Update firmware \(/ })).not.toBeInTheDocument();
     await fireEvent.click(button);
     expect(screen.getByRole("dialog")).toHaveTextContent("to 0.6.5");

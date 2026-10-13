@@ -23,7 +23,7 @@ def main():
     sources = {
         f'Bosun-{version}-setup-guide.html': ROOT / 'dist/setup-guide/setup-guide.html',
         f'Bosun-{version}-pi-setup.tar.gz': resources / 'pi/bosun-pi-setup.tar.gz',
-        f'Bosun-{version}-native-update.zip': package,
+        f'Bosun-{version}-firmware-update.zip': package,
     }
     stage = ROOT / 'editor/dist-stage'
     for source in [*sources.values(), stage / 'index.html']:

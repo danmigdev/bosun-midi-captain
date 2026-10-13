@@ -26,16 +26,19 @@ class ReleaseVersionTests(unittest.TestCase):
             "editor/package.json": '{"version":"1.2.3"}',
             "editor/src-tauri/tauri.conf.json": '{"version":"1.2.3"}',
             "editor/src-tauri/Cargo.toml": '[package]\nversion = "1.2.3"\n',
-            "firmware/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native"\n',
+            "firmware/include/bosun/protocol.h": '#define BOSUN_FIRMWARE_VERSION "1.2.3"\n',
             "firmware/CMakeLists.txt": 'project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nproject(BosunNative VERSION 1.2.3 LANGUAGES C)\n',
-            "firmware/platform/rp2040/CMakeLists.txt": 'pico_set_program_version(${target} "1.2.3-native")\n',
+            "firmware/platform/rp2040/CMakeLists.txt": 'pico_set_program_version(${target} "1.2.3")\n',
         }
+        sdk = self.root / "firmware/cmake/pico_sdk.cmake"
+        sdk.parent.mkdir(parents=True, exist_ok=True)
+        sdk.write_text('set(PICO_SDK_PATH "" CACHE PATH "Pico SDK 2.3.0 checkout")\n', encoding="utf-8")
         for path, contents in self.sources.items():
             destination = self.root / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(contents, encoding="utf-8")
 
-    def package(self, *, release="1.2.3", firmware_version="1.2.3-native", embedded=b"1.2.3-native\0"):
+    def package(self, *, release="1.2.3", firmware_version="1.2.3", embedded=b"\x001.2.3\x002.3.0\x00"):
         binary = bytearray()
         for index in range(3):
             block = bytearray(512)
@@ -60,7 +63,7 @@ class ReleaseVersionTests(unittest.TestCase):
     def test_aligned_sources_tags_and_actual_uf2_identity(self):
         for tag in (None, "v1.2.3", "refs/tags/v1.2.3"):
             self.assertEqual(gate.verify(self.root, tag=tag, package=self.package()),
-                             {"release": "1.2.3", "firmware_version": "1.2.3-native", "prerelease": "false"})
+                             {"release": "1.2.3", "firmware_version": "1.2.3", "prerelease": "false"})
 
     def test_experimental_channel_is_explicit_and_unknown_channels_fail(self):
         path = self.root / "editor/package.json"
@@ -79,18 +82,18 @@ class ReleaseVersionTests(unittest.TestCase):
                     gate.verify(self.root)
                 path.write_text(original, encoding="utf-8")
 
-    def test_editor_native_and_package_advance_together(self):
+    def test_editor_firmware_and_package_advance_together(self):
         for relative, original in self.sources.items():
             (self.root / relative).write_text(original.replace("1.2.3", "1.2.4"), encoding="utf-8")
-        package = self.package(release="1.2.4", firmware_version="1.2.4-native", embedded=b"1.2.4-native\0")
+        package = self.package(release="1.2.4", firmware_version="1.2.4", embedded=b"\x001.2.4\x00")
         self.assertEqual(gate.verify(self.root, tag="v1.2.4", package=package),
-                         {"release": "1.2.4", "firmware_version": "1.2.4-native", "prerelease": "false"})
+                         {"release": "1.2.4", "firmware_version": "1.2.4", "prerelease": "false"})
         # A package built for the previous release must still be rejected.
         old_package = self.package()
         with self.assertRaises(ValueError):
             gate.verify(self.root, tag="v1.2.4", package=old_package)
 
-    def test_missing_native_declaration_and_wrong_tag_fail(self):
+    def test_missing_firmware_declaration_and_wrong_tag_fail(self):
         for tag in ("v1.2.4", "main", "v1.2.3\nrelease=untrusted"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 gate.verify(self.root, tag=tag)
@@ -102,9 +105,12 @@ class ReleaseVersionTests(unittest.TestCase):
     def test_missing_wrong_manifest_and_old_embedded_firmware_fail(self):
         with self.assertRaises(ValueError):
             gate.verify(self.root, package=self.root / "missing.zip")
-        for changes in ({"release": "1.2.4"}, {"firmware_version": "1.2.4-native"},
-                        {"embedded": b"1.2.2-native\0"}, {"embedded": b"no version\0"},
-                        {"embedded": b"1.2.3-native\0and 1.2.2-native\0"}):
+        # A stale image, a missing version, a second Bosun version, or the
+        # pre-0.8.4 "-native" spelling are all rejected.
+        for changes in ({"release": "1.2.4"}, {"firmware_version": "1.2.4"},
+                        {"embedded": b"\x001.2.2\x00"}, {"embedded": b"no version\x00"},
+                        {"embedded": b"\x001.2.3\x00and\x001.2.2\x00"},
+                        {"embedded": b"\x001.2.3-native\x00"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 gate.verify(self.root, package=self.package(**changes))
 
@@ -125,8 +131,8 @@ class BumpVersionSmokeTests(unittest.TestCase):
             "editor/src-tauri/Cargo.lock": '[[package]]\nname = "bosun-editor"\nversion = "1.2.3"\n[[package]]\nname = "keep"\nversion = "4.5.6"\n',
             "editor/src-tauri/android-version-code.txt": '31',
             "firmware/CMakeLists.txt": 'cmake_minimum_required(VERSION 3.20)\nif(BOSUN_PLATFORM STREQUAL "rp2040")\n    project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nelse()\n    project(BosunNative VERSION 1.2.3 LANGUAGES C)\nendif()\n',
-            "firmware/include/bosun/protocol.h": '#define BOSUN_NATIVE_VERSION "1.2.3-native-experimental"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
-            "firmware/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun Native MIDI Captain")\n    pico_set_program_version(${target} "1.2.3-native-experimental")\n',
+            "firmware/include/bosun/protocol.h": '#define BOSUN_FIRMWARE_VERSION "1.2.3"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
+            "firmware/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun MIDI Captain")\n    pico_set_program_version(${target} "1.2.3")\n',
         }
         for name, contents in fixtures.items():
             path = self.root / name
@@ -146,9 +152,9 @@ class BumpVersionSmokeTests(unittest.TestCase):
         native = (self.root / "firmware/CMakeLists.txt").read_text()
         self.assertEqual(re.findall(r"project\(BosunNative VERSION (\d+\.\d+\.\d+) LANGUAGES", native), [version, version])
         self.assertIn("cmake_minimum_required(VERSION 3.20)", native)
-        self.assertIn(f'#define BOSUN_NATIVE_VERSION "{version}-native"',
+        self.assertIn(f'#define BOSUN_FIRMWARE_VERSION "{version}"',
                       (self.root / "firmware/include/bosun/protocol.h").read_text())
-        self.assertIn(f'pico_set_program_version(${{target}} "{version}-native")',
+        self.assertIn(f'pico_set_program_version(${{target}} "{version}")',
                       (self.root / "firmware/platform/rp2040/CMakeLists.txt").read_text())
         for name in ("editor/package.json", "editor/src-tauri/tauri.conf.json"):
             self.assertEqual(json.loads((self.root / name).read_text())["version"], version)
@@ -163,7 +169,7 @@ class BumpVersionSmokeTests(unittest.TestCase):
         self.assertIn(f'name = "bosun-editor"\nversion = "{version}"', cargo_lock)
         self.assertIn('name = "keep"\nversion = "4.5.6"', cargo_lock)
 
-    def test_bump_advances_native_editor_and_android_version_code(self):
+    def test_bump_advances_firmware_editor_and_android_version_code(self):
         result = self.run_bump("9.8.7")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_versions("9.8.7")
@@ -175,7 +181,7 @@ class BumpVersionSmokeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assert_versions("1.2.3")
 
-    def test_missing_one_native_platform_version_cannot_silently_succeed(self):
+    def test_missing_one_firmware_platform_version_cannot_silently_succeed(self):
         path = self.root / "firmware/CMakeLists.txt"
         contents = path.read_text().replace("    project(BosunNative VERSION 1.2.3 LANGUAGES C)\n", "")
         path.write_text(contents)

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { firmwareLabel } from "../lib/firmware-update";
   import { startUsbUpdate, startFactoryInstall, recoverUsbUpdate, usbUpdateStatus, usbUpdateRunning, usbUpdateTerminal, type UsbUpdateJob } from "../lib/usb-update";
   type Props = {
     port: string; installed?: string; version: string; job: UsbUpdateJob | null;
@@ -71,10 +72,10 @@
   <div class="content">
     {#if !job}
       {#if candidateId}
-      <p>Install <strong>{version}</strong>. Bosun saves and verifies the original firmware, installs Bosun firmware and prepares storage for new profiles.</p>
+      <p>Install <strong>{firmwareLabel(version)}</strong>. Bosun saves and verifies the original firmware, installs Bosun firmware and prepares storage for new profiles.</p>
       <p>Press Install to start. Keep the Captain on the same USB port and keep the computer powered on.</p>
       {:else}
-      <p>Install <strong>{version}</strong> on the Captain connected to <strong>{port}</strong>{installed ? ` (currently ${installed})` : ""}.</p>
+      <p>Install <strong>{firmwareLabel(version)}</strong> on the Captain connected to <strong>{port}</strong>{installed ? ` (currently ${firmwareLabel(installed)})` : ""}.</p>
       <p>Bosun saves a complete recovery backup on this computer, preserves your saved profiles, and checks the firmware and settings after restarting the Captain.</p>
       <p>Save your edits first. Keep the Captain on the same USB port and keep this computer awake until the update finishes. MIDI and Stage pause during the update.</p>
       {/if}

@@ -22,13 +22,25 @@ pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// A package this app installs. Since 0.8.4 the firmware version is the bare
+/// release ("0.8.4", formerly "0.8.3-native"). "family" stays "native": Pis
+/// running 0.8.2/0.8.3 accept no other value.
+fn supported_manifest(manifest: &UpdateManifest) -> bool {
+    manifest.schema == 1
+        && manifest.board == "midi-captain-rp2040"
+        && manifest.family == "native"
+        && manifest.flash_bytes == FLASH_BYTES as u32
+        && !manifest.release.is_empty()
+        && manifest.firmware_version == manifest.release
+}
+
 fn word(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
 }
 
 pub fn firmware_image(data: &[u8]) -> Result<Vec<u8>, String> {
     if data.is_empty() || data.len() % 512 != 0 || data.len() > STORAGE_OFFSET * 2 {
-        return Err("Invalid native UF2 size".into());
+        return Err("Invalid firmware UF2 size".into());
     }
     let count = data.len() / 512;
     let mut image = Vec::with_capacity(count * 256);
@@ -124,13 +136,7 @@ pub fn read_native_package(path: &Path) -> Result<NativePackage, String> {
     }
     let manifest: UpdateManifest =
         serde_json::from_slice(&manifest.ok_or("Missing manifest")?).map_err(|e| e.to_string())?;
-    if manifest.schema != 1
-        || manifest.board != "midi-captain-rp2040"
-        || manifest.family != "native"
-        || manifest.flash_bytes != FLASH_BYTES as u32
-        || manifest.release.is_empty()
-        || !manifest.firmware_version.ends_with("-native")
-    {
+    if !supported_manifest(&manifest) {
         return Err("Unsupported firmware release".into());
     }
     let firmware = firmware.ok_or("Missing firmware")?;
@@ -189,6 +195,24 @@ mod tests {
             assert!(firmware_image(&data).is_err(), "offset {offset}");
         }
         assert!(firmware_image(&uf2()[..700]).is_err());
+    }
+    #[test]
+    fn firmware_version_is_the_bare_release() {
+        let manifest = |version: &str| UpdateManifest {
+            schema: 1,
+            board: "midi-captain-rp2040".into(),
+            release: "0.8.4".into(),
+            family: "native".into(),
+            firmware_version: version.into(),
+            flash_bytes: FLASH_BYTES as u32,
+            firmware_sha256: String::new(),
+        };
+        assert!(supported_manifest(&manifest("0.8.4")));
+        assert!(!supported_manifest(&manifest("0.8.4-native")));
+        assert!(!supported_manifest(&manifest("0.8.3")));
+        let mut other_family = manifest("0.8.4");
+        other_family.family = "firmware".into();
+        assert!(!supported_manifest(&other_family));
     }
     #[test]
     fn validates_bundled_package_when_present() {

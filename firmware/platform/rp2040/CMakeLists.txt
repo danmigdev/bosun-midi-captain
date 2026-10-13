@@ -44,8 +44,8 @@ function(bosun_configure_rp2040_target target)
         "LINKER:--defsym,SCRATCH_Y_ORIGIN=0x2003e000"
         "LINKER:--defsym,SCRATCH_Y_LENGTH=16384"
         "LINKER:--defsym,HEAP_LIMIT=__end__")
-    pico_set_program_name(${target} "Bosun Native MIDI Captain")
-    pico_set_program_version(${target} "0.8.3-native")
+    pico_set_program_name(${target} "Bosun MIDI Captain")
+    pico_set_program_version(${target} "0.8.3")
     pico_add_extra_outputs(${target})
     if(NOT PICO_NO_PICOTOOL AND NOT PICO_NO_UF2)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)

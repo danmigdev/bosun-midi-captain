@@ -18,6 +18,6 @@ empty="$(mktemp -d "$build/empty.XXXXXX")/storage.bin"
 "$build/host/bosun_storage_image" --empty --output "$empty"
 version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$root/editor/package.json")"
 python3 "$root/tools/package-native-update.py" --uf2 "${BOSUN_BUILD_ROOT:-$root/firmware/build}-rp2040/bosun_native.uf2" \
-    --output "$resources/update/bosun-update.zip" --release "$version" --firmware-version "$version-native"
+    --output "$resources/update/bosun-update.zip" --release "$version" --firmware-version "$version"
 python3 "$root/tools/package-factory-installer.py" --package "$resources/update/bosun-update.zip" --output "$resources/installer" \
     --loader "$build/ram/bosun_usb_installer.uf2" --storage "$empty" --sdk "$PICO_SDK_PATH"

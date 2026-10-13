@@ -392,9 +392,9 @@ object BosunMidiBridge {
                 matches(it, kemperHint, KEMPER_VENDOR_IDS, "profiler", "kemper")
             }
             // The firmware's USB strings are "PaintAudio" / "MIDI
-            // Captain Bosun Native" (firmware/platform/rp2040/
-            // usb_descriptors.c), so the pedal's label here is "PaintAudio
-            // MIDI Captain Bosun Native".
+            // Captain Bosun" (firmware/platform/rp2040/usb_descriptors.c;
+            // "MIDI Captain Bosun Native" before 0.8.4), so the pedal's
+            // label here is "PaintAudio MIDI Captain Bosun".
             captain = devices.firstOrNull {
                 matches(it, captainHint, CAPTAIN_VENDOR_IDS, "bosun", "captain")
             }
