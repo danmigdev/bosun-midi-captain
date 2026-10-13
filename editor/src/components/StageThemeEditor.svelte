@@ -7,6 +7,8 @@
   import StageSelect from "./StageSelect.svelte";
   import {
     STAGE_SECTIONS,
+    KEMPER_SECTIONS,
+    COLORLESS_SECTIONS,
     FONT_STACKS,
     MIN_SECTION_SCALE,
     MAX_SECTION_SCALE,
@@ -25,15 +27,16 @@
 
   type Props = {
     theme: StageTheme;
-    /** False on a pedal without an expression jack, where Stage shows no
-     *  VOL / WAH readout. Only the row is hidden; its saved style is kept. */
-    showExpression?: boolean;
+    /** False outside a Kemper profile, where Stage shows neither the VOL / WAH
+     *  readout nor the Morph bar. Only the rows are hidden; their saved
+     *  styles are kept. */
+    showKemper?: boolean;
     onchange: (theme: StageTheme) => void;
     onclose: () => void;
   };
-  let { theme, showExpression = true, onchange, onclose }: Props = $props();
-  let sections = $derived(showExpression ? STAGE_SECTIONS
-    : STAGE_SECTIONS.filter((section) => section !== "expression"));
+  let { theme, showKemper = true, onchange, onclose }: Props = $props();
+  let sections = $derived(showKemper ? STAGE_SECTIONS
+    : STAGE_SECTIONS.filter((section) => !KEMPER_SECTIONS.has(section)));
 
   const fontOptions = Object.entries(FONT_STACKS).map(([label, value]) => ({ label, value }));
   const globalFontOptions = [{ value: "", label: "Inter (default)" }, ...fontOptions];
@@ -47,6 +50,8 @@
     switchLabel: "Switch label",
     switchId: "Switch ID",
     expression: "VOL / WAH",
+    morph: "Morph bar",
+    morphControls: "Morph controls",
   };
 
   // Starting point shown in the color picker when a section has no
@@ -61,6 +66,8 @@
     switchLabel: "#ffffff",
     switchId: "#6a7280",
     expression: "#ffffff",
+    morph: "#ffffff",
+    morphControls: "#edf5f7",
   };
 
   function updateSection(section: StageSection, patch: Partial<{ fontFamily: string; color: string; scale: number }>) {
@@ -137,6 +144,7 @@
         </div>
         </div>
 
+        {#if !COLORLESS_SECTIONS.has(section)}
         <div class="theme-panel__color">
         <span class="theme-panel__field-label">Color</span>
         <ColorField
@@ -145,6 +153,7 @@
           onchange={(hex) => updateSection(section, { color: hex })}
         />
         </div>
+        {/if}
 
         <label class="theme-panel__field">
         <span class="theme-panel__scale-label">Size <span class="theme-panel__scale-value">{Math.round((s.scale ?? DEFAULT_SECTION_SCALE) * 100)}%</span></span>

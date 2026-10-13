@@ -18,6 +18,23 @@ describe("Stage Morph", () => {
     await rerender({ context: context(-1, 2) });
     expect(screen.getByRole("meter")).toHaveAttribute("aria-valuetext", "Unknown");
     expect(screen.getByRole("meter")).not.toHaveAttribute("aria-valuenow");
+    // Spelled out: a bare "?" was not understood on stage.
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.queryByText("?")).not.toBeInTheDocument();
+  });
+
+  it("opens and closes its controls from a labelled toggle, not a bare +", async () => {
+    render(StageMorph, { props: props() });
+    const toggle = screen.getByRole("button", { name: "Morph controls" });
+    expect(toggle).toHaveTextContent("Controls");
+    expect(toggle).not.toHaveTextContent("+");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("slider", { name: "Morph position" })).toBeInTheDocument();
+    await fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
   it("sends explicit endpoints and percentage, with controls hidden until opened", async () => {
@@ -60,6 +77,28 @@ describe("Stage Morph", () => {
     expect(p.oncommand).not.toHaveBeenCalled();
   });
 
+  it("explains only a lasting not-ready state, so a rig change does not move the layout", async () => {
+    vi.useFakeTimers();
+    try {
+      const notice = "Connect the Kemper and wait for the current rig to be ready.";
+      const { rerender } = render(StageMorph, { props: props() });
+      await fireEvent.click(screen.getByRole("button", { name: "Morph controls" }));
+      // A rig change: not ready for about half a second, then ready again.
+      await rerender({ ready: false, identity: "kemper/1/2/3" });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
+      await rerender({ ready: true });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
+      // The Kemper goes away: explained once the state lasts.
+      await rerender({ ready: false });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(screen.getByText(notice)).toBeInTheDocument();
+      await rerender({ ready: true });
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("shows failures without claiming the requested position succeeded", async () => {
     const p = props(); p.oncommand.mockRejectedValue(new Error("midi_send_failed"));
     render(StageMorph, { props: p });
@@ -77,7 +116,9 @@ describe("Stage Morph", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Base", exact: true }));
     await rerender({ identity: "kemper/1/2/3", context: context(-1, 3) });
     reject(new Error("old request"));
-    await fireEvent.click(screen.getByRole("button", { name: "Morph controls" }));
+    // The panel stays open across the rig change; only the request is orphaned.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Base", exact: true })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Morph controls" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("meter")).toHaveAttribute("aria-valuetext", "Unknown");
   });

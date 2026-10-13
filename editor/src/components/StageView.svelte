@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from "svelte";
+  import { onMount, onDestroy, tick, untrack } from "svelte";
   import "../lib/stage-surface.css";
   import {
     cmd,
@@ -592,8 +592,64 @@
 
   // Full patch (with bindings) fetched on mount and when deviceInfo changes
   let fullPatch = $state<{ name?: string; bindings?: Binding[] } | null>(null);
-  let patchName = $derived(fullPatch?.name ?? (deviceInfo ? `${deviceInfo.bank}/${deviceInfo.slot}` : "-"));
+  // While GET_PATCH is in flight the saved inventory already names the new
+  // location, so a rig change never flashes a bare "bank/slot" title.
+  let inventoryName = $derived(deviceInfo
+    ? patches.find((p) => p.bank === deviceInfo.bank && p.slot === deviceInfo.slot)?.name : undefined);
+  let patchName = $derived(fullPatch?.name ?? inventoryName
+    ?? (deviceInfo ? `${deviceInfo.bank}/${deviceInfo.slot}` : "-"));
   let bindings = $derived(fullPatch?.bindings ?? []);
+
+  // The previous patch's labels and LED colours while GET_PATCH for a new
+  // location is in flight, so a rig change swaps the grid in one step instead
+  // of blanking every label to "-" first. Display only: input stays disabled
+  // (canActivateSwitch needs fullPatch) and effect state is never computed
+  // from these bindings (isLatchedOn reads the live map), so a new CONTEXT can
+  // never light the previous rig's label. Dropped if the PATCH never comes.
+  const HELD_BINDINGS_MS = 1500;
+  let heldBindings = $state.raw<Binding[] | null>(null);
+  let heldBindingsTimer: ReturnType<typeof setTimeout> | null = null;
+  let displayBindings = $derived(fullPatch ? bindings : heldBindings ?? []);
+
+  function releaseHeldBindings() {
+    if (heldBindingsTimer) clearTimeout(heldBindingsTimer);
+    heldBindingsTimer = null;
+    heldBindings = null;
+  }
+
+  /** Forget the current patch. `hold` keeps its labels on screen until the
+   *  next one arrives (same profile, new or reselected location). */
+  function invalidatePatch(hold: boolean) {
+    if (!hold) releaseHeldBindings();
+    else if (fullPatch) {
+      releaseHeldBindings();
+      heldBindings = fullPatch.bindings ?? [];
+      heldBindingsTimer = setTimeout(() => { heldBindingsTimer = null; heldBindings = null; }, HELD_BINDINGS_MS);
+    }
+    fullPatch = null;
+  }
+
+  // Readouts that do not belong to one rig. They stay until the new rig's
+  // first CONTEXT replaces them (about 16 ms on the Pi rig), so BPM does not
+  // vanish and reflow the header, and an open or dismissed tuner does not
+  // close and reopen. Everything rig-specific (effect states, rig name and
+  // number, expression mode, Morph) is cleared as before.
+  const HEADER_CARRY_KEYS = [
+    "kemper_bpm",
+    "tuner", "kemper_tuner", "tuner_note", "kemper_tuner_note", "tuner_deviance", "kemper_tuner_deviance",
+  ];
+  function carriedHeader(previous: Record<string, unknown>): Record<string, unknown> {
+    const kept: Record<string, unknown> = {};
+    for (const key of HEADER_CARRY_KEYS) if (key in previous) kept[key] = previous[key];
+    return kept;
+  }
+
+  // Bank and rig readout text from before a rig change, shown only where the
+  // reset leaves a readout empty (a label on a Kemper field) until the new
+  // rig's first CONTEXT: one text change instead of a blank frame between the
+  // two numbers. A value read from the Captain's own position still updates
+  // at once, and nothing is guessed from it.
+  let heldLabels = $state.raw<{ bank: string; rig: string } | null>(null);
 
   // Live latched state per switch (from binding_fired toggle_on / toggle_off)
   let latched = $state<Record<string, boolean>>({});
@@ -632,6 +688,11 @@
   // Remembered across the context reset of a patch switch, so the badge does
   // not flicker; the next full CONTEXT settles it.
   let kemperProfile = $state(false);
+  // Same memory for the Morph bar: firmware sends its keys in every Kemper
+  // CONTEXT, but the patch-switch reset deletes them for one message. Gating
+  // the bar on the key unmounted it on every rig change, so the switch grid
+  // grew and shrank back (2026-10-13 report).
+  let morphAvailable = $state(false);
   let expressionMode = $derived(connected
     && (context.expression_mode === "WAH" || context.expression_mode === "VOL" || context.expression_mode === "OFF")
     ? context.expression_mode : "---");
@@ -669,8 +730,8 @@
     };
     const fallbackRigField = context.kemper_rig_in_bank != null ? "kemper_rig_in_bank" : "slot";
     return {
-      bank: format(["bank", "kemper_bank"], "bank", "BANK "),
-      rig: format(["kemper_rig_in_bank", "kemper_rig", "slot"], fallbackRigField, "RIG "),
+      bank: format(["bank", "kemper_bank"], "bank", "BANK ") || heldLabels?.bank || "",
+      rig: format(["kemper_rig_in_bank", "kemper_rig", "slot"], fallbackRigField, "RIG ") || heldLabels?.rig || "",
     };
   });
 
@@ -680,13 +741,24 @@
     return sw.toUpperCase();
   }
 
-  function bindingForSwitch(sw: string): Binding | undefined {
+  function lastBindingFor(list: Binding[], sw: string): Binding | undefined {
     // The firmware's compiled switch table keeps the last configured binding.
     // Mirror that same action even if an imported patch contains duplicates.
-    for (let index = bindings.length - 1; index >= 0; --index) {
-      if (bindings[index].switch === sw) return bindings[index];
+    for (let index = list.length - 1; index >= 0; --index) {
+      if (list[index].switch === sw) return list[index];
     }
     return undefined;
+  }
+
+  /** The live binding: input, optimistic feedback and effect state. */
+  function bindingForSwitch(sw: string): Binding | undefined {
+    return lastBindingFor(bindings, sw);
+  }
+
+  /** What the card shows: the live binding, or the held previous one while a
+   *  rig change waits for its PATCH (see heldBindings). */
+  function displayBindingFor(sw: string): Binding | undefined {
+    return lastBindingFor(displayBindings, sw);
   }
 
   function effectLabel(b: Binding | undefined): string {
@@ -818,7 +890,7 @@
    *  which stays the source of truth for what's actually engaged). */
   function switchVisual(sw: string): { active: boolean; color: string | null } {
     if (preselectedBank) return { active: false, color: null };
-    const b = bindingForSwitch(sw);
+    const b = displayBindingFor(sw);
     const navPatch = b ? null : navPatchFor(sw);
     const navSlot = navPatch ? navSlotFor(sw) : null;
     const active = b ? isLatchedOn(sw) : (navSlot !== null && navSlot === deviceInfo?.slot);
@@ -893,7 +965,8 @@
       _linkUp = false;
       // The same patch may have been edited while this browser was offline.
       // Keep input disabled until its bindings have been read on the new link.
-      fullPatch = null;
+      invalidatePatch(false);
+      heldLabels = null;
       latched = {};
       clearKemperReconciles();
       // A reconnect needs a fresh confirmation, not the last pedal mode.
@@ -922,9 +995,20 @@
       _patchLocation = location;
       _patchProfile = profile;
       // Never render a new CONTEXT snapshot against the previous patch's
-      // bindings while GET_PATCH for the new location is in flight.
-      fullPatch = null;
-      if (profileChanged || contextLocation !== location) context = {};
+      // bindings while GET_PATCH for the new location is in flight. Within one
+      // profile the old labels stay visible (dark, inert) until it returns.
+      // Untracked: reading fullPatch or context here must not make every
+      // later PATCH or CONTEXT re-run this effect and request GET_PATCH again.
+      untrack(() => {
+        invalidatePatch(!profileChanged);
+        if (profileChanged) {
+          context = {};
+          heldLabels = null;
+        } else if (contextLocation !== location) {
+          heldLabels = screenLabels;
+          context = carriedHeader(context);
+        }
+      });
       latched = {};
       if (connected && location) pollContext();
     }
@@ -972,9 +1056,11 @@
           }
           const isPartial = (msg as Record<string, unknown>).partial === true;
           if (!isPartial || "kemper_mode" in incoming) kemperProfile = typeof incoming.kemper_mode === "string";
+          if (!isPartial || "kemper_morph_source" in incoming) morphAvailable = "kemper_morph_source" in incoming;
           context = isPartial
             ? { ...context, ...accepted }
             : { ...accepted, ...preservedOptimistic };
+          heldLabels = null;
         } else if (msg.type === "PATCH"
             && (!deviceInfo?.stage_input || !deviceInfo.profile
               || (!msg.profile && msg.active_profile === deviceInfo.profile))
@@ -982,6 +1068,7 @@
               ? `${deviceInfo.bank}/${deviceInfo.slot}` : ""))) {
           const p = (msg as unknown as { patch: { name?: string; bindings?: Binding[] } }).patch;
           fullPatch = p;
+          releaseHeldBindings();
           // Location/profile changes already clear latched state above.
           // A metadata read of this same patch must preserve binding_fired
           // feedback that arrived just before its PATCH reply.
@@ -1005,8 +1092,9 @@
             _announcedPatchLocation = _patchLocation;
             contextLocation = _patchLocation;
             clearKemperReconciles();
-            context = {};
-            fullPatch = null;
+            heldLabels = screenLabels;
+            context = carriedHeader(context);
+            invalidatePatch(true);
             latched = {};
             // A rig change does not guarantee that the Kemper will emit every
             // block state again. In particular, selecting the already-active
@@ -1049,6 +1137,7 @@
     for (const unsubscribe of preselectionSubscriptions.splice(0)) unsubscribe();
     if (unsubFw) { unsubFw(); unsubFw = null; }
     clearKemperReconciles();
+    releaseHeldBindings();
   }
 </script>
 
@@ -1072,7 +1161,7 @@
     {/each}
   </span>
   {#if showThemeEditor}
-    <StageThemeEditor theme={stageTheme} showExpression={kemperProfile}
+    <StageThemeEditor theme={stageTheme} showKemper={kemperProfile || morphAvailable}
       onchange={handleThemeChange} onclose={() => (showThemeEditor = false)} />
   {/if}
   {#if showBankPicker}
@@ -1133,7 +1222,7 @@
     </div>
   </div>
 
-  {#if "kemper_morph_source" in context}
+  {#if morphAvailable}
     <StageMorph {context} {connected}
       ready={connected && !!deviceInfo?.profile && context.kemper_morph_ready === "on"
         && !preselectedBank && !bankChangePending && pendingSwitch === null}
@@ -1173,7 +1262,7 @@
       <div class="stage__pedal-row"
         class:stage__pedal-row--lower={rowIndex === rows.length - 1}>
         {#each row as sw}
-          {@const b = preselectedBank ? null : bindingForSwitch(sw)}
+          {@const b = preselectedBank ? null : displayBindingFor(sw)}
           {@const navPatch = preselectedBank ? preselectionPatchFor(sw) : b ? null : navPatchFor(sw)}
           {@const navSlot = navPatch ? (preselectedBank ? preselectionSlots.get(sw)! : navSlotFor(sw)) : null}
           {@const active = !preselectedBank && (b ? isLatchedOn(sw) : (navSlot !== null && navSlot === deviceInfo?.slot))}

@@ -1943,12 +1943,15 @@ describe("StageView", () => {
       // when the current slot doesn't exist there).
       await rerender({ deviceInfo: { ...DEVICE, bank: 2, slot: 4 } });
 
-      // The old patch must disappear atomically with the location change.
-      // Applying new CONTEXT block values to the old binding map is worse
-      // than a short neutral state while GET_PATCH is in flight.
+      // The old patch stops being live atomically with the location change:
+      // its title goes, its card is inert and no effect state is computed
+      // from it. Its label stays on the dark card while GET_PATCH is in
+      // flight, so the grid swaps once instead of blanking to "-" first.
       expect(container.querySelector(".stage__rig-name")).toHaveTextContent("2/4");
       expect(container.querySelector(".stage__rig-name")).not.toHaveTextContent("Acoustic");
-      expect(labelOf(switchById(container, "1"))).toBe("-");
+      expect(labelOf(switchById(container, "1"))).toBe("EQ");
+      expect(switchById(container, "1")).toBeDisabled();
+      expect(switchById(container, "1")).toHaveAttribute("aria-pressed", "false");
 
       // GET_PATCH for the new location must have been requested...
       expect(invokeMock).toHaveBeenCalledWith(
@@ -2074,7 +2077,7 @@ describe("StageView", () => {
       const { container } = renderStage();
       await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
-      expect(screen.getAllByRole("combobox")).toHaveLength(8);
+      expect(screen.getAllByRole("combobox")).toHaveLength(10);
       expect(container.querySelector(".theme-panel select")).toBeNull();
 
       await chooseFont("Default font", FONT_STACKS.Serif);
@@ -2159,28 +2162,57 @@ describe("StageView", () => {
       expect(stageEl.style.getPropertyValue("--stage-tuner-color").trim()).toBe("");
     });
 
-    it("hides only the VOL / WAH row outside a Kemper profile and keeps that section's saved style", async () => {
-      localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({ version: 2, sections: { expression: { color: "#abcdef" } } }));
+    it("hides only the Kemper rows outside a Kemper profile and keeps their saved styles", async () => {
+      localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({ version: 2, sections: {
+        expression: { color: "#abcdef" }, morph: { scale: 1.5 },
+      } }));
       const { container } = renderStage({ hardware: CAPTAIN_10 });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
-      expect(screen.queryByRole("group", { name: "VOL / WAH appearance" })).not.toBeInTheDocument();
+      for (const name of ["VOL / WAH", "Morph bar", "Morph controls"]) {
+        expect(screen.queryByRole("group", { name: `${name} appearance` })).not.toBeInTheDocument();
+      }
       expect(screen.getByRole("group", { name: "Switch ID appearance" })).toBeInTheDocument();
       expect(screen.getAllByRole("combobox")).toHaveLength(7);
 
       await fireEvent.input(container.querySelector('input[title="Rig name color"]')!, { target: { value: "#123456" } });
       const stage = container.querySelector(".stage") as HTMLElement;
       expect(stage.style.getPropertyValue("--stage-expression-color")).toBe("#abcdef");
+      expect(stage.style.getPropertyValue("--stage-morph-scale")).toBe("3");
       expect(JSON.parse(localStorage.getItem("BOSUN_STAGE_THEME")!).sections).toEqual({
-        expression: { color: "#abcdef" }, rigName: { color: "#123456" },
+        expression: { color: "#abcdef" }, morph: { scale: 1.5 }, rigName: { color: "#123456" },
       });
     });
 
-    it("lists the VOL / WAH row on a Kemper profile, also on a Mini 6", async () => {
+    it("lists the VOL / WAH and Morph rows on a Kemper profile, also on a Mini 6", async () => {
       renderStage({ hardware: MINI_6 });
       await pushFirmwareMessage({ type: "CONTEXT", context: { kemper_mode: "performance" } });
       await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
       expect(screen.getByRole("group", { name: "VOL / WAH appearance" })).toBeInTheDocument();
-      expect(screen.getAllByRole("combobox")).toHaveLength(8);
+      expect(screen.getByRole("group", { name: "Morph bar appearance" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Morph controls appearance" })).toBeInTheDocument();
+      expect(screen.getAllByRole("combobox")).toHaveLength(10);
+    });
+
+    it("sizes the Morph bar and its controls separately; the bar has no color of its own", async () => {
+      const { container } = renderStage();
+      await pushFirmwareMessage({ type: "CONTEXT", context: {
+        kemper_mode: "performance", kemper_morph_source: "unknown", kemper_morph_ready: "off",
+      } });
+      await fireEvent.click(screen.getByRole("button", { name: "Stage appearance" }));
+      const bar = screen.getByRole("group", { name: "Morph bar appearance" });
+      const controls = screen.getByRole("group", { name: "Morph controls appearance" });
+      expect(within(bar).queryByTitle("Morph bar color")).not.toBeInTheDocument();
+      expect(within(controls).getByTitle("Morph controls color")).toBeInTheDocument();
+
+      await fireEvent.input(within(bar).getByRole("slider", { name: "Morph bar size" }), { target: { value: "1.5" } });
+      await fireEvent.input(within(controls).getByRole("slider", { name: "Morph controls size" }), { target: { value: "0.75" } });
+      const stage = container.querySelector(".stage") as HTMLElement;
+      // 100% writes 2 (the shared Stage baseline), so these are 150% and 75%.
+      expect(stage.style.getPropertyValue("--stage-morph-scale")).toBe("3");
+      expect(stage.style.getPropertyValue("--stage-morph-controls-scale")).toBe("1.5");
+      expect(JSON.parse(localStorage.getItem("BOSUN_STAGE_THEME")!).sections).toEqual({
+        morph: { scale: 1.5 }, morphControls: { scale: 0.75 },
+      });
     });
   });
 
@@ -2744,6 +2776,169 @@ describe("StageView", () => {
         context: { bank: 1, slot: 1, kemper_rig_name: "ACOUSTIC" },
       });
       expect(switchById(container, "4")).not.toHaveClass("stage__switch--active");
+    });
+
+    // 2026-10-13 report: a rig change looked like a full reload. The Morph bar
+    // vanished for one message (so the grid grew and shrank back), every
+    // label blanked to "-" and the title fell back to bank/slot. Real order on
+    // the Pi rig: patch_switched, full CONTEXT +16 ms, PATCH, settled +500 ms.
+    describe("rig change without a reload", () => {
+      const KEMPER_RIG = (slot: number, extra: Record<string, unknown> = {}) => ({
+        bank: 1, slot, kemper_mode: "browse", kemper_generation: slot,
+        kemper_morph_source: "unknown", kemper_morph_value: -1, kemper_morph_revision: 1,
+        kemper_morph_ready: "off", expression_mode: "", patch_name: slot === 1 ? "ACOUSTIC" : "CLEAN",
+        ...extra,
+      });
+      const inventory = [patch(1, 1, "ACOUSTIC"), patch(1, 2, "CLEAN")];
+
+      async function onAcoustic() {
+        const view = renderStage({ deviceInfo: { ...DEVICE, bank: 1, slot: 1 }, patches: inventory });
+        await pushFirmwareMessage({
+          type: "PATCH", bank: 1, slot: 1,
+          patch: { name: "ACOUSTIC", bindings: [blockBinding("up", "Reverb", "SPACE")] },
+        });
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(1, {
+          kemper_rig_name: "ACOUSTIC", kemper_morph_ready: "on", kemper_bpm: 120,
+          expression_mode: "WAH", kemper_block_Reverb: "on",
+        }) });
+        return view;
+      }
+
+      async function switchToClean(rerender: (p: Partial<StageProps>) => Promise<void>) {
+        // App/KioskApp update deviceInfo from the same event.
+        await pushFirmwareMessage({ type: "EVENT", event: "patch_switched", bank: 1, slot: 2, source: "editor" });
+        await rerender({ deviceInfo: { ...DEVICE, bank: 1, slot: 2 } });
+      }
+
+      it("keeps the Morph bar mounted, showing an unknown position until the new rig reports", async () => {
+        const { container, rerender } = await onAcoustic();
+        const bar = container.querySelector(".morph");
+        expect(bar).not.toBeNull();
+        await switchToClean(rerender);
+        expect(container.querySelector(".morph")).toBe(bar);
+        expect(screen.getByRole("meter")).toHaveAttribute("aria-valuetext", "Unknown");
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2) });
+        expect(container.querySelector(".morph")).toBe(bar);
+        // A full snapshot without Morph keys (another profile) removes it.
+        await pushFirmwareMessage({ type: "CONTEXT", context: { bank: 1, slot: 2 } });
+        expect(container.querySelector(".morph")).toBeNull();
+      });
+
+      it("keeps the Morph controls open across the rig change", async () => {
+        const { rerender } = await onAcoustic();
+        await fireEvent.click(screen.getByRole("button", { name: "Morph controls" }));
+        await switchToClean(rerender);
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2) });
+        expect(screen.getByRole("button", { name: "Morph controls" })).toHaveAttribute("aria-expanded", "true");
+        // Not ready until the Kemper has settled on the new rig.
+        expect(screen.getByRole("slider", { name: "Morph position" })).toBeDisabled();
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, { kemper_morph_ready: "on" }) });
+        expect(screen.getByRole("button", { name: "Morph controls" })).toHaveAttribute("aria-expanded", "true");
+      });
+
+      it("names the new rig at once and keeps BPM, without guessing rig-specific state", async () => {
+        const { container, rerender } = await onAcoustic();
+        await switchToClean(rerender);
+        // Title from the saved inventory, not "1/2" or the old rig name.
+        expect(container.querySelector(".stage__rig-name")).toHaveTextContent("CLEAN");
+        expect(container.querySelector(".stage__rig-number")).toHaveTextContent("RIG 2");
+        expect(container.querySelector(".stage__bpm")).toHaveTextContent("120");
+        expect(container.querySelector(".stage__expression")).toHaveTextContent("---");
+
+        // First CONTEXT: firmware's patch_name until the Kemper names the rig.
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, { kemper_bpm: 96 }) });
+        expect(container.querySelector(".stage__rig-name")).toHaveTextContent("CLEAN");
+        expect(container.querySelector(".stage__bpm")).toHaveTextContent("96");
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, {
+          kemper_rig_name: "Clean Deluxe", kemper_bpm: 96, expression_mode: "VOL",
+        }) });
+        expect(container.querySelector(".stage__rig-name")).toHaveTextContent("Clean Deluxe");
+        expect(container.querySelector(".stage__expression")).toHaveTextContent("VOL");
+      });
+
+      it("keeps a Kemper rig readout until the new rig's first CONTEXT instead of blanking it", async () => {
+        const { container, rerender } = renderStage({
+          deviceInfo: { ...DEVICE, bank: 1, slot: 1 }, patches: inventory,
+          device: { tft_labels: { kemper_rig_in_bank: { prefix: "RIG " } } },
+        });
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(1, { kemper_rig_in_bank: 1 }) });
+        const rig = () => container.querySelector(".stage__rig-number");
+        expect(rig()).toHaveTextContent("RIG 1");
+        await switchToClean(rerender);
+        // The Kemper field is gone until the Kemper reports; the Captain slot
+        // is not substituted for it, so the previous text stays one message.
+        expect(rig()).toHaveTextContent("RIG 1");
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, { kemper_rig_in_bank: 2 }) });
+        expect(rig()).toHaveTextContent("RIG 2");
+        // Once a snapshot has arrived, a missing field is shown as unknown again.
+        await pushFirmwareMessage({ type: "CONTEXT", partial: true, context: { kemper_rig_in_bank: null } });
+        expect(rig()?.textContent).toBe("");
+      });
+
+      it("keeps a dismissed tuner dismissed across the rig change", async () => {
+        const { container, rerender } = await onAcoustic();
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(1, {
+          kemper_tuner: "on", kemper_tuner_note: "E", kemper_tuner_deviance: 8192,
+        }) });
+        expect(container.querySelector(".tuner-screen__note")).toHaveTextContent("E");
+        await fireEvent.click(screen.getByRole("button", { name: "Close tuner" }));
+        expect(container.querySelector(".tuner-screen__note")).toBeNull();
+        await switchToClean(rerender);
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, {
+          kemper_tuner: "on", kemper_tuner_note: "E", kemper_tuner_deviance: 8192,
+        }) });
+        expect(container.querySelector(".tuner-screen__note")).toBeNull();
+      });
+
+      it("holds the previous labels dark and inert until the new PATCH, then swaps in one step", async () => {
+        const { container, rerender } = await onAcoustic();
+        expect(switchById(container, "UP")).toHaveClass("stage__switch--active");
+        await switchToClean(rerender);
+        const up = switchById(container, "UP")!;
+        expect(labelOf(up)).toBe("SPACE");
+        expect(up).toHaveClass("stage__switch--bound");
+        expect(up).not.toHaveClass("stage__switch--active");
+        expect(up).toBeDisabled();
+
+        // A new rig's block state never lights the held previous label.
+        await pushFirmwareMessage({ type: "CONTEXT", context: KEMPER_RIG(2, { kemper_block_Reverb: "on" }) });
+        expect(labelOf(up)).toBe("SPACE");
+        expect(up).not.toHaveClass("stage__switch--active");
+
+        await pushFirmwareMessage({
+          type: "PATCH", bank: 1, slot: 2,
+          patch: { name: "CLEAN", bindings: [blockBinding("3", "X", "FLANG")] },
+        });
+        expect(labelOf(switchById(container, "UP"))).toBe("-");
+        expect(switchById(container, "UP")).not.toHaveClass("stage__switch--bound");
+        expect(labelOf(switchById(container, "3"))).toBe("FLANG");
+      });
+
+      it("drops the held labels if the new PATCH never arrives", async () => {
+        const { container, rerender } = await onAcoustic();
+        // The prop path (no event) holds too; pushFirmwareMessage polls with
+        // real timers, so drive this one without it.
+        vi.useFakeTimers();
+        await rerender({ deviceInfo: { ...DEVICE, bank: 1, slot: 2 } });
+        expect(labelOf(switchById(container, "UP"))).toBe("SPACE");
+        await vi.advanceTimersByTimeAsync(1499);
+        expect(labelOf(switchById(container, "UP"))).toBe("SPACE");
+        await vi.advanceTimersByTimeAsync(1);
+        expect(labelOf(switchById(container, "UP"))).toBe("-");
+      });
+
+      it("does not hold the previous profile's labels", async () => {
+        const { container, rerender } = renderStage({
+          deviceInfo: { ...DEVICE, bank: 1, slot: 1, profile: "kemper", stage_input: true },
+        });
+        await pushFirmwareMessage({
+          type: "PATCH", bank: 1, slot: 1, profile: "", active_profile: "kemper",
+          patch: { name: "ACOUSTIC", bindings: [blockBinding("up", "Reverb", "SPACE")] },
+        });
+        expect(labelOf(switchById(container, "UP"))).toBe("SPACE");
+        await rerender({ deviceInfo: { ...DEVICE, bank: 1, slot: 1, profile: "midi", stage_input: true } });
+        expect(labelOf(switchById(container, "UP"))).toBe("-");
+      });
     });
   });
 });

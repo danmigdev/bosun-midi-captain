@@ -16,11 +16,21 @@ export type StageSection =
   | "tuner"
   | "switchLabel"
   | "switchId"
-  | "expression";
+  | "expression"
+  | "morph"
+  | "morphControls";
 
 export const STAGE_SECTIONS: StageSection[] = [
-  "rigName", "bank", "bpm", "tuner", "switchLabel", "switchId", "expression",
+  "rigName", "bank", "bpm", "tuner", "switchLabel", "switchId", "expression", "morph", "morphControls",
 ];
+
+// Shown only on a Kemper profile, where Stage has the VOL / WAH readout and
+// the Morph bar. Their saved styles are kept on other profiles.
+export const KEMPER_SECTIONS: ReadonlySet<StageSection> = new Set(["expression", "morph", "morphControls"]);
+
+// The Morph bar's BASE / MORPH colours name the two ends of its blue-to-red
+// fill, so that section has font and size only.
+export const COLORLESS_SECTIONS: ReadonlySet<StageSection> = new Set(["morph"]);
 
 // CSS custom-property key per section, matching the kebab-case class names
 // already used in StageView.svelte (.stage__rig-name, .stage__switch-id, ...).
@@ -32,6 +42,8 @@ const SECTION_CSS_KEY: Record<StageSection, string> = {
   switchLabel: "switch-label",
   switchId: "switch-id",
   expression: "expression",
+  morph: "morph",
+  morphControls: "morph-controls",
 };
 
 export type StageSectionStyle = {

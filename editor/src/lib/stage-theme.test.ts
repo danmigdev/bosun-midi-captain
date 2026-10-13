@@ -69,6 +69,15 @@ describe("readSavedStageTheme", () => {
     expect(readSavedStageTheme().sections).toEqual({ rigName: { scale: 0.1 }, bank: { scale: 5 } });
   });
 
+  it("keeps the Morph bar and Morph controls sections", () => {
+    saveStageTheme({ version: 2, sections: {
+      morph: { fontFamily: "serif", scale: 1.5 }, morphControls: { color: "#abcdef", scale: 0.5 },
+    } });
+    expect(readSavedStageTheme().sections).toEqual({
+      morph: { fontFamily: "serif", scale: 1.5 }, morphControls: { color: "#abcdef", scale: 0.5 },
+    });
+  });
+
   it("converts old saved percentages without changing their rendered sizes or migrating twice", () => {
     localStorage.setItem("BOSUN_STAGE_THEME", JSON.stringify({
       version: 1,
@@ -148,6 +157,7 @@ describe("stageThemeToCssVars", () => {
     const defaults = [
       "--stage-rig-name-scale: 2", "--stage-bank-scale: 2", "--stage-bpm-scale: 2",
       "--stage-tuner-scale: 2", "--stage-switch-label-scale: 2", "--stage-switch-id-scale: 2", "--stage-expression-scale: 2",
+      "--stage-morph-scale: 2", "--stage-morph-controls-scale: 2",
     ].join("; ");
     expect(stageThemeToCssVars(readSavedStageTheme())).toBe(defaults);
     expect(stageThemeToCssVars(resetAllStageTheme())).toBe(defaults);
@@ -173,6 +183,8 @@ describe("stageThemeToCssVars", () => {
         tuner: { color: "#c" },
         switchLabel: { color: "#d" },
         switchId: { color: "#e" },
+        morph: { fontFamily: "serif", scale: 1.5 },
+        morphControls: { color: "#f", scale: 0.5 },
       },
     });
     expect(css).toBe([
@@ -190,6 +202,10 @@ describe("stageThemeToCssVars", () => {
       "--stage-switch-id-color: #e",
       "--stage-switch-id-scale: 2",
       "--stage-expression-scale: 2",
+      "--stage-morph-font: serif",
+      "--stage-morph-scale: 3",
+      "--stage-morph-controls-color: #f",
+      "--stage-morph-controls-scale: 1",
     ].join("; "));
   });
 });
