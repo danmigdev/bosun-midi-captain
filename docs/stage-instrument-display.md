@@ -10,6 +10,11 @@ Active effects and the selected rig have a stronger background colour. On an
 interactive Stage page, tap or click a switch tile to operate its configured
 action. The VNC viewer is read-only.
 
+When the rig changes, the layout stays put: the new rig's name appears at once,
+the switch tiles keep their previous labels, unlit and inactive, until the new
+rig's assignments arrive (a fraction of a second), and effects light up as the
+Kemper reports them.
+
 Use **+ / -** to browse banks or tap **BANK** to open the bank grid. See
 [bank selection](stage-bank-selection.md) to choose immediate loading or
 preselection.
@@ -60,6 +65,11 @@ scroll when needed. Text sizes default to **100%**, with a range of **10% to
 
 The **VOL / WAH** section controls the expression label's font, colour and size
 (10%–500%). This indicator displays text only.
+
+On Kemper profiles, **Morph bar** sets the font and size of the bar's BASE,
+MORPH and position text, and **Morph controls** the font, colour and size of the
+panel opened by **Controls**. BASE and MORPH keep their blue and red, the two
+ends of the bar. See [Morph controls and display](morph.md).
 
 **BANK**, **RIG** and **VOL / WAH** use the same base text size in both landscape
 and portrait. Their separate appearance settings still allow different fonts

@@ -7,9 +7,10 @@ Bosun controls the Morph position/button; it does not edit those sound parameter
 
 ## Stage
 
-A thin **BASE → MORPH** bar appears below the header for a Kemper profile on
-supported firmware. It stays separate from the VOL/WAH indicator.
-Click or tap the bar to show its optional controls:
+A **BASE → MORPH** bar appears below the header for a Kemper profile on
+supported firmware. It stays separate from the VOL/WAH indicator and stays in
+place while the rig changes. Tap **Controls** at its right end to show or hide
+its optional controls; they stay open across rig changes:
 
 - **Base:** send position 0%.
 - **Morph:** send position 100%.
@@ -30,7 +31,7 @@ not measured progress, an acknowledgement from the Kemper, or confirmation that
 the rig contains morphed parameters. MIDI's 128 positions are rounded to a whole
 percentage for display.
 
-**?** means the position cannot be established. Bosun clears the indication on
+**Unknown** means the position cannot be established. Bosun clears the indication on
 rig/profile changes, detected external Morph messages, a Morph Button command,
 failed MIDI sends, lost Kemper communication and reconnection. It never animates
 an invented rise/fall ramp. A control change that the Kemper does not report can
@@ -42,7 +43,13 @@ not poll that parameter or use it as confirmed Morph progress.
 [Kemper's response about Morph feedback](https://forum.kemper-amps.com/forum/thread/64812-expose-morph-state-in-midi-sysex/).
 
 Stage rejects commands for an old profile or rig generation and disables controls
-while the Kemper rig is unavailable. A hub request for context after a Morph
+while the Kemper rig is unavailable. While a new rig loads (about half a second)
+the controls are simply disabled; if the rig stays unavailable, a line explains
+why.
+
+The **Morph bar** and **Morph controls** sections of
+[Stage appearance](stage-instrument-display.md#appearance) set the size and font of
+the bar text (BASE, MORPH and the position) and of the controls separately. A hub request for context after a Morph
 command is ordered after that command.
 
 ## Captain footswitch

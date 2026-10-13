@@ -23,9 +23,9 @@ the MIDI bridge; a Pi shares the Captain connection across the local network.
 
 ## Download and install
 
-These instructions cover **Bosun 0.8.2**. Download the matching packages from
+These instructions cover **Bosun 0.8.3**. Download the matching packages from
 [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
-See the [release notes](docs/releases/0.8.2.md).
+See the [release notes](docs/releases/0.8.3.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ See the [release notes](docs/releases/0.8.2.md).
 [illustrated setup guide and FAQ](docs/first-setup.md). It covers six
 configurations, including Android as hub and a Pi with an HDMI display.
 The same wizard is available as an
-[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.2/Bosun-0.8.2-setup-guide.html).
+[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.3/Bosun-0.8.3-setup-guide.html).
 Keep the app, Captain firmware and Pi components on matching releases.
 
 ## Connections
@@ -109,9 +109,9 @@ Stage follows the playing rig, bank, effects and expression mode. Tap a switch
 tile to operate its configured action. Activating the Kemper tuner opens the
 fullscreen tuner automatically.
 
-The **Morph bar** shows the last commanded position as **Set**, or **?** when
-unknown; it does not measure the Kemper's live Morph position. Its controls
-send positions or a Morph Button tap.
+The **Morph bar** shows the last commanded position as **Set**, or **Unknown**
+after a rig change; it does not measure the Kemper's live Morph position.
+**Controls** opens buttons that send positions or a Morph Button tap.
 
 Use the dedicated guides for [Stage appearance and tuner](docs/stage-instrument-display.md),
 [bank selection and preselection](docs/stage-bank-selection.md), and
