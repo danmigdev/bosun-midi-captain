@@ -96,6 +96,10 @@ Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-factory-ins
 if ($LASTEXITCODE -ne 0) { throw 'Build current native installer assets first: bash tools/build-factory-installer.sh' }
 Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-native-update.py') --verify $nativePackage }
 if ($LASTEXITCODE -ne 0) { throw 'Native update package validation failed' }
+# The same release check as release.yml: a package left over from an earlier
+# local build would make Maintenance offer "Update Bosun to <older release>".
+Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/verify-release-version.py') --package $nativePackage }
+if ($LASTEXITCODE -ne 0) { throw 'The bundled firmware is from another release. Rebuild it first: bash tools/build-factory-installer.sh' }
 $nativeDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativePackage).Hash
 
 # Version + product name come from tauri.conf.json (single source of truth).

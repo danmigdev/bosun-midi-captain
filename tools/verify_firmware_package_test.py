@@ -211,6 +211,12 @@ class BuildWiringTests(unittest.TestCase):
         self.assertIn("Remove-Item -Recurse -Force -LiteralPath $stageDir", text)
         self.assertIn("Portable dist directory must not be a link or junction", text)
 
+    def test_portable_package_requires_firmware_from_this_release(self):
+        text = SCRIPT.with_name("package-portable.ps1").read_text(encoding="utf-8")
+        check = text.index("tools/verify-release-version.py') --package $nativePackage")
+        build = text.index("npx tauri build --no-bundle")
+        self.assertLess(check, build)
+
     def test_release_android_job_builds_without_firmware_resources(self):
         workflow = (
             SCRIPT.parent.parent / ".github" / "workflows" / "release.yml"
