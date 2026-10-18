@@ -175,7 +175,7 @@ if (Test-Path $tauriPropsPath) {
 }
 
 Write-Host "`nVersion bump complete: $Version" -ForegroundColor Green
-Write-Host "Next: run the build(s) that actually need it -" -ForegroundColor Cyan
-Write-Host "  tools\native-build.ps1 -Platform rp2040   (then regenerate the firmware update package for $Version)" -ForegroundColor Cyan
-Write-Host "  npm run package:portable   (from editor/, desktop dist)" -ForegroundColor Cyan
-Write-Host "  tools\build-android.ps1 -Deploy   (Android APK)" -ForegroundColor Cyan
+Write-Host "Next: build and install the local test build of $Version (nothing is published) -" -ForegroundColor Cyan
+Write-Host "  powershell -ExecutionPolicy Bypass -File tools\build-dist.ps1" -ForegroundColor Cyan
+Write-Host "  (firmware package in WSL, dist\ portable build, Pi and attached Android device)" -ForegroundColor Cyan
+Write-Host "Push, tag and release only after the manual tests." -ForegroundColor Cyan
