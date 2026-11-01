@@ -23,9 +23,9 @@ the MIDI bridge; a Pi shares the Captain connection across the local network.
 
 ## Download and install
 
-These instructions cover **Bosun 0.8.4**. Download the matching packages from
+These instructions cover **Bosun 0.8.5**. Download the matching packages from
 [GitHub Releases](https://github.com/danmigdev/bosun-midi-captain/releases).
-See the [release notes](docs/releases/0.8.4.md).
+See the [release notes](docs/releases/0.8.5.md).
 
 | System | Package | Installation |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ See the [release notes](docs/releases/0.8.4.md).
 [illustrated setup guide and FAQ](docs/first-setup.md). It covers six
 configurations, including Android as hub and a Pi with an HDMI display.
 The same wizard is available as an
-[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.4/Bosun-0.8.4-setup-guide.html).
+[offline HTML guide](https://github.com/danmigdev/bosun-midi-captain/releases/download/v0.8.5/Bosun-0.8.5-setup-guide.html).
 Keep the app, Captain firmware and Pi components on matching releases.
 
 ## Connections
