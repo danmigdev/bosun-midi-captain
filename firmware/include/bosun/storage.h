@@ -35,6 +35,19 @@ bosun_store_result_t bosun_store_read_at(const char *path, uint32_t offset, void
  * An interrupted write leaves the old or new complete file, never a partial
  * destination. A stale private temporary file is reclaimed on the next write. */
 bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data, size_t length);
+/* Chunked replacement of path, one call per chunk; no file stays open between
+ * calls. The staged bytes live beside path under the private temporary name,
+ * so a directory holds one stage: hidden from listings and reclaimed by the
+ * next write_atomic there. append writes at offset == staged length (INVALID otherwise);
+ * offset 0 first discards anything staged. stage_read_at is read_at on the
+ * staged bytes and reports their total size (NOT_FOUND: nothing staged).
+ * commit atomically replaces path with the staged file, like write_atomic.
+ * discard succeeds when nothing is staged. */
+bosun_store_result_t bosun_store_stage_append(const char *path, uint32_t offset, const void *data, size_t length);
+bosun_store_result_t bosun_store_stage_read_at(const char *path, uint32_t offset, void *buffer,
+                                               size_t capacity, size_t *length, uint32_t *size);
+bosun_store_result_t bosun_store_stage_commit(const char *path);
+bosun_store_result_t bosun_store_stage_discard(const char *path);
 bosun_store_result_t bosun_store_remove(const char *path);
 /* mkdir creates missing ancestors, and succeeds for an existing directory. */
 bosun_store_result_t bosun_store_mkdir(const char *path);

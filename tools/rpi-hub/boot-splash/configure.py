@@ -61,13 +61,19 @@ def atomic_write(path: Path, content: bytes) -> None:
     previous = path.stat() if path.exists() else None
     descriptor, temporary = tempfile.mkstemp(prefix=".bosun-splash-", dir=path.parent)
     try:
+        mode = previous.st_mode & 0o777 if previous else 0o644
         with os.fdopen(descriptor, "wb") as output:
             output.write(content)
             output.flush()
+            # Stage belongs to the bosun account: change the open file, never a
+            # name it could swap for a symlink before root's chmod/chown.
+            if hasattr(os, "fchown"):
+                os.fchmod(output.fileno(), mode)
+                if previous:
+                    os.fchown(output.fileno(), previous.st_uid, previous.st_gid)
             os.fsync(output.fileno())
-        os.chmod(temporary, previous.st_mode & 0o777 if previous else 0o644)
-        if previous and hasattr(os, "chown"):
-            os.chown(temporary, previous.st_uid, previous.st_gid)
+        if not hasattr(os, "fchown"):
+            os.chmod(temporary, mode)  # Windows fixture tests
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):

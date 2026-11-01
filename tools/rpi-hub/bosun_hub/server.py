@@ -9,7 +9,8 @@ stream:
   - ``ws``    the same protocol lines as WebSocket text messages (one
               line per message) for the Stage kiosk browser, plus
               ``{"type":"HUB","link":...}`` status frames.
-  - ``http``  static file server for the built Stage kiosk bundle.
+  - ``http``  static file server for the built Stage kiosk bundle. A custom
+              startup logo is substituted into ``index.html`` as it is sent.
 
 UDP discovery on :9877 advertises the TCP endpoint without contacting the
 Captain or subscribing to its protocol stream.
@@ -19,12 +20,15 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import io
 import logging
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
+from .boot_logo import BootLogoService, brand_page
 from .hub import Hub
 from .discovery import DISCOVERY_PORT, DiscoveryProtocol, serve_discovery
 
@@ -144,8 +148,32 @@ async def _serve_ws(hub: Hub, host: str, port: int):
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, boot_logo=None, **kwargs) -> None:
+        self.boot_logo = boot_logo  # the base constructor handles the request
+        super().__init__(*args, **kwargs)
+
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         log.debug("http %s - %s", self.address_string(), fmt % args)
+
+    def send_head(self):
+        # Brand the loading screen per request: the installed bundle is never
+        # rewritten, so a custom logo survives Stage redeploys.
+        png = None
+        if self.boot_logo is not None and urlsplit(self.path).path in ("/", "/index.html"):
+            png = self.boot_logo.custom_png()
+        if png is not None:
+            try:
+                page = brand_page(Path(self.directory, "index.html").read_bytes().decode("utf-8"), png)
+            except (OSError, UnicodeDecodeError):
+                page = None
+            if page is not None:
+                body = page.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                return io.BytesIO(body)
+        return super().send_head()
 
     def end_headers(self) -> None:
         # The kiosk is a single local client; make sure it never serves a
@@ -154,8 +182,8 @@ class _QuietHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
-def _start_http(stage_dir: Path, host: str, port: int) -> ThreadingHTTPServer:
-    handler = functools.partial(_QuietHandler, directory=str(stage_dir))
+def _start_http(stage_dir: Path, host: str, port: int, boot_logo=None) -> ThreadingHTTPServer:
+    handler = functools.partial(_QuietHandler, directory=str(stage_dir), boot_logo=boot_logo)
     httpd = ThreadingHTTPServer((host, port), handler)
     threading.Thread(
         target=httpd.serve_forever, name="bosun-hub-http", daemon=True
@@ -177,8 +205,11 @@ async def run(
     ws_port: int = 8081,
     http_port: int = 8080,
     stage_dir: Optional[Path] = None,
+    boot_logo_dir: Optional[Path] = None,
 ) -> None:
     hub = Hub(target)
+    if boot_logo_dir is not None:
+        hub.boot_logo = BootLogoService(hub, boot_logo_dir)
     hub.start()
     servers = []
     discovery: DiscoveryProtocol | None = None
@@ -197,7 +228,7 @@ async def run(
                 host, DISCOVERY_PORT, exc,
             )
         if stage_dir is not None and stage_dir.is_dir():
-            httpd = _start_http(stage_dir, host, http_port)
+            httpd = _start_http(stage_dir, host, http_port, hub.boot_logo)
         elif stage_dir is not None:
             raise FileNotFoundError(f"stage dir {stage_dir} missing")
         await asyncio.Event().wait()

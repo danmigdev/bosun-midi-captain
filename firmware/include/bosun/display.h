@@ -7,6 +7,12 @@
 
 #define BOSUN_DISPLAY_LABELS 16u
 #define BOSUN_DISPLAY_GLYPHS 128u
+/* Global custom startup logo: rows 0..199 of the TFT, row-major RGB565
+ * little-endian words. Absent or unreadable selects the built-in logo. */
+#define BOSUN_BOOT_LOGO_DIR "/config/boot_logo"
+#define BOSUN_BOOT_LOGO_PATH BOSUN_BOOT_LOGO_DIR "/tft.rgb565"
+#define BOSUN_BOOT_LOGO_HEIGHT 200u
+#define BOSUN_BOOT_LOGO_BYTES (BOSUN_DISPLAY_WIDTH * BOSUN_BOOT_LOGO_HEIGHT * 2u)
 typedef enum {
     BOSUN_DISPLAY_OK = 0,
     BOSUN_DISPLAY_UNKNOWN_FIELD = 2, BOSUN_DISPLAY_LIMIT = 4,
@@ -23,20 +29,27 @@ typedef struct {
     bosun_display_label_t labels[BOSUN_DISPLAY_LABELS];
     uint16_t line[BOSUN_DISPLAY_WIDTH];
     uint32_t config_revision, patch_revision, kemper_revision;
-    uint32_t frame_ms, animation_started_ms;
+    uint32_t frame_ms, animation_started_ms, logo_ms;
     char hold_effect[129];
-    uint16_t row, rotation, tuner_x, tuner_color;
-    uint8_t count, brightness;
+    uint16_t row, rotation, tuner_x, tuner_color, logo_duration, logo_run;
+    uint8_t count, brightness, logo;
     unsigned status;
-    bool has_frame, scrolling, tuner;
+    bool has_frame, scrolling, tuner, logo_custom;
 } bosun_display_t;
 
 /* Retains one bounded label snapshot and one 480-byte RGB565 stripe. A call
  * transfers at most eight rows; MIDI processing stays in the outer loop.
  * Every label uses the ROM font. Unknown context fields stay empty instead of
- * displaying orphan prefixes. */
+ * displaying orphan prefixes. The first frame after init is the startup logo
+ * when device.json tft.boot_logo_seconds (0..60, default 2) is nonzero. */
 void bosun_display_init(bosun_display_t *display);
 unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *config,
                               const bosun_kemper_state *kemper, const char *hold_effect,
                               uint32_t now_ms);
+/* Draws the startup logo (custom file or built-in, firmware version below it)
+ * from the next render, restarting one in progress, and holds it duration_ms
+ * after the frame completes. Context changes never end it; skip (a switch
+ * press) does. Either way the layout returns with a full redraw. */
+void bosun_display_logo(bosun_display_t *display, uint16_t duration_ms);
+void bosun_display_skip_logo(bosun_display_t *display);
 #endif

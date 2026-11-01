@@ -328,6 +328,13 @@ void bosun_application_tick(bosun_application_t *app) {
     if (!app->input_length && !app->reboot_pending) bosun_protocol_tick(&app->protocol, now);
     if (app->connected) flush_protocol(app);
     render_leds(app, now);
+    if (app->protocol.logo_preview) {
+        app->protocol.logo_preview = false;
+        bosun_display_logo(&app->display, 3000);
+    }
+    /* Any debounced press ends a startup logo or preview; MIDI never does. */
+    for (unsigned sw = 0; sw < app->runtime.hardware->switch_count; ++sw)
+        if (!app->runtime.switches[sw].stable) { bosun_display_skip_logo(&app->display); break; }
     char hold_effect[129];
     bosun_runtime_hold_effect(&app->runtime, hold_effect, sizeof hold_effect);
     (void)bosun_display_render(&app->display, &app->config,

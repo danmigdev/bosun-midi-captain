@@ -28,6 +28,15 @@ class PiSetupPackageTest(unittest.TestCase):
         self.assertTrue(read, "configure.py no longer reads repository files this way")
         self.assertFalse(read - files, f"missing from the Pi package: {sorted(read - files)}")
 
+    def test_boot_logo_applier_inputs_are_packaged(self):
+        """install-boot-splash.sh installs the root logo applier and its units."""
+        files = set(PACKAGE.setup_files())
+        installer = (TOOLS / "rpi-hub/install-boot-splash.sh").read_text(encoding="utf-8")
+        read = {"tools/rpi-hub/" + name for name in re.findall(r'"\$SRC/([^"]+)"', installer)}
+        self.assertIn("tools/rpi-hub/boot-splash/apply_logo.py", read)
+        self.assertIn("tools/rpi-hub/systemd/bosun-boot-logo.path", read)
+        self.assertFalse(read - files, f"missing from the Pi package: {sorted(read - files)}")
+
     def test_entry_points_are_packaged(self):
         files = set(PACKAGE.setup_files())
         for name in ("tools/rpi-hub/quick-install.sh", "tools/rpi-hub/install.sh",

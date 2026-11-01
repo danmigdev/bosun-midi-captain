@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply a new Bosun startup logo to the early boot pictures
+
+[Path]
+# The hub rewrites this trigger after storing or removing a logo.
+PathChanged=/var/lib/bosun-hub/boot-logo/apply
+Unit=bosun-boot-logo.service
+
+[Install]
+WantedBy=paths.target

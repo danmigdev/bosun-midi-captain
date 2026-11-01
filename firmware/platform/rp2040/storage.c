@@ -126,12 +126,23 @@ bosun_store_result_t bosun_store_format(void) {
     return result(error);
 }
 
-static bosun_store_result_t read_file(const char *path, uint32_t offset, void *buffer,
-                                      size_t capacity, size_t *length, bool complete) {
+/* Private temporary beside path: write_atomic's and the chunked stage's. */
+static const char *staged_path(const char *path, char *out) {
+    const char *slash = strrchr(path, '/');
+    size_t prefix = slash ? (size_t)(slash - path + 1) : 0;
+    memcpy(out, path, prefix);
+    memcpy(out + prefix, temporary_name, sizeof temporary_name);
+    return out;
+}
+
+static bosun_store_result_t read_file(const char *path, bool staged, uint32_t offset, void *buffer,
+                                      size_t capacity, size_t *length, uint32_t *total, bool complete) {
     if (length) *length = 0;
-    if (!length || (!buffer && capacity) || !bosun_store_safe_path(path))
-        return BOSUN_STORE_INVALID;
+    if (!length || (!buffer && capacity) || !bosun_store_safe_path(path) ||
+        (staged && strcmp(path, "/") == 0)) return BOSUN_STORE_INVALID;
     if (!mounted) return BOSUN_STORE_UNAVAILABLE;
+    char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
+    if (staged) path = staged_path(path, temporary);
     lfs_file_t file;
     int error = lfs_file_opencfg(&filesystem, &file, path, LFS_O_RDONLY, &file_config);
     if (error) return result(error);
@@ -154,16 +165,23 @@ static bosun_store_result_t read_file(const char *path, uint32_t offset, void *b
     int close_error = lfs_file_close(&filesystem, &file);
     if (!error) error = close_error;
     if (error) *length = 0;
+    else if (total) *total = (uint32_t)size;
     return result(error);
 }
 
 bosun_store_result_t bosun_store_read(const char *path, void *buffer, size_t capacity, size_t *length) {
-    return read_file(path, 0, buffer, capacity, length, true);
+    return read_file(path, false, 0, buffer, capacity, length, NULL, true);
 }
 
 bosun_store_result_t bosun_store_read_at(const char *path, uint32_t offset, void *buffer,
                                        size_t capacity, size_t *length) {
-    return read_file(path, offset, buffer, capacity, length, false);
+    return read_file(path, false, offset, buffer, capacity, length, NULL, false);
+}
+
+bosun_store_result_t bosun_store_stage_read_at(const char *path, uint32_t offset, void *buffer,
+                                               size_t capacity, size_t *length, uint32_t *size) {
+    if (size) *size = 0;
+    return read_file(path, true, offset, buffer, capacity, length, size, false);
 }
 
 bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data, size_t length) {
@@ -172,10 +190,7 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
     if (length > BOSUN_STORE_FILE_MAX) return BOSUN_STORE_LIMIT;
     if (!writable()) return BOSUN_STORE_UNAVAILABLE;
     char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
-    const char *slash = strrchr(path, '/');
-    size_t prefix = slash ? (size_t)(slash - path + 1) : 0;
-    memcpy(temporary, path, prefix);
-    memcpy(temporary + prefix, temporary_name, sizeof temporary_name);
+    staged_path(path, temporary);
     int error = lfs_remove(&filesystem, temporary);
     if (error && error != LFS_ERR_NOENT) return result(error);
     lfs_file_t file;
@@ -195,6 +210,52 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
     if (!error) error = lfs_rename(&filesystem, temporary, path);
     if (error) (void)lfs_remove(&filesystem, temporary);
     return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_append(const char *path, uint32_t offset, const void *data, size_t length) {
+    if (!bosun_store_safe_path(path) || (!data && length) || strcmp(path, "/") == 0)
+        return BOSUN_STORE_INVALID;
+    if (offset > BOSUN_STORE_FILE_MAX || length > BOSUN_STORE_FILE_MAX - offset) return BOSUN_STORE_LIMIT;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
+    char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
+    staged_path(path, temporary);
+    int error = offset ? 0 : lfs_remove(&filesystem, temporary);
+    if (error && error != LFS_ERR_NOENT) return result(error);
+    lfs_file_t file;
+    error = lfs_file_opencfg(&filesystem, &file, temporary, offset ? LFS_O_WRONLY | LFS_O_APPEND :
+                             LFS_O_WRONLY | LFS_O_CREAT | LFS_O_EXCL, &file_config);
+    if (error) return result(error);
+    lfs_soff_t size = lfs_file_size(&filesystem, &file);
+    if (size < 0) error = (int)size;
+    else if ((uint32_t)size != offset) error = LFS_ERR_INVAL;
+    else if (length) {
+        lfs_ssize_t wrote = lfs_file_write(&filesystem, &file, data, (lfs_size_t)length);
+        if (wrote < 0) error = (int)wrote;
+        else if ((size_t)wrote != length) error = LFS_ERR_IO;
+    }
+    /* Close commits the appended bytes; a failed write is never committed. */
+    int close_error = lfs_file_close(&filesystem, &file);
+    if (!error) error = close_error;
+    return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_commit(const char *path) {
+    if (!bosun_store_safe_path(path) || strcmp(path, "/") == 0) return BOSUN_STORE_INVALID;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
+    char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
+    struct lfs_info info;
+    int error = lfs_stat(&filesystem, staged_path(path, temporary), &info);
+    if (!error && info.type != LFS_TYPE_REG) error = LFS_ERR_INVAL;
+    if (!error) error = lfs_rename(&filesystem, temporary, path);
+    return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_discard(const char *path) {
+    if (!bosun_store_safe_path(path) || strcmp(path, "/") == 0) return BOSUN_STORE_INVALID;
+    if (!writable()) return BOSUN_STORE_UNAVAILABLE;
+    char temporary[BOSUN_PATH_MAX + sizeof temporary_name];
+    int error = lfs_remove(&filesystem, staged_path(path, temporary));
+    return result(error == LFS_ERR_NOENT ? 0 : error);
 }
 
 bosun_store_result_t bosun_store_remove(const char *path) {

@@ -15,6 +15,11 @@
  * Session reset discards old input/output without changing configuration/MIDI.
  * REBOOT accepts mode="normal" (default) or "bootloader" (ROM BOOTSEL).
  * SET_HARDWARE persists a supported model and reboots normally if it differs.
+ * PUT_LOGO {offset, data: base64 of 1..12288 bytes} stages the custom startup
+ * logo in order (offset 0 restarts; an identical retry of the last chunk is
+ * accepted) and replies received. COMMIT_LOGO {size: 96000, fnv1a} verifies
+ * the staged bytes and atomically replaces the logo; DELETE_LOGO restores the
+ * built-in one. Both then set logo_preview for the application.
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;
@@ -42,6 +47,7 @@ typedef struct {
     char id[257], type[49];
     bool discarding, connected, reboot_requested, reboot_bootloader, ui_observed;
     bool hardware_configured; /* A valid hardware record selected runtime->hardware. */
+    bool logo_preview; /* The startup logo changed; the consumer clears it. */
 } bosun_protocol_t;
 
 void bosun_protocol_init(bosun_protocol_t *protocol, bosun_runtime_t *runtime);

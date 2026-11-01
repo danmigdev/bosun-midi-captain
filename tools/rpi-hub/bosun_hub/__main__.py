@@ -3,7 +3,8 @@ Entry point: ``python -m bosun_hub``.
 
 Typical Pi usage (from the systemd unit):
 
-    python -m bosun_hub --stage-dir /opt/bosun-hub/stage
+    python -m bosun_hub --stage-dir /opt/bosun-hub/stage \
+        --boot-logo-dir /var/lib/bosun-hub/boot-logo
 
 Local development against the firmware emulator (no pedal, no Pi);
 build it with ``tools/native-build.sh host``:
@@ -42,6 +43,13 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="directory of the built Stage kiosk bundle to serve over HTTP",
     )
+    p.add_argument(
+        "--boot-logo-dir",
+        type=Path,
+        default=None,
+        help="writable directory for the custom startup logo; without it the "
+        "hub reports the feature as unsupported",
+    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     return p.parse_args()
 
@@ -70,6 +78,7 @@ async def _amain(args: argparse.Namespace) -> None:
             ws_port=args.ws_port,
             http_port=args.http_port,
             stage_dir=args.stage_dir,
+            boot_logo_dir=args.boot_logo_dir,
         )
     )
     for sig in (signal.SIGINT, signal.SIGTERM):

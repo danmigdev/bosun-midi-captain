@@ -42,6 +42,28 @@ jacks never sample or drive GP27/GP28. The boot recovery chord only scans the
 switches every model wires. To run the emulator as a Mini 6, write that record
 under its `--root` directory before starting it.
 
+## Startup logo
+
+At power-on the TFT shows the startup logo for `tft.boot_logo_seconds`
+(device.json, 0..60, default 2; 0 disables it); any switch press skips it, MIDI
+traffic does not. The logo fills rows 0..199 and the firmware version is drawn
+below it. A custom logo is stored once for all profiles at
+`/config/boot_logo/tft.rgb565`: 240x200 RGB565 little-endian words, row-major,
+exactly 96,000 bytes. Without it (or when it cannot be read) the built-in Bosun
+logo in `src/boot_logo.c` is used; regenerate that file with
+`python firmware/tools/boot_logo.py` (Pillow) if the icon changes.
+
+- `PUT_LOGO {offset, data}`: `data` is base64 of 1..12,288 bytes. Offset 0
+  starts a new upload; otherwise it must equal the bytes received so far, and
+  an identical retry of the last chunk is accepted. `ACK` carries `received`;
+  `ERROR offset_mismatch` carries it too.
+- `COMMIT_LOGO {size: 96000, fnv1a}`: checks the staged size
+  (`incomplete_upload`) and its FNV-1a 32 (`checksum_mismatch`), then
+  atomically replaces the custom logo.
+- `DELETE_LOGO`: removes the custom logo and any partial upload.
+- After a successful commit or delete the TFT previews the result for 3 s.
+  `DEVICE_INFO.boot_logo` is `"custom"` or `"default"`.
+
 ## Build requirements
 
 Build on Linux, or on Windows through WSL with an Ubuntu distribution. On

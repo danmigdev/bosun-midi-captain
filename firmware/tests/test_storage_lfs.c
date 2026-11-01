@@ -6,8 +6,8 @@
 enum { FLASH_BYTES = 4 * 1024 * 1024, FLASH_BASE = 4 * 1024 * 1024,
        LEGACY_BYTES = 512 * 1024, ERASE_SIZE = 4096, PAGE_SIZE = 256 };
 static uint8_t flash[FLASH_BYTES], snapshot[FLASH_BYTES];
-static uint8_t old_data[9000], new_data[17000], large_data[65536], output[65536];
-static size_t mutations;
+static uint8_t old_data[9000], new_data[17000], large_data[65536], output[65536], chunk[12288];
+static size_t mutations, flash_reads, flash_read_bytes;
 static int cut_at = -1, cut_mode;
 static bool write_failure, read_failure;
 static uint32_t geometry_size = LEGACY_BYTES;
@@ -26,6 +26,7 @@ static size_t checked_offset(uint32_t absolute, size_t length) {
 bool bosun_board_flash_read(uint32_t absolute, uint8_t *data, size_t length) {
     size_t offset = checked_offset(absolute, length);
     if (read_failure) return false;
+    ++flash_reads; flash_read_bytes += length;
     memcpy(data, flash + offset, length);
     return true;
 }
@@ -106,6 +107,84 @@ static void test_power_cuts(void) {
         }
     }
     printf("littlefs: %zu injected power cuts across %zu real erase/program operations preserved complete old/new files and recovered\n", tested, transaction_operations);
+}
+
+static void logo_file_is(const char *path, const uint8_t *data, size_t size) {
+    size_t length = 0;
+    assert(bosun_store_read(path, output, sizeof output, &length) == BOSUN_STORE_OK);
+    assert(length == size && !memcmp(output, data, size));
+}
+
+/* Chunked staging under power loss: the destination is the old or new
+ * complete file, the stage holds whole appends only, and both recover. */
+static void test_stage_power_cuts(void) {
+    static const char path[] = "/config/boot_logo/tft.rgb565";
+    assert(bosun_store_format() == BOSUN_STORE_OK);
+    assert(bosun_store_mkdir("/config/boot_logo") == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic(path, old_data, sizeof old_data) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_append(path, 0, new_data, 8000) == BOSUN_STORE_OK);
+    memcpy(snapshot, flash, sizeof flash);
+    mutations = 0;
+    assert(bosun_store_stage_append(path, 8000, new_data + 8000, sizeof new_data - 8000) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_commit(path) == BOSUN_STORE_OK);
+    size_t operations = mutations, renamed = 0;
+    assert(operations > 4 && operations < 200);
+    for (int mode = 0; mode < 3; ++mode) {
+        for (size_t op = 0; op < operations; ++op) {
+            memcpy(flash, snapshot, sizeof flash);
+            assert(bosun_store_mount(NULL));
+            cut_mode = mode; cut_at = (int)op; mutations = 0;
+            if (setjmp(power_loss) == 0) {
+                (void)bosun_store_stage_append(path, 8000, new_data + 8000, sizeof new_data - 8000);
+                (void)bosun_store_stage_commit(path);
+                assert(!"stage power cut not reached");
+            }
+            cut_at = -1;
+            assert(bosun_store_mount(NULL));
+            size_t length = 0; uint32_t staged = 0;
+            assert(bosun_store_read(path, output, sizeof output, &length) == BOSUN_STORE_OK);
+            bool replaced = length == sizeof new_data;
+            logo_file_is(path, replaced ? new_data : old_data, replaced ? sizeof new_data : sizeof old_data);
+            bosun_store_result_t r = bosun_store_stage_read_at(path, 0, output, sizeof output, &length, &staged);
+            if (replaced) { assert(r == BOSUN_STORE_NOT_FOUND); ++renamed; }
+            else assert(r == BOSUN_STORE_OK && (staged == 8000 || staged == sizeof new_data) &&
+                        length == staged && !memcmp(output, new_data, staged));
+            assert(bosun_store_stage_append(path, 0, "x", 1) == BOSUN_STORE_OK);
+            assert(bosun_store_stage_discard(path) == BOSUN_STORE_OK);
+        }
+    }
+    assert(renamed > 0 && renamed < 3 * operations);
+    printf("littlefs: %zu power cuts across a staged append + commit left whole appends and an old/new complete file\n", 3 * operations);
+}
+
+/* One TFT logo row is one 480-byte read_at of a 96000-byte file, including
+ * its own open/close; report the backend's flash traffic per row. */
+static void test_logo_row_cost(void) {
+    static const char path[] = "/config/boot_logo/tft.rgb565";
+    assert(bosun_store_format() == BOSUN_STORE_OK);
+    assert(bosun_store_mkdir("/config/profiles/test/patches/01") == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic("/config/profiles/test/device.json", old_data, sizeof old_data) == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic("/config/active_profile.json", "{\"id\":\"test\"}", 13) == BOSUN_STORE_OK);
+    assert(bosun_store_mkdir("/config/boot_logo") == BOSUN_STORE_OK);
+    for (uint32_t offset = 0; offset < 96000; offset += sizeof chunk) {
+        size_t amount = 96000 - offset < sizeof chunk ? 96000 - offset : sizeof chunk;
+        for (size_t i = 0; i < amount; ++i) chunk[i] = (uint8_t)((offset + i) * 13u + 7u);
+        assert(bosun_store_stage_append(path, offset, chunk, amount) == BOSUN_STORE_OK);
+    }
+    assert(bosun_store_stage_commit(path) == BOSUN_STORE_OK);
+    assert(bosun_store_mount(NULL));
+    size_t worst = 0, total = 0, reads = 0;
+    for (uint32_t row = 0; row < 200; ++row) {
+        size_t length = 0, before = flash_read_bytes, count = flash_reads;
+        assert(bosun_store_read_at(path, row * 480u, output, 480, &length) == BOSUN_STORE_OK && length == 480);
+        for (size_t i = 0; i < 480; ++i) assert(output[i] == (uint8_t)((row * 480u + i) * 13u + 7u));
+        size_t cost = flash_read_bytes - before;
+        if (cost > worst) worst = cost;
+        total += cost; reads += flash_reads - count;
+    }
+    assert(worst < 16384);
+    printf("littlefs: a 480-byte logo row read costs %zu flash bytes in %zu reads on average (worst %zu bytes)\n",
+           total / 200, reads / 200, worst);
 }
 
 static void test_capacity(void) {
@@ -201,6 +280,7 @@ int main(void) {
     geometry_size = LEGACY_BYTES;
     assert(bosun_store_format() == BOSUN_STORE_OK);
     test_storage_api();
+    test_stage_api();
     memcpy(snapshot, flash, sizeof flash);
     mutations = 0;
     assert(bosun_store_mount(NULL) && mutations == 0 && !memcmp(flash, snapshot, sizeof flash));
@@ -215,6 +295,8 @@ int main(void) {
     read_failure = false;
     assert(bosun_store_mount(NULL));
     test_power_cuts();
+    test_stage_power_cuts();
+    test_logo_row_cost();
     test_capacity();
     test_legacy_growth();
     puts("littlefs storage: no automatic format, static caches, /config paths/raw JSON, remount, bounded reads/lists and I/O failures passed");

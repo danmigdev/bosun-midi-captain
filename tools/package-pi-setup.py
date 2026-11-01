@@ -39,7 +39,7 @@ def package(output):
         with tarfile.open(fileobj=gz, mode='w') as tar:
             for name in files:
                 data = (ROOT / name).read_bytes()
-                if name.endswith(('.sh', '.py', '.service', '.timer', '.rules')):
+                if name.endswith(('.sh', '.py', '.service', '.timer', '.path', '.rules')):
                     data = data.replace(b'\r\n', b'\n')
                 info = tarfile.TarInfo(name)
                 info.size, info.mtime, info.mode = len(data), 0, 0o644

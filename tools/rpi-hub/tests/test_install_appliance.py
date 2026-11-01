@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,6 +68,16 @@ systemctl)
         mkdir -p "$APPLIANCE_TEST_ROOT/system/var/lib/bosun-hub/chromium"
     fi
     if [[ "$1" == is-active && "${!#}" == "${FAIL_SERVICE:-}" ]]; then exit 3; fi
+    if [[ "$1" == restart && "${2:-}" == "${FAIL_RESTART:-}" ]]; then exit 1; fi
+    ;;
+python3)
+    # Quiet-boot configuration is covered by test_boot_splash.py; only fake
+    # the picture renderer's outputs here.
+    if [[ "$1" == */render.py ]]; then
+        for picture in splash splash-45 splash-65 splash-80; do
+            printf 'new %s\n' "$picture" > "$(dirname "$2")/$picture.bin"
+        done
+    fi
     ;;
 stat) printf 'bosun\n';;
 runuser) [[ "${PROFILE_WRITABLE:-1}" == 1 ]];;
@@ -200,3 +211,102 @@ def test_inactive_service_is_reported_as_failed_install(appliance, failed_servic
     appliance.build_stage()
     result, _ = appliance.run(FAIL_SERVICE=failed_service)
     assert result.returncode != 0
+
+
+def test_install_hands_only_stage_to_the_hub_account(appliance):
+    appliance.build_stage()
+    # Left by an earlier installer that ran chown -R bosun:bosun /opt/bosun-hub.
+    (appliance.system / "opt/bosun-hub/boot-splash").mkdir(parents=True)
+    result, events = appliance.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    dest = shell_path(appliance.system) + "/opt/bosun-hub"
+    first_restart = next(i for i, line in enumerate(events) if line.startswith("systemctl restart "))
+    chowns = [line for line in events[:first_restart] if line.startswith("chown ")]
+    assert f"chown root:root {dest}" in chowns
+    assert [line for line in events if line.startswith("chown -R bosun:bosun")] == [
+        f"chown -R bosun:bosun {dest}/stage"]
+    root_owned = " ".join(line for line in chowns if line.startswith("chown -R root:root ")).split()
+    for name in ("bosun_hub", "kiosk", "README.md", "requirements.txt", "boot-splash"):
+        assert f"{dest}/{name}" in root_owned
+    assert f"{dest}/stage" not in root_owned
+    unit = (appliance.system / "etc/systemd/system/bosun-hub.service").read_text()
+    assert "StateDirectory=bosun-hub/boot-logo" in unit
+    assert "--boot-logo-dir /var/lib/bosun-hub/boot-logo" in unit
+
+
+@pytest.fixture
+def splash_installer(appliance, tmp_path):
+    """install-boot-splash.sh on an installed appliance, with fake OS tools."""
+    system, source = appliance.system, appliance.source
+    script = (SOURCE / "install-boot-splash.sh").read_text(encoding="utf-8").replace("$EUID", "0")
+    script = script.replace(
+        "set -euo pipefail\n",
+        f'set -euo pipefail\nexport PATH="{shell_path(tmp_path / "fake-bin")}:$PATH"\n', 1)
+    for prefix in ("/opt/bosun-hub", "/etc/systemd/system", "/usr/local/libexec", "/proc/device-tree/model"):
+        script = script.replace(prefix, shell_path(system) + prefix)
+    (source / "install-boot-splash.sh").write_text(script, encoding="utf-8", newline="\n")
+    shutil.copytree(SOURCE / "boot-splash", source / "boot-splash",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (tmp_path / "fake-bin/python3").write_text(FAKE_TOOL, encoding="utf-8", newline="\n")
+    (tmp_path / "fake-bin/python3").chmod(0o755)
+    (system / "proc/device-tree").mkdir(parents=True)
+    (system / "proc/device-tree/model").write_text("Raspberry Pi 3 Model B Rev 1.2")
+    (system / "etc/systemd/system/bosun-kiosk.service").write_text("[Service]\n")
+    (system / "opt/bosun-hub").mkdir(parents=True)
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
+    events_log = tmp_path / "events.log"
+
+    def run(**overrides):
+        environment = {
+            **os.environ, "PATH": str(tmp_path / "fake-bin") + os.pathsep + os.environ.get("PATH", ""),
+            "APPLIANCE_TEST_ROOT": shell_path(tmp_path), "EVENT_LOG": shell_path(events_log),
+            "TMPDIR": shell_path(tmp_path / "temporary"), **overrides,
+        }
+        result = subprocess.run([bash, "--noprofile", "--norc", shell_path(source / "install-boot-splash.sh")],
+                                env=environment, text=True, capture_output=True, timeout=30)
+        return result, events_log.read_text().splitlines() if events_log.exists() else []
+
+    return SimpleNamespace(system=system, run=run)
+
+
+def test_splash_installer_reapplies_the_logo_after_refreshing_pictures(splash_installer):
+    system = splash_installer.system
+    units = system / "etc/systemd/system"
+    for name in ("bosun-framebuffer-splash.service", "bosun-framebuffer-splash-80.service"):
+        (units / name).write_text("[Service]\n")
+    (system / "opt/bosun-hub/boot-splash").mkdir()
+    result, events = splash_installer.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (system / "usr/local/libexec/bosun-boot-logo").read_bytes() == (
+        SOURCE / "boot-splash/apply_logo.py").read_bytes()
+    for name in ("bosun-boot-logo.service", "bosun-boot-logo.path"):
+        assert (units / name).read_bytes() == (SOURCE / "systemd" / name).read_bytes()
+    root = shell_path(system)
+    assert any(line.startswith("install -o root -g root -m 0755 ") and
+               line.endswith(f"{root}/usr/local/libexec/bosun-boot-logo") for line in events)
+    assert f"chown root:root {root}/opt/bosun-hub" in events
+    assert f"chown -R root:root {root}/opt/bosun-hub/boot-splash" in events
+    reload, stop, enable, restart = (events.index(line) for line in (
+        "systemctl daemon-reload",
+        "systemctl stop bosun-boot-logo.path bosun-boot-logo.service",
+        "systemctl enable --now bosun-boot-logo.path",
+        "systemctl restart bosun-boot-logo.service",
+    ))
+    render = next(i for i, line in enumerate(events) if "render.py" in line)
+    # No applier run can overwrite a picture while the refresh replaces it,
+    # and the refreshed pictures get the custom logo again afterwards.
+    assert reload < stop < render < enable < restart
+    for picture in ("splash", "splash-45", "splash-65", "splash-80"):
+        assert (system / f"opt/bosun-hub/boot-splash/{picture}.bin").read_text() == f"new {picture}\n"
+    assert not list((system / "opt/bosun-hub/boot-splash").glob(".pictures.*"))
+
+
+def test_splash_installer_sets_up_the_applier_without_framebuffer_pictures(splash_installer):
+    result, events = splash_installer.run(FAIL_RESTART="bosun-boot-logo.service")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "custom startup logo was not applied" in result.stderr
+    assert "display stays black until Chromium starts" in result.stdout
+    assert not any("render.py" in line or line.startswith("systemctl stop ") for line in events)
+    assert "systemctl enable --now bosun-boot-logo.path" in events
+    assert "systemctl restart bosun-boot-logo.service" in events

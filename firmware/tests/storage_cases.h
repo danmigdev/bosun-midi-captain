@@ -87,4 +87,73 @@ static void test_storage_api(void) {
     assert(bosun_store_write_atomic(limit_path, "max", 3) == BOSUN_STORE_OK);
     assert(bosun_store_read(limit_path, buffer, sizeof buffer, &length) == BOSUN_STORE_OK && length == 3);
 }
+
+static void stage_is(const char *path, const char *bytes) {
+    char buffer[16]; size_t length = 99; uint32_t size = 99;
+    if (!bytes) {
+        assert(bosun_store_stage_read_at(path, 0, buffer, sizeof buffer, &length, &size) == BOSUN_STORE_NOT_FOUND);
+        assert(length == 0 && size == 0);
+        return;
+    }
+    assert(bosun_store_stage_read_at(path, 0, buffer, sizeof buffer, &length, &size) == BOSUN_STORE_OK);
+    assert(length == strlen(bytes) && size == length && !memcmp(buffer, bytes, length));
+}
+static void file_is(const char *path, const char *bytes) {
+    char buffer[16]; size_t length = 99;
+    assert(bosun_store_read(path, buffer, sizeof buffer, &length) == (bytes ? BOSUN_STORE_OK : BOSUN_STORE_NOT_FOUND));
+    if (bytes) assert(length == strlen(bytes) && !memcmp(buffer, bytes, length));
+}
+
+/* Chunked staging: private beside its destination, strictly sequential,
+ * replaced or discarded as a whole, reclaimed like the atomic temporary. */
+static void test_stage_api(void) {
+    static const char path[] = "/config/stage/logo.bin";
+    char buffer[8]; size_t length = 99, count = 99; uint32_t size = 99;
+    bosun_dirent_t entries[4];
+    assert(bosun_store_mkdir("/config/stage") == BOSUN_STORE_OK);
+    stage_is(path, NULL);
+    assert(bosun_store_stage_discard(path) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_discard("/config/no-such-directory/logo.bin") == BOSUN_STORE_OK);
+    assert(bosun_store_stage_commit(path) == BOSUN_STORE_NOT_FOUND);
+    assert(bosun_store_stage_append(path, 3, "abc", 3) == BOSUN_STORE_NOT_FOUND);
+    assert(bosun_store_stage_append(path, 0, "abc", 3) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_append(path, 2, "zz", 2) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append(path, 4, "zz", 2) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append(path, 3, "defg", 4) == BOSUN_STORE_OK);
+    stage_is(path, "abcdefg");
+    assert(bosun_store_stage_read_at(path, 2, buffer, 3, &length, &size) == BOSUN_STORE_OK);
+    assert(length == 3 && size == 7 && !memcmp(buffer, "cde", 3));
+    assert(bosun_store_stage_read_at(path, 7, buffer, 3, &length, &size) == BOSUN_STORE_OK && length == 0 && size == 7);
+    assert(bosun_store_stage_read_at(path, 0, NULL, 0, &length, NULL) == BOSUN_STORE_OK && length == 0);
+    file_is(path, NULL);
+    assert(bosun_store_list("/config/stage", entries, 4, &count) == BOSUN_STORE_OK && count == 0);
+    assert(bosun_store_stage_append(path, 0, "xy", 2) == BOSUN_STORE_OK);
+    stage_is(path, "xy");
+    assert(bosun_store_stage_commit(path) == BOSUN_STORE_OK);
+    file_is(path, "xy"); stage_is(path, NULL);
+    assert(bosun_store_stage_append(path, 0, "new", 3) == BOSUN_STORE_OK);
+    file_is(path, "xy");
+    assert(bosun_store_stage_commit(path) == BOSUN_STORE_OK);
+    file_is(path, "new"); stage_is(path, NULL);
+    assert(bosun_store_stage_append(path, 0, "tmp", 3) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_discard(path) == BOSUN_STORE_OK);
+    stage_is(path, NULL); file_is(path, "new");
+    assert(bosun_store_stage_append(path, 0, "old", 3) == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic("/config/stage/other", "o", 1) == BOSUN_STORE_OK);
+    stage_is(path, NULL);
+    assert(bosun_store_list("/config/stage", entries, 4, &count) == BOSUN_STORE_OK && count == 2);
+    assert(bosun_store_stage_append("/", 0, "x", 1) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append("/config/../x", 0, "x", 1) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append("/config/stage/.bosun-atomic.tmp", 0, "x", 1) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append(path, 0, NULL, 1) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_commit("/") == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_read_at(path, 0, NULL, 1, &length, &size) == BOSUN_STORE_INVALID && length == 0);
+    assert(bosun_store_stage_append("/no-parent/x", 0, "x", 1) == BOSUN_STORE_NOT_FOUND);
+    assert(bosun_store_stage_append(path, 0, "x", 1) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_append(path, 1, buffer, BOSUN_STORE_FILE_MAX) == BOSUN_STORE_LIMIT);
+    stage_is(path, "x");
+    assert(bosun_store_stage_discard(path) == BOSUN_STORE_OK);
+    assert(bosun_store_remove(path) == BOSUN_STORE_OK && bosun_store_remove("/config/stage/other") == BOSUN_STORE_OK);
+    assert(bosun_store_remove("/config/stage") == BOSUN_STORE_OK);
+}
 #endif

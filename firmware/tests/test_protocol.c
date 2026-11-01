@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "bosun/protocol.h"
+#include "bosun/display.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -563,6 +564,109 @@ static void draft_limit(void) {
     assert(bosun_config_dirty(&config, 1, 1));
 }
 
+enum { LOGO_CHUNK = 12288 };
+static uint8_t logo_image[BOSUN_BOOT_LOGO_BYTES], logo_big[LOGO_CHUNK + 1];
+static uint32_t fnv1a(const uint8_t *data, size_t length) {
+    uint32_t hash = UINT32_C(0x811c9dc5);
+    for (size_t i = 0; i < length; ++i) hash = (hash ^ data[i]) * UINT32_C(0x01000193);
+    return hash;
+}
+static void put_logo(uint32_t offset, const uint8_t *data, size_t length, const char *type) {
+    static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    char *out = large + snprintf(large, sizeof large, "{\"type\":\"PUT_LOGO\",\"id\":\"logo\",\"offset\":%u,\"data\":\"", (unsigned)offset);
+    for (size_t i = 0; i < length; i += 3) {
+        uint32_t bits = (uint32_t)data[i] << 16 | (i + 1 < length ? (uint32_t)data[i + 1] << 8 : 0) |
+            (i + 2 < length ? data[i + 2] : 0);
+        *out++ = digits[bits >> 18 & 63]; *out++ = digits[bits >> 12 & 63];
+        *out++ = i + 1 < length ? digits[bits >> 6 & 63] : '=';
+        *out++ = i + 2 < length ? digits[bits & 63] : '=';
+    }
+    strcpy(out, "\"}");
+    request_at(large, type, 1);
+}
+static void received_is(uint32_t value) { assert(bosun_config_int(&reply, 0, "received", -1) == (int32_t)value); }
+static void boot_logo_is(const char *state) {
+    request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
+    assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "boot_logo"), state));
+}
+static void commit_logo(uint32_t hash, const char *type) {
+    char command[96];
+    snprintf(command, sizeof command, "{\"type\":\"COMMIT_LOGO\",\"size\":96000,\"fnv1a\":%lu}", (unsigned long)hash);
+    request(command, type);
+}
+static void startup_logo(void) {
+    uint32_t hash = 0;
+    for (unsigned seed = 0; hash <= INT32_MAX; ++seed) { /* Exercise the full unsigned range. */
+        for (size_t i = 0; i < sizeof logo_image; ++i) logo_image[i] = (uint8_t)(i * 31u + seed * 7u + (i >> 9));
+        hash = fnv1a(logo_image, sizeof logo_image);
+    }
+    boot_logo_is("default");
+    protocol.logo_preview = false;
+    /* Strictly sequential: offset 0 (re)starts, otherwise offset == received. */
+    put_logo(LOGO_CHUNK, logo_image + LOGO_CHUNK, LOGO_CHUNK, "ERROR"); is_error("offset_mismatch"); received_is(0);
+    put_logo(0, logo_image, LOGO_CHUNK, "ACK"); received_is(LOGO_CHUNK);
+    put_logo(0, logo_image, LOGO_CHUNK, "ACK"); received_is(LOGO_CHUNK);
+    put_logo(LOGO_CHUNK, logo_image + LOGO_CHUNK, LOGO_CHUNK, "ACK"); received_is(2 * LOGO_CHUNK);
+    put_logo(LOGO_CHUNK, logo_image + LOGO_CHUNK, LOGO_CHUNK, "ACK"); received_is(2 * LOGO_CHUNK);
+    put_logo(LOGO_CHUNK, logo_image, LOGO_CHUNK, "ERROR"); is_error("offset_mismatch"); received_is(2 * LOGO_CHUNK);
+    put_logo(LOGO_CHUNK, logo_image + LOGO_CHUNK, 100, "ERROR"); is_error("offset_mismatch");
+    put_logo(3 * LOGO_CHUNK, logo_image + 3 * LOGO_CHUNK, LOGO_CHUNK, "ERROR"); is_error("offset_mismatch");
+    commit_logo(hash, "ERROR"); is_error("incomplete_upload"); received_is(2 * LOGO_CHUNK);
+    for (uint32_t offset = 2 * LOGO_CHUNK; offset < sizeof logo_image; offset += LOGO_CHUNK) {
+        size_t length = sizeof logo_image - offset < LOGO_CHUNK ? sizeof logo_image - offset : LOGO_CHUNK;
+        put_logo(offset, logo_image + offset, length, "ACK"); received_is(offset + (uint32_t)length);
+    }
+    received_is(sizeof logo_image);
+    /* Never beyond 96000 bytes or 12288 per chunk; rejects keep the upload. */
+    put_logo(sizeof logo_image, logo_image, 1, "ERROR"); is_error("limit_exceeded");
+    put_logo(90000, logo_image, LOGO_CHUNK, "ERROR"); is_error("limit_exceeded");
+    put_logo(0, logo_big, sizeof logo_big, "ERROR"); is_error("limit_exceeded");
+    static const char *const bad_data[] = {"", "QQ", "QQ=", "QR==", "QUJ=", "Q===", "====", "QQ==QQ==",
+        "QQ-_", "QQ_A", "QQ Q", "QQ\\/A", "QQ\\u0041A", "QUJD\\n"};
+    char command[160];
+    for (unsigned i = 0; i < sizeof bad_data / sizeof *bad_data; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"PUT_LOGO\",\"offset\":0,\"data\":\"%s\"}", bad_data[i]);
+        request(command, "ERROR"); is_error("invalid_data");
+    }
+    static const char *const bad_put[] = {"\"offset\":0", "\"data\":\"QUJD\"", "\"offset\":-1,\"data\":\"QUJD\"",
+        "\"offset\":1.5,\"data\":\"QUJD\"", "\"offset\":\"0\",\"data\":\"QUJD\"", "\"offset\":0,\"data\":65",
+        "\"offset\":0,\"data\":[\"QUJD\"]", "\"offset\":null,\"data\":\"QUJD\""};
+    for (unsigned i = 0; i < sizeof bad_put / sizeof *bad_put; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"PUT_LOGO\",%s}", bad_put[i]);
+        request(command, "ERROR"); is_error("invalid_request");
+    }
+    request("{\"type\":\"PUT_LOGO\",\"offset\":0,\"offset\":96000,\"data\":\"QUJD\"}", "ERROR"); is_error("invalid_json");
+    static const char *const bad_commit[] = {"\"fnv1a\":1", "\"size\":95999,\"fnv1a\":1", "\"size\":\"96000\",\"fnv1a\":1",
+        "\"size\":96000", "\"size\":96000,\"fnv1a\":\"1\"", "\"size\":96000,\"fnv1a\":-1", "\"size\":96000,\"fnv1a\":1.0",
+        "\"size\":96000,\"fnv1a\":4294967296", "\"size\":96000,\"fnv1a\":12345678901", "\"size\":96000,\"fnv1a\":1e3"};
+    for (unsigned i = 0; i < sizeof bad_commit / sizeof *bad_commit; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"COMMIT_LOGO\",%s}", bad_commit[i]);
+        request(command, "ERROR"); is_error("invalid_request");
+    }
+    commit_logo(hash ^ 1u, "ERROR"); is_error("checksum_mismatch");
+    assert(!protocol.logo_preview); boot_logo_is("default");
+    commit_logo(hash, "ACK");
+    assert(protocol.logo_preview); boot_logo_is("custom");
+    static uint8_t stored[sizeof logo_image + 1]; size_t length = 0;
+    assert(bosun_store_read(BOSUN_BOOT_LOGO_PATH, stored, sizeof stored, &length) == BOSUN_STORE_OK);
+    assert(length == sizeof logo_image && !memcmp(stored, logo_image, length));
+    commit_logo(hash, "ERROR"); is_error("incomplete_upload"); received_is(0);
+    /* An abandoned replacement leaves the committed logo; DELETE drops both. */
+    protocol.logo_preview = false;
+    put_logo(0, logo_image + 100, LOGO_CHUNK, "ACK"); received_is(LOGO_CHUNK);
+    assert(bosun_store_read(BOSUN_BOOT_LOGO_PATH, stored, sizeof stored, &length) == BOSUN_STORE_OK && length == sizeof logo_image);
+    bosun_dirent_t entries[2]; size_t count = 9;
+    assert(bosun_store_list(BOSUN_BOOT_LOGO_DIR, entries, 2, &count) == BOSUN_STORE_OK && count == 1);
+    request("{\"type\":\"DELETE_LOGO\",\"id\":\"drop\"}", "ACK");
+    assert(protocol.logo_preview); boot_logo_is("default");
+    assert(bosun_store_read(BOSUN_BOOT_LOGO_PATH, stored, sizeof stored, &length) == BOSUN_STORE_NOT_FOUND);
+    commit_logo(hash, "ERROR"); is_error("incomplete_upload"); received_is(0);
+    protocol.logo_preview = false;
+    request("{\"type\":\"DELETE_LOGO\"}", "ACK"); assert(protocol.logo_preview);
+    assert(bosun_store_list(BOSUN_BOOT_LOGO_DIR, entries, 2, &count) == BOSUN_STORE_OK && count == 0);
+    protocol.logo_preview = false;
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-protocol-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -707,7 +811,7 @@ int main(void) {
     assert(sent == 0);
     full_catalog();
     monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
-    kemper_identity(); draft_limit();
+    kemper_identity(); draft_limit(); startup_logo();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));
@@ -716,8 +820,11 @@ int main(void) {
     request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("invalid_request");
     assert(!bosun_store_mount("/no-such-native-storage-root"));
     request("{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":2}", "ERROR"); is_error("storage_unavailable");
+    boot_logo_is("default");
+    request("{\"type\":\"DELETE_LOGO\"}", "ERROR"); is_error("storage_unavailable");
+    put_logo(0, logo_image, 3, "ERROR"); is_error("storage_unavailable");
     request("{\"type\":\"REBOOT\",\"mode\":\"bootloader\"}", "ACK");
     assert(protocol.reboot_requested && protocol.reboot_bootloader);
-    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect passed");
+    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect, startup logo upload passed");
     return 0;
 }

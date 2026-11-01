@@ -594,6 +594,59 @@ static void test_remote_tap_gpio_and_disconnect(void) {
     assert(midi_length[0] == sizeof pair && midi_length[1] == sizeof pair);
 }
 
+static bool shows(const char *text) {
+    return app.display.count && app.display.labels[0].length == strlen(text) &&
+        !memcmp(app.display.labels[0].glyphs, text, strlen(text));
+}
+static void test_startup_logo(void) {
+    static const char version[] = "v" BOSUN_FIRMWARE_VERSION;
+    /* Boot: the logo frame, then the default 2 s hold; MIDI does not end it. */
+    fixture();
+    for (unsigned i = 0; i < 30; ++i) tick();
+    assert(rows == 240 && shows(version));
+    const uint8_t cc[] = {0xb0, 7, 64};
+    while (now < 2000) {
+        memcpy(midi_input[0], cc, sizeof cc); midi_input_length[0] = sizeof cc;
+        tick(); assert(rows == 240);
+    }
+    assert(app.runtime.midi_rx_count > 1000 && shows(version));
+    while (now < 2040) tick();
+    assert(rows > 240 && shows("Bosun"));
+    /* A debounced switch press ends it at once. */
+    fixture();
+    tick(); tick();
+    assert(shows(version));
+    switches = 1;
+    while (now < 10) tick();
+    assert(shows("Bosun") && rows < 240 + 240);
+    switches = 0;
+    /* DELETE_LOGO previews the resulting logo for 3 s; a press skips it. */
+    for (unsigned i = 0; i < 40; ++i) tick();
+    cdc = true;
+    queue_command("{\"type\":\"DELETE_LOGO\",\"id\":\"logo\"}\n");
+    tick(); tick();
+    assert(strstr((char *)output, "{\"type\":\"ACK\",\"id\":\"logo\"}") && shows(version));
+    uint32_t started = now;
+    while (now - started < 2900) { tick(); assert(shows(version)); }
+    while (now - started < 3200) tick();
+    assert(shows("Bosun"));
+    queue_command("{\"type\":\"DELETE_LOGO\"}\n");
+    tick(); tick(); assert(shows(version));
+    switches = 1u << 9;
+    for (unsigned i = 0; i < 10; ++i) tick();
+    assert(shows("Bosun"));
+    switches = 0;
+    /* tft.boot_logo_seconds 0 boots straight into the layout. */
+    fixture();
+    assert(bosun_config_create("quiet", "Quiet", "generic", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&app.config, "quiet", true) == BOSUN_STORE_OK);
+    const char device[] = "{\"tft\":{\"boot_logo_seconds\":0}}";
+    assert(bosun_config_put_device(&app.config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    assert(bosun_application_init(&app, root));
+    rows = 0; tick();
+    assert(!shows(version) && rows == 8);
+}
+
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
@@ -604,6 +657,7 @@ int main(void) {
     test_initial_patch_action();
     test_usb_diagnostics_console();
     test_remote_tap_gpio_and_disconnect();
+    test_startup_logo();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display and watchdog passed");
     return 0;

@@ -32,6 +32,7 @@ int main(void) {
     assert(bosun_store_read("/unknown-volume", buffer, sizeof buffer, &length) == BOSUN_STORE_OK && length == 21);
     assert(bosun_store_format() == BOSUN_STORE_OK);
     test_storage_api();
+    test_stage_api();
     assert(bosun_store_mount(root));
     assert(bosun_store_read("/config/profiles/kemper_player_buk4/device.json", buffer, sizeof buffer, &length) == BOSUN_STORE_OK && length > 80);
 
@@ -74,6 +75,20 @@ int main(void) {
     assert(symlink(other_path, path) == 0);
     assert(bosun_store_write_atomic("/config/atomic", "replacement", 11) == BOSUN_STORE_OK);
     assert(bosun_store_read("/config/atomic", buffer, sizeof buffer, &length) == BOSUN_STORE_OK && length == 11);
+    /* A planted stage link is never followed, continued or published. */
+    snprintf(path, sizeof path, "%s/config/.bosun-atomic.tmp", root);
+    assert(symlink(other_path, path) == 0);
+    assert(bosun_store_stage_read_at("/config/staged", 0, buffer, sizeof buffer, &length, NULL) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append("/config/staged", 17, "x", 1) == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_commit("/config/staged") == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_append("/config/staged", 0, "fresh", 5) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_commit("/config/staged") == BOSUN_STORE_OK);
+    assert(bosun_store_read("/config/staged", buffer, sizeof buffer, &length) == BOSUN_STORE_OK && length == 5);
+    snprintf(path, sizeof path, "%s/config/hardlink", root);
+    assert(link(other_path, path) == 0);
+    assert(bosun_store_stage_append("/config/hardlink", 0, "bad", 3) == BOSUN_STORE_OK);
+    assert(bosun_store_stage_commit("/config/hardlink") == BOSUN_STORE_INVALID);
+    assert(bosun_store_stage_discard("/config/hardlink") == BOSUN_STORE_OK);
     snprintf(path, sizeof path, "%s/pipe", root);
     assert(mkfifo(path, 0600) == 0);
     assert(bosun_store_read("/pipe", buffer, sizeof buffer, &length) == BOSUN_STORE_INVALID);

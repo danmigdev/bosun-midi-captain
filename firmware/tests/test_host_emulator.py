@@ -1,5 +1,6 @@
 """Exercise the compiled application over real loopback sockets, without hardware."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -195,6 +196,27 @@ class HostApplicationTests(unittest.TestCase):
         self.assertEqual((hardware["model"], hardware["configured"]), ("captain10", True))
         self.assertEqual(len(client.request("LED_DUMP", "LED_DUMP")["pixels"]), 30)
         self.assertEqual((self.root / "untouched.txt").read_text(), "original sentinel")
+
+    def test_startup_logo_upload_commit_and_delete(self):
+        _, client = self.start()
+        self.assertEqual(client.request("GET_DEVICE_INFO", "DEVICE_INFO")["boot_logo"], "default")
+        image = bytes((i * 31 + (i >> 9)) & 255 for i in range(96000))
+        for offset in range(0, len(image), 12288):
+            chunk = base64.b64encode(image[offset:offset + 12288]).decode()
+            reply = client.request("PUT_LOGO", "ACK", offset=offset, data=chunk)
+            self.assertEqual(reply["received"], min(offset + 12288, len(image)))
+        fnv1a = 0x811c9dc5
+        for byte in image:
+            fnv1a = ((fnv1a ^ byte) * 0x01000193) & 0xffffffff
+        rejected = client.request("COMMIT_LOGO", "ERROR", size=len(image), fnv1a=fnv1a ^ 1)
+        self.assertEqual(rejected["error"], "checksum_mismatch")
+        client.request("COMMIT_LOGO", "ACK", size=len(image), fnv1a=fnv1a)
+        self.assertEqual(client.request("GET_DEVICE_INFO", "DEVICE_INFO")["boot_logo"], "custom")
+        logo = self.root / "config/boot_logo/tft.rgb565"
+        self.assertEqual(logo.read_bytes(), image)
+        client.request("DELETE_LOGO", "ACK")
+        self.assertEqual(list(logo.parent.iterdir()), [])
+        self.assertEqual(client.request("GET_DEVICE_INFO", "DEVICE_INFO")["boot_logo"], "default")
 
     def test_batched_requests_and_reconnect_drop_partial_session(self):
         emulator, client = self.start()

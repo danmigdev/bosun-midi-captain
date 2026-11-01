@@ -116,15 +116,15 @@ bosun_store_result_t bosun_store_format(void) {
     return root_fd < 0 ? BOSUN_STORE_UNAVAILABLE : result(clear_directory(root_fd, 0));
 }
 
-static bosun_store_result_t read_file(const char *path, uint32_t offset, void *buffer,
-                                      size_t capacity, size_t *length, bool complete) {
+static bosun_store_result_t read_file(const char *path, bool staged, uint32_t offset, void *buffer,
+                                      size_t capacity, size_t *length, uint32_t *total, bool complete) {
     if (length) *length = 0;
     if (!length || (!buffer && capacity) || !bosun_store_safe_path(path)) return BOSUN_STORE_INVALID;
     if (root_fd < 0) return BOSUN_STORE_UNAVAILABLE;
     char name[BOSUN_NAME_MAX];
     int parent = parent_fd(path, name);
     if (parent < 0) return result(errno);
-    int fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    int fd = openat(parent, staged ? temporary_name : name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     int error = fd < 0 ? errno : 0;
     close(parent);
     if (fd < 0) return result(error);
@@ -146,16 +146,44 @@ static bosun_store_result_t read_file(const char *path, uint32_t offset, void *b
     }
     if (close(fd) != 0 && !error) error = errno;
     if (error) *length = 0;
+    else if (total) *total = (uint32_t)st.st_size;
     return result(error);
 }
 
 bosun_store_result_t bosun_store_read(const char *path, void *buffer, size_t capacity, size_t *length) {
-    return read_file(path, 0, buffer, capacity, length, true);
+    return read_file(path, false, 0, buffer, capacity, length, NULL, true);
 }
 
 bosun_store_result_t bosun_store_read_at(const char *path, uint32_t offset, void *buffer,
                                        size_t capacity, size_t *length) {
-    return read_file(path, offset, buffer, capacity, length, false);
+    return read_file(path, false, offset, buffer, capacity, length, NULL, false);
+}
+
+bosun_store_result_t bosun_store_stage_read_at(const char *path, uint32_t offset, void *buffer,
+                                               size_t capacity, size_t *length, uint32_t *size) {
+    if (size) *size = 0;
+    return read_file(path, true, offset, buffer, capacity, length, size, false);
+}
+
+static int write_all(int fd, const void *data, size_t length) {
+    size_t written = 0;
+    while (written < length) {
+        size_t amount = length - written;
+        if (amount > 4096) amount = 4096;
+        ssize_t done = write(fd, (const uint8_t *)data + written, amount);
+        if (done < 0 && errno == EINTR) continue;
+        if (done <= 0) return done < 0 ? errno : EIO;
+        written += (size_t)done;
+    }
+    return 0;
+}
+
+/* A destination may be absent or one ordinary file, never a link or other object. */
+static int replaceable(int parent, const char *name) {
+    struct stat st;
+    if (fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) == 0)
+        return S_ISREG(st.st_mode) && st.st_nlink == 1 ? 0 : EINVAL;
+    return errno == ENOENT ? 0 : errno;
 }
 
 bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data, size_t length) {
@@ -165,26 +193,14 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
     char name[BOSUN_NAME_MAX];
     int parent = parent_fd(path, name);
     if (parent < 0) return result(errno);
-    int error = 0;
-    struct stat st;
-    if (fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) == 0) {
-        if (!S_ISREG(st.st_mode) || st.st_nlink != 1) error = EINVAL;
-    } else if (errno != ENOENT) error = errno;
+    int error = replaceable(parent, name);
     if (!error && unlinkat(parent, temporary_name, 0) != 0 && errno != ENOENT) error = errno;
     int fd = -1;
     if (!error) {
         fd = openat(parent, temporary_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
         if (fd < 0) error = errno;
     }
-    size_t written = 0;
-    while (!error && written < length) {
-        size_t amount = length - written;
-        if (amount > 4096) amount = 4096;
-        ssize_t done = write(fd, (const uint8_t *)data + written, amount);
-        if (done < 0 && errno == EINTR) continue;
-        if (done <= 0) error = done < 0 ? errno : EIO;
-        else written += (size_t)done;
-    }
+    if (!error) error = write_all(fd, data, length);
     if (fd >= 0) {
         if (!error && fsync(fd) != 0) error = errno;
         if (close(fd) != 0 && !error) error = errno;
@@ -192,6 +208,64 @@ bosun_store_result_t bosun_store_write_atomic(const char *path, const void *data
     if (!error && renameat(parent, temporary_name, parent, name) != 0) error = errno;
     if (!error && fsync(parent) != 0) error = errno;
     if (error) (void)unlinkat(parent, temporary_name, 0);
+    close(parent);
+    return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_append(const char *path, uint32_t offset, const void *data, size_t length) {
+    if (!bosun_store_safe_path(path) || (!data && length)) return BOSUN_STORE_INVALID;
+    if (offset > BOSUN_STORE_FILE_MAX || length > BOSUN_STORE_FILE_MAX - offset) return BOSUN_STORE_LIMIT;
+    if (root_fd < 0) return BOSUN_STORE_UNAVAILABLE;
+    char name[BOSUN_NAME_MAX];
+    int parent = parent_fd(path, name);
+    if (parent < 0) return result(errno);
+    int error = 0;
+    if (!offset && unlinkat(parent, temporary_name, 0) != 0 && errno != ENOENT) error = errno;
+    int fd = -1;
+    if (!error) {
+        fd = openat(parent, temporary_name, offset ? O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC :
+                    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0) error = errno;
+    }
+    struct stat st;
+    if (!error && fstat(fd, &st) != 0) error = errno;
+    if (!error && (!S_ISREG(st.st_mode) || st.st_nlink != 1 || (uint64_t)st.st_size != offset)) error = EINVAL;
+    bool torn = false;
+    if (!error) { error = write_all(fd, data, length); torn = error != 0; }
+    if (fd >= 0) {
+        if (!error && fsync(fd) != 0) { error = errno; torn = true; }
+        if (close(fd) != 0 && !error) { error = errno; torn = true; }
+    }
+    /* Unlike littlefs, a failed POSIX append may leave a torn suffix behind. */
+    if (torn) (void)unlinkat(parent, temporary_name, 0);
+    close(parent);
+    return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_commit(const char *path) {
+    if (!bosun_store_safe_path(path)) return BOSUN_STORE_INVALID;
+    if (root_fd < 0) return BOSUN_STORE_UNAVAILABLE;
+    char name[BOSUN_NAME_MAX];
+    int parent = parent_fd(path, name);
+    if (parent < 0) return result(errno);
+    int error = replaceable(parent, name);
+    struct stat st;
+    if (!error && fstatat(parent, temporary_name, &st, AT_SYMLINK_NOFOLLOW) != 0) error = errno;
+    else if (!error && (!S_ISREG(st.st_mode) || st.st_nlink != 1)) error = EINVAL;
+    if (!error && renameat(parent, temporary_name, parent, name) != 0) error = errno;
+    if (!error && fsync(parent) != 0) error = errno;
+    close(parent);
+    return result(error);
+}
+
+bosun_store_result_t bosun_store_stage_discard(const char *path) {
+    if (!bosun_store_safe_path(path)) return BOSUN_STORE_INVALID;
+    if (root_fd < 0) return BOSUN_STORE_UNAVAILABLE;
+    char name[BOSUN_NAME_MAX];
+    int parent = parent_fd(path, name);
+    if (parent < 0) return errno == ENOENT ? BOSUN_STORE_OK : result(errno);
+    int error = unlinkat(parent, temporary_name, 0) != 0 && errno != ENOENT ? errno : 0;
+    if (!error && fsync(parent) != 0) error = errno;
     close(parent);
     return result(error);
 }

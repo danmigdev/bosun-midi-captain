@@ -342,13 +342,17 @@ export interface DeviceStats {
 }
 
 export type FirmwareMessage =
-  | { type: "ACK"; id?: string; fw?: string }
+  | { type: "ACK"; id?: string; fw?: string; received?: number }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
   | { type: "ERROR"; id?: string; error: string; of?: string; detail?: string }
   | { type: "HUB_UPDATE"; id?: string; job?: string; phase: string;
       received?: number; size?: number; error?: string; detail?: string;
       backup?: string; release?: string; firmware_version?: string;
       sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string }
+  // Raspberry Pi startup logo (hub-local, see lib/boot-logo.ts).
+  | { type: "HUB_BOOT_LOGO"; id?: string; supported?: boolean; custom?: boolean;
+      early?: "applied" | "pending" | "unavailable" | "error"; error?: string; png?: string;
+      upload?: string; received?: number; size?: number }
   | { type: "DEVICE_INFO"; id?: string; fw: string; device: string; current: { bank: number; slot: number };
       profile?: string;
       /** Firmware 0.8+: the model's switch layout (see lib/hardware.ts parseHardware).
@@ -358,6 +362,8 @@ export type FirmwareMessage =
       reboot_modes?: string[];
       /** Firmware can execute a complete guarded tap via ACTIVATE_SWITCH. */
       stage_input?: boolean;
+      /** Startup logo the TFT shows; absent when the firmware has none. */
+      boot_logo?: "custom" | "default";
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
       bank_count?: number;
       preset_navigation?: Record<string, unknown>;

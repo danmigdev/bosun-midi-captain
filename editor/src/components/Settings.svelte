@@ -7,6 +7,8 @@
   import { getBankCount, getRigsPerBank, MAX_BANKS, MAX_RIGS_PER_BANK } from "../lib/bank-layout";
   import { CAPTAIN_10, expressionJacks, hasSwitch, missingSwitches, type HardwareLayout } from "../lib/hardware";
   import ExpressionPedals from "./ExpressionPedals.svelte";
+  import StartupLogo from "./StartupLogo.svelte";
+  import type { PedalLogoState } from "../lib/boot-logo";
 
   type DeviceConfig = {
     device_name?: string;
@@ -24,7 +26,7 @@
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number; dim?: number };
     preset_navigation?: { switches?: Record<string, number>; bank_colors?: Record<string, string> };
-    tft?: { brightness?: number; rotation?: number };
+    tft?: { brightness?: number; rotation?: number; boot_logo_seconds?: number };
     expression?: ExpressionConfig[];
     [k: string]: unknown;
   };
@@ -33,8 +35,13 @@
     device: DeviceConfig | null; manifest?: Manifest | null; activeKind?: string; connected?: boolean;
     /** Connected model; omitted means the 10-switch Captain. */
     hardware?: HardwareLayout;
+    /** DEVICE_INFO.boot_logo: null when the firmware has no startup logo. */
+    bootLogo?: PedalLogoState | null;
+    networkSession?: boolean;
+    firmwareVersion?: string;
   };
-  let { device, manifest = null, activeKind = "", connected = true, hardware = CAPTAIN_10 }: Props = $props();
+  let { device, manifest = null, activeKind = "", connected = true, hardware = CAPTAIN_10,
+    bootLogo = null, networkSession = false, firmwareVersion = "" }: Props = $props();
 
   /** A full expression-jack entry with sensible defaults (disabled, CC 11). */
   function defaultExpression(jack: number): ExpressionConfig {
@@ -80,6 +87,8 @@
     if (!w.leds) w.leds = { brightness: 64, dim: 64 };
     if (w.leds.dim == null) w.leds.dim = 64;
     if (!w.tft) w.tft = { brightness: 80, rotation: 180 };
+    // Only firmware with a startup logo knows this key.
+    if (bootLogo && w.tft.boot_logo_seconds == null) w.tft.boot_logo_seconds = 2;
     // Expression jacks: one default per jack this model has (none on a
     // pedal without jacks), each backfilled to a complete entry so the
     // editor can bind enable/invert/curve/message without null checks.
@@ -144,7 +153,8 @@
       // The jack count is part of the fingerprint: expression defaults are
       // seeded per model, so hardware reported after the config arrived (or
       // a pedal swap) reseeds instead of keeping the other model's jacks.
-      const fp = `${hardware.expression_jacks}:${JSON.stringify(device)}`;
+      // So is startup logo support, which seeds tft.boot_logo_seconds.
+      const fp = `${hardware.expression_jacks}:${bootLogo ? 1 : 0}:${JSON.stringify(device)}`;
       if (fp !== lastFingerprint) {
         working = withDefaults(device);
         lastFingerprint = fp;
@@ -155,6 +165,8 @@
   async function save() {
     if (!bankCountValid) return;
     saving = true; saveErr = "";
+    const seconds = working.tft?.boot_logo_seconds;
+    if (typeof seconds === "number") working.tft!.boot_logo_seconds = Math.min(60, Math.max(0, Math.round(seconds)));
     try {
       await cmd.putGlobal(working as Record<string, unknown>);
       savedAt = new Date().toLocaleTimeString();
@@ -495,8 +507,18 @@
             {#each ROTATIONS as r}<option value={r}>{r}°</option>{/each}
           </select>
         </label>
+        {#if bootLogo}
+          <label>Startup logo (seconds)
+            <input type="number" min="0" max="60" step="1" bind:value={working.tft!.boot_logo_seconds} />
+          </label>
+        {/if}
       </div>
+      {#if bootLogo}
+        <p class="hint small">How long the startup logo stays on screen at power-on. 0 turns it off; a switch press skips it.</p>
+      {/if}
     </section>
+
+    <StartupLogo {connected} pedalLogo={bootLogo} {networkSession} version={firmwareVersion} />
 
     <!-- Hidden on a pedal without jacks unless a copied config left entries
          to remove; ExpressionPedals (which polls STATS) only mounts with jacks. -->

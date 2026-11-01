@@ -35,6 +35,7 @@ import logging
 import secrets
 from typing import Optional
 
+from .boot_logo import BootLogoService
 from .link import UpstreamLink
 from .update_service import UpdateService
 
@@ -203,6 +204,8 @@ class Hub:
         self._target = target
         self._update_device_info = None
         self.updates = UpdateService(self)
+        # Unsupported until server.run() configures its state directory.
+        self.boot_logo = BootLogoService(self)
         self.link = UpstreamLink(
             target=target,
             on_line=self._on_upstream_line,
@@ -251,6 +254,7 @@ class Hub:
 
     def start(self) -> None:
         self._loop = asyncio.get_running_loop()
+        self.boot_logo.start()
         self.link.start()
 
     def stop(self) -> None:
@@ -379,6 +383,9 @@ class Hub:
 
         kind = msg.get("type")
         if self.updates.handle(sub, msg):
+            return
+        # Pi-local like the update jobs: never forwarded, so maintenance cannot block it.
+        if self.boot_logo.handle(sub, msg):
             return
         if kind == "PING" and self.updates.allows_local_ping():
             self._offer_correlated(sub, "id" in msg, msg.get("id"), {"type": "ACK"})

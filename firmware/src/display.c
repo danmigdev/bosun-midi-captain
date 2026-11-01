@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "bosun/display.h"
+#include "bosun/protocol.h"
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include "../third_party/adafruit-gfx-font/glcdfont.c"
 #include "../third_party/adafruit-gfx-font/unicode_cp437.h"
+#include "boot_logo.c"
 
 enum { CELL_W = 6, CELL_H = 12,
        SCROLL_MARGIN = 6, SCROLL_PAUSE = 800, ROWS_PER_TICK = 8 };
+enum { LOGO_OFF, LOGO_BOOT, LOGO_START, LOGO_DRAW, LOGO_HOLD };
 
 static int clamp(int value, int minimum, int maximum) {
     return value < minimum ? minimum : value > maximum ? maximum : value;
@@ -180,10 +183,8 @@ static void simple_label(bosun_display_t *display, const char *text, uint8_t sca
     label->x = (int16_t)((240 - (int)label->width) / 2);
     label->y = (int16_t)(center_y - label->height / 2);
 }
-static void prepare(bosun_display_t *display, const bosun_config_t *config,
-                    const bosun_kemper_state *kemper) {
-    display->status = BOSUN_DISPLAY_OK;
-    display->count = 0; display->scrolling = false;
+/* Rotation and backlight; both are resent with the first frame. */
+static void panel(bosun_display_t *display, const bosun_config_t *config) {
     int tft = bosun_json_get(&config->device_doc, 0, "tft");
     int rotation = bosun_config_int(&config->device_doc, tft, "rotation", 180);
     if (rotation < 0 || rotation > 270 || rotation % 90) { rotation = 180; display->status |= BOSUN_DISPLAY_INVALID_LAYOUT; }
@@ -196,6 +197,13 @@ static void prepare(bosun_display_t *display, const bosun_config_t *config,
     uint8_t level = (uint8_t)((brightness * 255 + 50) / 100);
     if (!display->has_frame || level != display->brightness) bosun_board_display_brightness(level);
     display->brightness = level;
+}
+static void prepare(bosun_display_t *display, const bosun_config_t *config,
+                    const bosun_kemper_state *kemper) {
+    display->status = BOSUN_DISPLAY_OK;
+    display->count = 0; display->scrolling = false;
+    panel(display, config);
+    int tft = bosun_json_get(&config->device_doc, 0, "tft");
     display->tuner = kemper && kemper->tuner_active;
     if (display->tuner) {
         int deviation = clamp((int)kemper->tuner_deviance - 8192, -2000, 2000);
@@ -249,16 +257,89 @@ static void row_label(bosun_display_t *display, const bosun_display_label_t *lab
         ++character;
     }
 }
+/* Fills line with logo row display->row and returns the built-in run cursor
+ * after it; the caller keeps that cursor only once the row is on the panel.
+ * A custom row costs one bounded storage read; any failure redraws the whole
+ * frame with the built-in logo instead. */
+static uint16_t logo_line(bosun_display_t *display) {
+    unsigned y = display->row, run = display->logo_run;
+    memset(display->line, 0, sizeof display->line);
+    if (y >= BOSUN_BOOT_LOGO_HEIGHT) {
+        for (unsigned label = 0; label < display->count; ++label) row_label(display, &display->labels[label]);
+        return (uint16_t)run;
+    }
+    if (display->logo_custom) {
+        size_t length = 0;
+        if (bosun_store_read_at(BOSUN_BOOT_LOGO_PATH, y * (uint32_t)sizeof display->line, display->line,
+                                sizeof display->line, &length) == BOSUN_STORE_OK && length == sizeof display->line) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+            for (unsigned x = 0; x < 240; ++x) display->line[x] = (uint16_t)(display->line[x] << 8 | display->line[x] >> 8);
+#endif
+            return (uint16_t)run;
+        }
+        display->logo_custom = false; display->row = 0; y = 0; run = 0;
+        memset(display->line, 0, sizeof display->line);
+    }
+    if (y >= BOOT_LOGO_Y && y < BOOT_LOGO_Y + BOOT_LOGO_SIZE)
+        for (unsigned x = BOOT_LOGO_X; x < BOOT_LOGO_X + BOOT_LOGO_SIZE && run < BOOT_LOGO_RUNS; ++run)
+            for (unsigned n = 0; n < boot_logo_runs[run][0] && x < BOOT_LOGO_X + BOOT_LOGO_SIZE; ++n)
+                display->line[x++] = boot_logo_runs[run][1];
+    return (uint16_t)run;
+}
+/* True while the startup logo owns the panel. */
+static bool logo(bosun_display_t *display, const bosun_config_t *config, uint32_t now_ms) {
+    if (display->logo == LOGO_START) {
+        display->status = BOSUN_DISPLAY_OK;
+        display->count = 0; display->scrolling = false;
+        panel(display, config);
+        simple_label(display, "v" BOSUN_FIRMWARE_VERSION, 2, rgb565(0x9aa1ad), 220);
+        display->row = 0; display->logo_run = 0; display->logo_custom = true;
+        display->logo = LOGO_DRAW;
+    }
+    if (display->logo == LOGO_DRAW) {
+        for (unsigned rows = 0; rows < ROWS_PER_TICK && display->row < 240; ++rows) {
+            uint16_t next = logo_line(display);
+            if (!bosun_board_display_blit_rgb565(0, (int16_t)display->row, 240, 1, display->line, 240)) {
+                display->status |= BOSUN_DISPLAY_IO;
+                return true;
+            }
+            display->logo_run = next;
+            ++display->row;
+        }
+        if (display->row < 240) return true;
+        display->logo = LOGO_HOLD; display->logo_ms = now_ms;
+        return true;
+    }
+    if (now_ms - display->logo_ms < display->logo_duration) return true;
+    bosun_display_skip_logo(display);
+    return false;
+}
+void bosun_display_logo(bosun_display_t *display, uint16_t duration_ms) {
+    if (!display) return;
+    if (!duration_ms) { bosun_display_skip_logo(display); return; }
+    display->logo = LOGO_START; display->logo_duration = duration_ms;
+}
+void bosun_display_skip_logo(bosun_display_t *display) {
+    if (!display || display->logo == LOGO_OFF) return;
+    display->logo = LOGO_OFF; display->has_frame = false; display->row = 240;
+}
 void bosun_display_init(bosun_display_t *display) {
     if (!display) return;
     memset(display, 0, sizeof *display);
-    display->row = 240;
+    display->row = 240; display->logo = LOGO_BOOT;
 }
 unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *config,
                               const bosun_kemper_state *kemper, const char *hold_effect,
                               uint32_t now_ms) {
     if (!display || !config) return BOSUN_DISPLAY_INVALID_LAYOUT;
     if (!hold_effect) hold_effect = "";
+    if (display->logo == LOGO_BOOT) {
+        int tft = bosun_json_get(&config->device_doc, 0, "tft");
+        int seconds = clamp(bosun_config_int(&config->device_doc, tft, "boot_logo_seconds", 2), 0, 60);
+        display->logo = LOGO_OFF;
+        bosun_display_logo(display, (uint16_t)(seconds * 1000));
+    }
+    if (display->logo != LOGO_OFF && logo(display, config, now_ms)) return display->status;
     uint32_t kemper_revision = kemper ? kemper->revision : 0;
     if (display->row >= 240) {
         bool changed = !display->has_frame || config->revision != display->config_revision ||

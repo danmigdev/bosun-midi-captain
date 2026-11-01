@@ -1,6 +1,13 @@
 #include "bosun/protocol.h"
+#include "bosun/display.h"
 #include "bosun_manifest.h"
 #include <string.h>
+
+enum { LOGO_CHUNK_MAX = 12288 };
+_Static_assert(BOSUN_PROTOCOL_RX_BYTES > (LOGO_CHUNK_MAX + 2u) / 3u * 4u + 256u,
+               "A full PUT_LOGO line must fit the request buffer");
+_Static_assert(BOSUN_PROTOCOL_TX_BYTES > LOGO_CHUNK_MAX + 1024u,
+               "Logo read-back reuses the reply buffer after its header");
 
 static bool field(bosun_json_writer_t *w, const char *name) {
     return bosun_json_puts(w, ",") && bosun_json_quote(w, name) && bosun_json_puts(w, ":");
@@ -67,7 +74,8 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "on", "request", "mode", "switch", "model"};
+        "on", "request", "mode", "switch", "model", "offset", "data", "size", "fnv1a"};
+    _Static_assert(sizeof names / sizeof *names <= 32, "one bit per argument name");
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
         for (unsigned k = 0; k < sizeof names / sizeof *names; ++k)
@@ -344,6 +352,9 @@ static void device_info(bosun_protocol_t *p) {
      * and skips GET_GLOBAL, so it also needs bank_count and the Screen projection. */
     tft_projection(p, d);
     bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
+    size_t none;
+    string(&p->writer, "boot_logo",
+           bosun_store_read_at(BOSUN_BOOT_LOGO_PATH, 0, NULL, 0, &none) == BOSUN_STORE_OK ? "custom" : "default");
 }
 /* The reply buffer is also the file read workspace. Validate saved JSON before
  * exposing it on wire; these handlers no longer need request tokens afterward. */
@@ -359,6 +370,109 @@ static bosun_store_result_t read_value(bosun_protocol_t *p, const char *profile,
     if (parsed != BOSUN_JSON_OK || doc.tokens[0].type != BOSUN_JSON_OBJECT)
         return parsed == BOSUN_JSON_LIMIT ? BOSUN_STORE_LIMIT : BOSUN_STORE_INVALID;
     p->writer.length += length; return BOSUN_STORE_OK;
+}
+static int base64_value(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    return c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+/* Canonical padded RFC 4648 base64, decoded over its own text: each group is
+ * read whole before its at most three bytes are written at or before it. */
+static bool base64_decode(char *text, size_t length, size_t *decoded) {
+    if (!length || length % 4) return false;
+    size_t padding = text[length - 1] != '=' ? 0 : text[length - 2] == '=' ? 2 : 1;
+    uint8_t *out = (uint8_t *)text; size_t used = 0;
+    for (size_t i = 0; i < length; i += 4) {
+        uint32_t bits = 0;
+        for (size_t k = i; k < i + 4; ++k) {
+            int value = k < length - padding ? base64_value((unsigned char)text[k]) : 0;
+            if (value < 0) return false;
+            bits = bits << 6 | (uint32_t)value;
+        }
+        size_t bytes = i + 4 < length ? 3 : 3 - padding;
+        if (bits & ((UINT32_C(1) << 8 * (3 - bytes)) - 1)) return false;
+        for (size_t k = 0; k < bytes; ++k) out[used++] = (uint8_t)(bits >> (16 - 8 * k));
+    }
+    *decoded = used; return true;
+}
+static bool unsigned_arg(bosun_protocol_t *p, const char *name, uint32_t *value) {
+    int token = get(p, name); const char *text; size_t length; uint64_t number = 0;
+    if (token < 0 || p->request.tokens[token].type != BOSUN_JSON_NUMBER ||
+        !bosun_json_raw(&p->request, token, &text, &length) || !length || length > 10) return false;
+    for (size_t i = 0; i < length; ++i) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        number = number * 10u + (uint64_t)(text[i] - '0');
+    }
+    if (number > UINT32_MAX) return false;
+    *value = (uint32_t)number; return true;
+}
+static void logo_error(bosun_protocol_t *p, const char *reason, uint32_t received) {
+    error(p, reason); unsigned_integer(&p->writer, "received", received);
+}
+/* Reads staged bytes into the reply buffer after its header. */
+static bosun_store_result_t staged_bytes(bosun_protocol_t *p, uint32_t offset, size_t length, char **out) {
+    size_t got = 0;
+    *out = p->tx + p->writer.length;
+    bosun_store_result_t r = bosun_store_stage_read_at(BOSUN_BOOT_LOGO_PATH, offset, *out, length, &got, NULL);
+    return r == BOSUN_STORE_OK && got != length ? BOSUN_STORE_IO : r;
+}
+static bosun_store_result_t put_logo(bosun_protocol_t *p) {
+    int32_t offset; int data = get(p, "data");
+    const char *raw; size_t raw_length, length = 0;
+    if (!bosun_json_integer(&p->request, get(p, "offset"), &offset) || offset < 0 ||
+        data < 0 || p->request.tokens[data].type != BOSUN_JSON_STRING ||
+        !bosun_json_raw(&p->request, data, &raw, &raw_length)) return BOSUN_STORE_INVALID;
+    if (raw_length - 2 > (LOGO_CHUNK_MAX + 2u) / 3u * 4u) { error(p, "limit_exceeded"); return BOSUN_STORE_OK; }
+    /* The request line is this protocol's own RX buffer; offset is already read. */
+    char *bytes = (char *)raw + 1;
+    if (!base64_decode(bytes, raw_length - 2, &length)) { error(p, "invalid_data"); return BOSUN_STORE_OK; }
+    if (length > LOGO_CHUNK_MAX || (uint32_t)offset > BOSUN_BOOT_LOGO_BYTES - length)
+        { error(p, "limit_exceeded"); return BOSUN_STORE_OK; }
+    uint32_t received = 0; size_t none;
+    bosun_store_result_t r = bosun_store_stage_read_at(BOSUN_BOOT_LOGO_PATH, 0, NULL, 0, &none, &received);
+    if (r != BOSUN_STORE_OK && r != BOSUN_STORE_NOT_FOUND) return r;
+    if (!offset) {
+        r = bosun_store_mkdir(BOSUN_BOOT_LOGO_DIR);
+        if (r == BOSUN_STORE_OK) r = bosun_store_stage_append(BOSUN_BOOT_LOGO_PATH, 0, bytes, length);
+    } else if ((uint32_t)offset == received) {
+        r = bosun_store_stage_append(BOSUN_BOOT_LOGO_PATH, received, bytes, length);
+    } else {
+        char *staged;
+        if (received < (uint32_t)offset || received - (uint32_t)offset != length ||
+            staged_bytes(p, (uint32_t)offset, length, &staged) != BOSUN_STORE_OK || memcmp(staged, bytes, length))
+            { logo_error(p, "offset_mismatch", received); return BOSUN_STORE_OK; }
+        r = BOSUN_STORE_OK; /* Identical retry of the last chunk: already stored. */
+    }
+    if (r == BOSUN_STORE_OK) unsigned_integer(&p->writer, "received", (uint32_t)offset + (uint32_t)length);
+    return r;
+}
+static bosun_store_result_t commit_logo(bosun_protocol_t *p) {
+    int32_t size; uint32_t expected, staged = 0; size_t none;
+    if (!bosun_json_integer(&p->request, get(p, "size"), &size) || size != (int32_t)BOSUN_BOOT_LOGO_BYTES ||
+        !unsigned_arg(p, "fnv1a", &expected)) return BOSUN_STORE_INVALID;
+    bosun_store_result_t r = bosun_store_stage_read_at(BOSUN_BOOT_LOGO_PATH, 0, NULL, 0, &none, &staged);
+    if (r != BOSUN_STORE_OK && r != BOSUN_STORE_NOT_FOUND) return r;
+    if (staged != BOSUN_BOOT_LOGO_BYTES) { logo_error(p, "incomplete_upload", staged); return BOSUN_STORE_OK; }
+    uint32_t hash = UINT32_C(2166136261);
+    for (uint32_t offset = 0; offset < staged;) {
+        size_t amount = staged - offset < LOGO_CHUNK_MAX ? staged - offset : LOGO_CHUNK_MAX;
+        char *chunk;
+        if ((r = staged_bytes(p, offset, amount, &chunk)) != BOSUN_STORE_OK) return r;
+        for (size_t i = 0; i < amount; ++i) hash = (hash ^ (uint8_t)chunk[i]) * UINT32_C(16777619);
+        offset += (uint32_t)amount;
+    }
+    if (hash != expected) { error(p, "checksum_mismatch"); return BOSUN_STORE_OK; }
+    r = bosun_store_stage_commit(BOSUN_BOOT_LOGO_PATH);
+    if (r == BOSUN_STORE_OK) p->logo_preview = true;
+    return r;
+}
+static bosun_store_result_t delete_logo(bosun_protocol_t *p) {
+    bosun_store_result_t r = bosun_store_stage_discard(BOSUN_BOOT_LOGO_PATH);
+    if (r == BOSUN_STORE_OK) r = bosun_store_remove(BOSUN_BOOT_LOGO_PATH);
+    if (r == BOSUN_STORE_NOT_FOUND) r = BOSUN_STORE_OK;
+    if (r == BOSUN_STORE_OK) p->logo_preview = true;
+    return r;
 }
 static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     bosun_runtime_t *rt = p->runtime; bosun_config_t *c = rt->config;
@@ -599,7 +713,10 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             field(&p->writer, "reboot"); bosun_json_puts(&p->writer, reboot ? "true" : "false");
             if (reboot) { p->reboot_bootloader = false; p->reboot_requested = true; }
         }
-    } else if (!strcmp(p->type, "REBOOT")) {
+    } else if (!strcmp(p->type, "PUT_LOGO")) r = put_logo(p);
+    else if (!strcmp(p->type, "COMMIT_LOGO")) r = commit_logo(p);
+    else if (!strcmp(p->type, "DELETE_LOGO")) r = delete_logo(p);
+    else if (!strcmp(p->type, "REBOOT")) {
         int mode = get(p, "mode");
         bool bootloader = mode >= 0 && bosun_json_equal(&p->request, mode, "bootloader");
         if (mode >= 0 && !bootloader && !bosun_json_equal(&p->request, mode, "normal"))

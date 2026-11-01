@@ -171,6 +171,39 @@ known-good directory to restore previous boot files and splash assets. Subsequen
 `install-boot-splash.sh` refresh the version in both the early picture and the
 browser screen; renderer changes require a new trial.
 
+### Custom startup logo
+
+Choose a startup logo in Bosun Settings while connected to the Pi over the
+network; **Use Bosun logo** restores the original. The logo replaces the Bosun
+icon and the "Bosun" name on the loading screens; the version line and the
+progress bar stay. Bosun Desktop or Android scales the image and sends ready-made
+pictures, so the Pi decodes no image itself: the hub only checks their structure,
+and Chromium displays the PNG.
+
+The hub keeps the logo in `/var/lib/bosun-hub/boot-logo` and inserts it into the
+Chromium loading screen as it serves Stage. No Stage file changes, so the logo
+survives Stage deployments and updates.
+
+The early framebuffer pictures change only where the framebuffer splash above
+is installed. `install-boot-splash.sh` installs `bosun-boot-logo.path`, which
+runs a small root helper whenever the logo changes. It copies the logo's pixel
+rows into the four pictures and keeps the original Bosun pictures in
+`/opt/bosun-hub/boot-splash/default`, so **Use Bosun logo** can restore them.
+Its result is in `/run/bosun-boot-logo/status.json` and
+`journalctl -u bosun-boot-logo.service`. Settings reports the early screen as
+unavailable without the framebuffer splash, and as pending until the helper has
+run. Rerunning `install-boot-splash.sh` after an update renders new pictures and
+pastes the logo into them again. After a trial commit the hub reapplies the
+logo when it starts at the next boot. Changing the logo between preparing and
+committing a trial changes the installed pictures, so the commit refuses; prepare
+the trial again.
+
+`/opt/bosun-hub`, the hub code and the boot splash files are owned by root;
+only the Stage bundle belongs to the `bosun` account that runs the network
+services. Earlier installers handed the whole directory to `bosun`, which let it
+change files that root runs at boot. Rerunning `install.sh` corrects an existing
+installation; `install-boot-splash.sh` also takes back the boot splash files.
+
 ### Stage output
 
 Connect and power an HDMI screen. Stage is configured to open automatically at startup and select the screen when it is connected later. The screen's advertised preferred resolution is used; a 1920 × 440 panel should advertise that mode. Check the actual image and supported resolution on your screen after connecting it.

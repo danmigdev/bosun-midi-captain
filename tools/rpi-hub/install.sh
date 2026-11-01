@@ -80,7 +80,15 @@ elif [[ -f "$STAGE_BUILD/index.html" ]]; then
 else
     echo "warning: no editor/dist-stage Stage bundle; preserving installed bundle" >&2
 fi
-chown -R "$HUB_USER:$HUB_USER" "$DEST"
+# Only Stage belongs to the hub account (deploy-stage.ps1 keeps that owner).
+# Root runs boot-splash files below $DEST at startup, so the directory, the
+# code and every other tree stay root-owned; no service writes here. Skip
+# links an older bosun-owned $DEST may hold: chmod follows them.
+chown root:root "$DEST"
+chmod 755 "$DEST"
+find "$DEST" -mindepth 1 -maxdepth 1 ! -name stage ! -type l -exec chown -R root:root {} +
+find "$DEST" -mindepth 1 -maxdepth 1 ! -name stage ! -type l -exec chmod -R go-w {} +
+chown -R "$HUB_USER:$HUB_USER" "$DEST/stage"
 
 echo "== systemd units =="
 install -m 644 "$SRC"/systemd/bosun-hub.service   /etc/systemd/system/

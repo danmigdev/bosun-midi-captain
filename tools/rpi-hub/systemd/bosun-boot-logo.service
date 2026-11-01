@@ -1,0 +1,22 @@
+[Unit]
+Description=Bosun custom startup logo for the early boot pictures
+# Started by bosun-boot-logo.path. Root only copies validated pixel rows from
+# the hub's state directory into /opt/bosun-hub/boot-splash; nothing is decoded.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/bosun-boot-logo
+ProtectSystem=strict
+# Optional: without the framebuffer splash the applier only reports unavailable.
+ReadWritePaths=-/opt/bosun-hub/boot-splash
+ProtectHome=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+# No capability is needed: hub files are world-readable, outputs root-owned.
+CapabilityBoundingSet=
+PrivateDevices=yes
+UMask=0022
+RuntimeDirectory=bosun-boot-logo
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0755
+TimeoutStartSec=60
