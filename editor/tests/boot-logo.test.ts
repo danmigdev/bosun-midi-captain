@@ -1,4 +1,6 @@
 import { createHash, webcrypto } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ sendAndAwait: vi.fn() }));
@@ -6,7 +8,7 @@ vi.mock("../src/lib/protocol", () => ({ sendAndAwait: mocks.sendAndAwait }));
 
 import {
   CHUNK_BYTES, PI_PICTURE_BYTES, TFT_LOGO_BYTES, deletePedalLogo, fitRect, fnv1a32, hubLogoInfo,
-  packBsplash, packRgb565, resetHubLogo, toBase64, uploadHubLogo, uploadPedalLogo,
+  packBsplash, packRgb565, prepareLogo, resetHubLogo, toBase64, uploadHubLogo, uploadPedalLogo,
 } from "../src/lib/boot-logo";
 
 const bytes = (length: number) => Uint8Array.from({ length }, (_, i) => (i * 7) % 256);
@@ -40,6 +42,38 @@ describe("pixel formats", () => {
   it("rejects a pixel buffer of the wrong size", () => {
     expect(() => packRgb565([0, 0, 0], 1, 1)).toThrow();
     expect(() => packBsplash([0, 0, 0, 0], 2, 1)).toThrow();
+  });
+});
+
+describe("image loading", () => {
+  it("reads the picked file through a URL scheme the app CSP allows", async () => {
+    // A blob: URL is refused by the Desktop CSP, which made every image fail.
+    const csp = JSON.parse(readFileSync(resolve(process.cwd(), "src-tauri/tauri.conf.json"), "utf8"))
+      .app.security.csp as string;
+    const imgSrc = csp.split(";").map(part => part.trim()).find(part => part.startsWith("img-src"))!.split(/\s+/);
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      set src(value: string) { sources.push(value); }
+      decode() { return Promise.reject(new Error("stop after loading")); }
+    });
+    await expect(prepareLogo(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "logo.png", { type: "image/png" })))
+      .rejects.toThrow("not an image");
+    expect(sources).toHaveLength(1);
+    const scheme = sources[0].slice(0, sources[0].indexOf(":") + 1);
+    expect(scheme).toBe("data:");
+    expect(imgSrc).toContain(scheme);
+    vi.unstubAllGlobals();
+  });
+
+  it("gives an SVG without a MIME type the SVG type", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      set src(value: string) { sources.push(value); }
+      decode() { return Promise.reject(new Error("stop after loading")); }
+    });
+    await expect(prepareLogo(new File(["<svg xmlns='http://www.w3.org/2000/svg'/>"], "logo.svg"))).rejects.toThrow();
+    expect(sources[0].startsWith("data:image/svg+xml")).toBe(true);
+    vi.unstubAllGlobals();
   });
 });
 

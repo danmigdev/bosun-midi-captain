@@ -16,7 +16,7 @@ vi.mock("../src/lib/boot-logo", async (importOriginal) => ({
 
 const prepared = {
   tft: new Uint8Array(96000), piPicture: new Uint8Array(266416), piPng: new Uint8Array([1, 2, 3]),
-  previewUrl: "blob:logo",
+  previewUrl: "data:image/png;base64,AQID",
 };
 
 beforeEach(() => {
@@ -24,7 +24,6 @@ beforeEach(() => {
   mocks.getDeviceInfo.mockResolvedValue(undefined);
   mocks.prepareLogo.mockResolvedValue(prepared);
   mocks.hubLogoInfo.mockResolvedValue({ supported: true, custom: false });
-  URL.revokeObjectURL = vi.fn();
 });
 afterEach(() => cleanup());
 
@@ -53,7 +52,7 @@ describe("StartupLogo", () => {
     expect(mocks.getDeviceInfo).toHaveBeenCalled();
     expect(mocks.hubLogoInfo).not.toHaveBeenCalled();
     expect(mocks.uploadHubLogo).not.toHaveBeenCalled();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:logo");
+    expect(screen.queryByRole("button", { name: "Use this logo" })).toBeNull();
   });
 
   it("sends the logo to the pedal and the Raspberry Pi on a network session", async () => {

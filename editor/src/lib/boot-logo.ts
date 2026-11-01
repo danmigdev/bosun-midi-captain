@@ -28,7 +28,7 @@ export interface PreparedLogo {
   tft: Uint8Array;
   piPicture: Uint8Array;
   piPng: Uint8Array;
-  /** Object URL of the Chromium PNG, for previews. Revoke when done. */
+  /** data: URL of the Chromium PNG, for previews. */
   previewUrl: string;
 }
 
@@ -86,17 +86,28 @@ export function toBase64(bytes: Uint8Array): string {
 
 // ---- Rendering (needs a real canvas; jsdom has none) ----
 
+function readDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** The app's CSP (tauri.conf.json) allows data: images, not blob: URLs. */
 async function loadImage(file: Blob): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(file);
+  // An SVG only renders with its MIME type; some systems report none.
+  if (!file.type && "name" in file && /\.svg$/i.test(String(file.name))) {
+    file = new Blob([file], { type: "image/svg+xml" });
+  }
   try {
     const image = new Image();
-    image.src = url;
+    image.src = await readDataUrl(file);
     await image.decode();
     return image;
   } catch {
     throw new Error("This file is not an image the editor can read. Use PNG, JPEG, SVG or WebP.");
-  } finally {
-    URL.revokeObjectURL(url);
   }
 }
 
@@ -137,7 +148,8 @@ export async function prepareLogo(file: Blob): Promise<PreparedLogo> {
     const { element } = drawFitted(image, box.width, box.height, null);
     const blob = await pngBlob(element);
     if (blob.size <= PI_PNG_MAX_BYTES) {
-      return { tft, piPicture, piPng: new Uint8Array(await blob.arrayBuffer()), previewUrl: URL.createObjectURL(blob) };
+      const piPng = new Uint8Array(await blob.arrayBuffer());
+      return { tft, piPicture, piPng, previewUrl: `data:image/png;base64,${toBase64(piPng)}` };
     }
     // Photographic logos compress poorly; shrink until the Pi accepts it.
     if (attempt === 6) throw new Error("This image is too detailed for the startup screen. Try a simpler logo.");

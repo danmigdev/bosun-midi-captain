@@ -52,10 +52,7 @@
     }
   }
 
-  function discardPending() {
-    if (pending) URL.revokeObjectURL(pending.previewUrl);
-    pending = null;
-  }
+  function discardPending() { pending = null; }
   onDestroy(() => { destroyed = true; discardPending(); });
 
   async function picked(event: Event) {
