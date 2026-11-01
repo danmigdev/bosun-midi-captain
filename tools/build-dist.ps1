@@ -173,6 +173,11 @@ if ($SkipAndroid) {
     if (-not (Test-Path $adb)) { $adb = "C:\development\Android\Sdk\platform-tools\adb.exe" }
     $attached = @()
     if (Test-Path $adb) {
+        # The first adb call forks a background server that inherits the caller's
+        # output handles, so a caller capturing this script's output waits for it
+        # forever. Start the server detached first; later adb calls reuse it.
+        $server = Start-Process -FilePath $adb -ArgumentList "start-server" -WindowStyle Hidden -PassThru
+        if (-not $server.WaitForExit(30000)) { $server.Kill(); throw "adb start-server did not finish in 30 s" }
         $attached = @(Invoke-NativeTool { & $adb devices } | Where-Object { $_ -match "`tdevice$" })
     }
     if ($attached.Count -eq 0) {
