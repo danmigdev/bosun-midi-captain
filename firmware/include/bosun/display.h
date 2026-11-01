@@ -33,6 +33,7 @@ typedef struct {
     char hold_effect[129];
     uint16_t row, rotation, tuner_x, tuner_color, logo_duration, logo_run;
     uint8_t count, brightness, logo;
+    bool updating;
     unsigned status;
     bool has_frame, scrolling, tuner, logo_custom;
 } bosun_display_t;
@@ -52,4 +53,8 @@ unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *co
  * press) does. Either way the layout returns with a full redraw. */
 void bosun_display_logo(bosun_display_t *display, uint16_t duration_ms);
 void bosun_display_skip_logo(bosun_display_t *display);
+/* While active the logo frame shows "Updating" instead of the version, from
+ * the next render, with no timeout; skip does not end it. Turning it off
+ * ends any logo, including a preview requested meanwhile, with a full redraw. */
+void bosun_display_updating(bosun_display_t *display, bool active);
 #endif

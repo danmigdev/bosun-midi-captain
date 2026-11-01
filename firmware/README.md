@@ -64,6 +64,19 @@ logo in `src/boot_logo.c` is used; regenerate that file with
 - After a successful commit or delete the TFT previews the result for 3 s.
   `DEVICE_INFO.boot_logo` is `"custom"` or `"default"`.
 
+## Update lock
+
+`UPDATE_LOCK {seconds}` (an integer 0..120) protects a firmware update from the
+footswitches. A nonzero value locks, or renews the lock, until now + seconds;
+0 releases it. Anything else is `invalid_request`; the lock lives in RAM only,
+so a reboot clears it. While locked the physical switches are ignored (a switch
+held when the lock starts is released, so a momentary binding sends its release),
+`ACTIVATE_SWITCH` answers `ERROR update_lock` and every other command works.
+A switch still held when the lock ends stays ignored until it is let go, so
+unlocking never produces a press. Expression pedals are not affected. The TFT
+shows the startup logo frame with "Updating" in place of the version until the
+lock ends (switch presses do not dismiss it), then redraws the layout.
+
 ## Build requirements
 
 Build on Linux, or on Windows through WSL with an Ubuntu distribution. On

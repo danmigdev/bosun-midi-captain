@@ -6,6 +6,7 @@ from pathlib import Path
 import random
 import struct
 import sys
+import urllib.error
 import urllib.request
 import zlib
 
@@ -402,6 +403,43 @@ def test_http_serves_the_page_unchanged_by_default_or_without_the_block(stage):
     service.directory.joinpath("logo.bin").write_bytes(picture())
     (directory / "index.html").write_bytes(b"<h1>stage kiosk</h1>")
     assert get("/")[1] == b"<h1>stage kiosk</h1>"
+
+
+
+def test_http_serves_the_custom_png_for_the_update_screen(stage):
+    directory, service, get = stage
+    def missing(path="/boot-logo.png"):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            get(path)
+        assert error.value.code == 404 and error.value.headers["Cache-Control"] == "no-store"
+        error.value.close()
+    missing()  # Stage falls back to its bundled Bosun icon
+    service.directory.joinpath("logo.png").write_bytes(png())
+    missing()  # only logo.png, as a crash could leave it, is not a custom logo
+    service.directory.joinpath("logo.bin").write_bytes(picture())
+    for path in ("/boot-logo.png", "/boot-logo.png?t=1"):
+        headers, body = get(path)
+        assert body == png()
+        assert headers["Content-Type"] == "image/png" and headers["Cache-Control"] == "no-store"
+        assert int(headers["Content-Length"]) == len(body)
+    headers, body = get("/boot-logo.png", method="HEAD")
+    assert body == b"" and int(headers["Content-Length"]) == len(png())
+    # The store decides, never a same-named file in the bundle.
+    (directory / "boot-logo.png").write_bytes(b"bundle")
+    service.directory.joinpath("logo.bin").unlink()
+    missing()
+
+
+def test_http_without_a_logo_store_has_no_boot_logo(tmp_path):
+    httpd = _start_http(tmp_path, "127.0.0.1", 0, None)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/boot-logo.png", timeout=5)
+        assert error.value.code == 404
+        error.value.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_run_serves_the_configured_store_over_tcp_and_http(tmp_path, monkeypatch):

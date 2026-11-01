@@ -45,6 +45,7 @@ class ReadOnlyIO:
         self.pins = [device, device]
         self.calls = []
         self.snapshot_error = None
+        self.release_error = None
         self.on_snapshot = lambda: None
 
     def pin(self, port):
@@ -61,6 +62,13 @@ class ReadOnlyIO:
             raise self.snapshot_error
         self.on_snapshot()
         return copy.deepcopy(self.after)
+
+    def release_lock(self, device):
+        # UPDATE_LOCK lives in RAM only: releasing it writes nothing.
+        assert device == self.device
+        self.calls.append("release_lock")
+        if self.release_error:
+            raise self.release_error
 
     def forbidden(self, *args, **kwargs):
         pytest.fail("Recovery verification must never reboot or access device flash")
@@ -120,7 +128,7 @@ def test_verified_recovery_publishes_durable_record_without_changing_original_ev
     assert record["journal_sha256"] == hashlib.sha256(original["journal.json"]).hexdigest()
     assert record["configuration_before_sha256"] == hashlib.sha256(original["configuration-before.json"]).hexdigest()
     assert {p.name: p.read_bytes() for p in recovery.directory.iterdir()} == original
-    assert recovery.io.calls == ["pin", "snapshot", "pin"]
+    assert recovery.io.calls == ["pin", "snapshot", "pin", "release_lock"]
 
 
 def test_opened_usb_identity_mismatch_refuses_even_reading_the_device(recovery):
@@ -136,7 +144,7 @@ def test_fresh_usb_identity_swap_before_or_after_snapshot_is_rejected(recovery, 
     recovery.io.pins[int(swap_after_snapshot)] = replace(recovery.device, usb_path="/sys/devices/other-captain")
     with pytest.raises(install.FirmwareInstallError, match="Captain changed"):
         verify(recovery)
-    assert recovery.io.calls == (["pin", "snapshot", "pin"] if swap_after_snapshot else ["pin"])
+    assert recovery.io.calls == (["pin", "snapshot", "pin", "release_lock"] if swap_after_snapshot else ["pin"])
     assert_no_record(recovery)
 
 
@@ -151,6 +159,7 @@ def test_returned_firmware_and_every_configuration_component_must_match(recovery
         after["profiles"]["spare"][changed]["changed"] = True
     with pytest.raises(install.FirmwareInstallError, match="expected firmware|differs from the backup"):
         verify(recovery)
+    assert recovery.io.calls == ["pin", "snapshot", "release_lock"]
     assert_no_record(recovery)
 
 
@@ -200,7 +209,7 @@ def test_unsaved_device_changes_are_not_committed_by_recovery(recovery):
     recovery.io.snapshot_error = install.FirmwareInstallError("Unexpected unsaved changes after the update")
     with pytest.raises(install.FirmwareInstallError, match="unsaved changes"):
         verify(recovery)
-    assert recovery.io.calls == ["pin", "snapshot"]
+    assert recovery.io.calls == ["pin", "snapshot", "release_lock"]
     assert_no_record(recovery)
 
 
@@ -214,7 +223,7 @@ def test_original_evidence_changed_while_reading_device_is_not_certified(recover
     recovery.io.on_snapshot = change_evidence
     with pytest.raises(install.FirmwareInstallError, match="evidence changed during"):
         verify(recovery)
-    assert recovery.io.calls == ["pin", "snapshot", "pin"]
+    assert recovery.io.calls == ["pin", "snapshot", "pin", "release_lock"]
     assert_no_record(recovery)
 
 
@@ -235,5 +244,20 @@ def test_failed_record_directory_fsync_cannot_report_verified_success(recovery, 
     monkeypatch.setattr(install, "_sync_directory", fail_sync)
     with pytest.raises(OSError, match="fsync failure"):
         verify(recovery)
-    assert recovery.io.calls == ["pin", "snapshot", "pin"]
+    assert recovery.io.calls == ["pin", "snapshot", "pin", "release_lock"]
     assert json.loads((recovery.directory / "journal.json").read_text()) == recovery.journal
+
+
+def test_failed_lock_release_does_not_change_the_verified_result(recovery):
+    recovery.io.release_error = install.FirmwareResponseTimeout("No correlated response to UPDATE_LOCK")
+    result = verify(recovery)
+    assert result["recovery_verified"] is True and Path(result["recovery_record"]).is_file()
+    assert recovery.io.calls == ["pin", "snapshot", "pin", "release_lock"]
+
+
+def test_snapshot_failure_still_releases_the_lock_before_reporting(recovery):
+    recovery.io.snapshot_error = install.FirmwareResponseTimeout("No correlated response to UPDATE_LOCK")
+    with pytest.raises(install.FirmwareResponseTimeout):
+        verify(recovery)
+    assert recovery.io.calls == ["pin", "snapshot", "release_lock"]
+    assert_no_record(recovery)

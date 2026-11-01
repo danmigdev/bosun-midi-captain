@@ -33,6 +33,55 @@ class FirmwareResponseTimeout(FirmwareInstallError):
     pass
 
 
+class FirmwareRequestRefused(FirmwareInstallError):
+    """The device answered the correlated request with another type, e.g. ERROR."""
+
+
+# While Bosun reads the configuration it holds UPDATE_LOCK: the Captain ignores
+# its own switches and shows "Updating". A reply can take its full 15 s timeout
+# and renewals go out between requests, so a 5 s threshold keeps them <= 20 s
+# apart. A reboot or the lease's expiry also ends the lock.
+UPDATE_LOCK_SECONDS = 60
+UPDATE_LOCK_RENEW_S = 5
+
+
+def _update_lock(client, seconds: int) -> bool:
+    """Firmware before 0.8.5 answers ERROR, which never blocks its update.
+    Silence is not that answer: a timeout fails like any other request."""
+    try:
+        client.request("UPDATE_LOCK", "ACK", seconds=seconds)
+        return True
+    except FirmwareRequestRefused:
+        return False
+
+
+class _LockedClient:
+    """A snapshot's protocol client that keeps UPDATE_LOCK renewed."""
+
+    def __init__(self, client):
+        self._client = client
+        self._renewed = time.monotonic()
+        # Firmware without the command is not asked again every 5 s.
+        self._supported = _update_lock(client, UPDATE_LOCK_SECONDS)
+
+    def request(self, command: str, response: str, **fields) -> dict:
+        if self._supported and time.monotonic() - self._renewed >= UPDATE_LOCK_RENEW_S:
+            self._renewed = time.monotonic()
+            self._supported = _update_lock(self._client, UPDATE_LOCK_SECONDS)
+        return self._client.request(command, response, **fields)
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def _release_lock(io, device) -> None:
+    """Best effort: the lease ends the lock within 60 s on its own."""
+    try:
+        io.release_lock(device)
+    except Exception:
+        pass
+
+
 def _patch_inventory(client, profile):
     """Never back up a partial or mixed-revision catalog."""
     patches = []
@@ -78,6 +127,7 @@ class BootDevice:
 class InstallIO(Protocol):
     def pin(self, serial_port: str) -> PinnedDevice: ...
     def snapshot(self, device: PinnedDevice, *, save_dirty: bool, expected_info: dict | None = None) -> dict: ...
+    def release_lock(self, device: PinnedDevice) -> None: ...
     def enter_bootloader(self, device: PinnedDevice) -> BootDevice: ...
     def recover_bootloader(self, device: PinnedDevice) -> BootDevice: ...
     def save_flash(self, target: BootDevice, destination: Path) -> None: ...
@@ -190,10 +240,14 @@ def verify_prewrite_recovery(installation_dir: Path, serial_port: str, *,
     io = io or LinuxInstallIO()
     if io.pin(serial_port) != device:
         raise FirmwareInstallError("The connected Captain changed before recovery verification")
-    after = io.snapshot(device, save_dirty=False, expected_info=before["info"])
-    _compare_snapshot(before, after, journal["source_version"])
-    if _is_native(before["info"]) != _is_native(after["info"]) or io.pin(serial_port) != device:
-        raise FirmwareInstallError("The connected Captain changed during recovery verification")
+    try:
+        after = io.snapshot(device, save_dirty=False, expected_info=before["info"])
+        _compare_snapshot(before, after, journal["source_version"])
+        if _is_native(before["info"]) != _is_native(after["info"]) or io.pin(serial_port) != device:
+            raise FirmwareInstallError("The connected Captain changed during recovery verification")
+    finally:
+        # The check never reboots the Captain: give its switches back either way.
+        _release_lock(io, device)
     current_journal, current_before = read_prewrite_recovery(installation_dir)
     if current_journal != journal or current_before != before:
         raise FirmwareInstallError("The original recovery evidence changed during verification")
@@ -255,7 +309,16 @@ class FirmwareInstaller:
         verified_backup = False
         entered_bootloader = False
         writes_started = False
+        # A snapshot takes UPDATE_LOCK; only BOOTSEL (a reboot) or a release ends it.
+        locked = False
         io = self.io
+
+        def unlock() -> None:
+            nonlocal locked
+            if locked:
+                locked = False
+                _release_lock(io, device)
+
         report("preflight")
         try:
             package = validate_update_package(Path(package_path))
@@ -269,6 +332,7 @@ class FirmwareInstaller:
                 raise FirmwareInstallError("The selected USB device changed before the hub released its connection")
             report("reading_configuration", device=asdict(device),
                    release=package.manifest["release"], target_version=package.manifest["firmware_version"])
+            locked = True
             before = io.snapshot(device, save_dirty=True, expected_info=expected_info)
             _require_snapshot(before)
             if before["info"].get("fw") != expected_info.get("fw") or _is_native(before["info"]) != _is_native(expected_info):
@@ -279,6 +343,7 @@ class FirmwareInstaller:
             report("entering_bootloader", source_version=before["info"]["fw"])
             entered_bootloader = True
             target = io.enter_bootloader(device)
+            locked = False
             if target.flash_bytes != FLASH_BYTES or target.unique_id.upper() != device.serial.upper():
                 raise FirmwareInstallError("ROM flash identity/geometry does not match the pinned Captain")
             report("backing_up_flash", flash_unique_id=target.unique_id, flash_bytes=target.flash_bytes,
@@ -306,11 +371,13 @@ class FirmwareInstaller:
             report("rebooting")
             io.reboot(target)
             report("verifying_configuration")
+            locked = True
             after = io.snapshot(device, save_dirty=False)
             _compare_snapshot(before, after, package.manifest["firmware_version"])
             if not _is_native(after["info"]):
                 raise FirmwareInstallError("The device did not boot Bosun firmware")
             _write_new(job_dir / "configuration-after.json", (json.dumps(after, indent=2, sort_keys=True) + "\n").encode())
+            unlock()
             report("complete", status="complete", configuration_verified=True)
         except Exception as error:
             original_error = str(error)
@@ -322,17 +389,21 @@ class FirmwareInstaller:
                     if backup.stat().st_size != FLASH_BYTES or hashlib.sha256(backup.read_bytes()).hexdigest() != state["backup_sha256"]:
                         raise FirmwareInstallError("The full flash backup no longer matches its verified hash")
                     recovery = io.recover_bootloader(device)
+                    locked = False
                     if recovery.unique_id != target.unique_id or recovery.flash_bytes != FLASH_BYTES or recovery.rom_serial != target.rom_serial:
                         raise FirmwareInstallError("Rollback target identity changed")
                     io.load(recovery, backup, FLASH_BASE)
                     io.verify(recovery, backup, FLASH_BASE)
                     report("rolling_back", required=False, rollback_flash_verified=True)
                     io.reboot(recovery)
+                    locked = True
                     restored = io.snapshot(device, save_dirty=False)
                     _compare_snapshot(before, restored, before["info"]["fw"])
+                    unlock()
                     report("rolled_back", required=False, status="rolled_back", error=original_error,
                            rollback_verified=True)
                 except Exception as recovery_error:
+                    unlock()
                     report("manual_recovery", required=False, status="manual_recovery", error=original_error,
                            recovery_error=str(recovery_error), rollback_verified=False)
             else:
@@ -340,9 +411,12 @@ class FirmwareInstaller:
                 if entered_bootloader and io is not None and device is not None:
                     try:
                         target = io.recover_bootloader(device)
+                        locked = False
                         io.reboot(target)
                     except Exception as resume_error:
                         recovery_error = str(resume_error)
+                # The Captain may still run the old firmware: give its switches back.
+                unlock()
                 status = "manual_recovery" if recovery_error else "failed"
                 report(status, required=False, status=status, error=original_error,
                        recovery_error=recovery_error, flash_may_be_modified=False)
@@ -391,7 +465,7 @@ class _ProtocolClient:
                 if not isinstance(reply, dict) or reply.get("id") != correlation:
                     continue
                 if reply.get("type") != response:
-                    raise FirmwareInstallError(f"{command} failed: {reply.get('error', reply.get('type'))}")
+                    raise FirmwareRequestRefused(f"{command} failed: {reply.get('error', reply.get('type'))}")
                 return reply
             self._pending.extend(self.port.read(4096))
             if len(self._pending) > 65536:
@@ -493,6 +567,8 @@ class LinuxInstallIO:
     def snapshot(self, device: PinnedDevice, *, save_dirty: bool, expected_info: dict | None = None) -> dict:
         client = self._open_runtime_client(device)
         try:
+            # The lock outlives this client; the installer decides when to release it.
+            client = _LockedClient(client)
             info = client.request("GET_DEVICE_INFO", "DEVICE_INFO")
             if expected_info is not None and (info.get("fw") != expected_info.get("fw") or _is_native(info) != _is_native(expected_info)):
                 raise FirmwareInstallError("The connected firmware changed before saving pending edits")
@@ -542,6 +618,13 @@ class LinuxInstallIO:
                 raise FirmwareInstallError("Unsaved changes appeared while checking the configuration")
             _require_snapshot(snapshot)
             return snapshot
+        finally:
+            client.close()
+
+    def release_lock(self, device: PinnedDevice) -> None:
+        client = self._open_runtime_client(device, timeout=5)
+        try:
+            _update_lock(client, 0)
         finally:
             client.close()
 

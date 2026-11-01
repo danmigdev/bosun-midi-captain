@@ -20,6 +20,8 @@
     type Manifest,
     type PatchSummary,
   } from "../lib/protocol";
+  import { wsLink, type HubUpdate } from "./ws-link";
+  import bosunIcon from "../../src-tauri/icons/128x128@2x.png";
 
   type DeviceInfo = {
     fw: string;
@@ -40,6 +42,30 @@
   let globalDevice = $state<Record<string, unknown> | null>(null);
   let patches = $state<PatchSummary[]>([]);
   let everBooted = $state(false);
+  // Set while the hub updates the Captain's firmware or checks a recovery.
+  let update = $state<HubUpdate | null>(null);
+  let customLogoFailed = $state(false);
+
+  const UPDATE_STEPS: Record<string, string> = {
+    validating: "Checking the update package", "backing-up": "Backing up the pedal",
+    flashing: "Installing Bosun", rebooting: "Restarting the pedal",
+    verifying: "Checking firmware and settings",
+  };
+
+  function capitalize(text: string): string {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function updateStep({ phase, detail }: HubUpdate): string {
+    if (detail.trim()) return capitalize(detail.trim());
+    return UPDATE_STEPS[phase] ?? capitalize(phase.replace(/[-_]+/g, " "));
+  }
+
+  function showUpdate(next: HubUpdate | null): void {
+    // Every new screen tries the custom logo again: it may have been set since.
+    if (next && !update) customLogoFailed = false;
+    update = next;
+  }
 
   let hasPatchList = false;
   let deviceInfoRetry: ReturnType<typeof setTimeout> | null = null;
@@ -157,6 +183,9 @@
     let announcedLocation = "";
     let announcedUntil = 0;
     const keep = (off: () => void) => disposed ? off() : offs.push(off);
+    // Kiosk only, so straight from the transport rather than protocol.ts.
+    offs.push(wsLink.on("hub-update", ({ payload }) => showUpdate(payload as HubUpdate | null)));
+    showUpdate(wsLink.update);
 
     async function sync() {
       const up = await isConnected();
@@ -317,14 +346,68 @@
     {patches}
     onExit={() => location.reload()}
   />
-  {#if !connected}
+  {#if !connected && !update}
     <div class="kiosk-reconnecting">reconnecting…</div>
   {/if}
 {:else}
   <div class="kiosk-waiting">Waiting for the pedal…</div>
 {/if}
 
+{#if update}
+  <div class="kiosk-updating" role="status" aria-live="polite">
+    {#if customLogoFailed}
+      <img class="kiosk-updating__icon" src={bosunIcon} alt="" />
+    {:else}
+      <img class="kiosk-updating__logo" src="/boot-logo.png" alt="" onerror={() => (customLogoFailed = true)} />
+    {/if}
+    <strong>Updating</strong>
+    <small>{updateStep(update)}</small>
+    <p>Do not unplug the Captain or power off the Raspberry Pi.</p>
+  </div>
+{/if}
+
 <style>
+  /* Matches the boot splash in stage-kiosk.html, and sits above it so a
+     Stage opened mid-update says why the pedal is not ready. */
+  .kiosk-updating {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    background: #0f141a;
+    color: #e4e6eb;
+    font-family: "DejaVu Sans", sans-serif;
+    text-align: center;
+  }
+  .kiosk-updating__icon {
+    width: min(38vh, 192px);
+    height: min(38vh, 192px);
+  }
+  .kiosk-updating__logo {
+    width: auto;
+    height: auto;
+    max-width: min(90vw, 400px);
+    max-height: min(50vh, 222px);
+  }
+  .kiosk-updating strong {
+    margin-top: 12px;
+    font-size: 36px;
+    line-height: 1.2;
+  }
+  .kiosk-updating small {
+    margin-top: 8px;
+    color: #9aa1ad;
+    font-size: 18px;
+  }
+  .kiosk-updating p {
+    margin: 28px 0 0;
+    font-size: 16px;
+  }
+
   .kiosk-reconnecting {
     position: fixed;
     top: 0.6rem;

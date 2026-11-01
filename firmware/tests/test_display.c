@@ -211,11 +211,10 @@ static void decode_builtin(void) {
     assert(run == BOOT_LOGO_RUNS && BOOT_LOGO_Y + BOOT_LOGO_SIZE <= BOSUN_BOOT_LOGO_HEIGHT);
     assert(builtin[100][120] && !builtin[5][120] && !builtin[100][10]);
 }
-static void logo_frame_is(const uint16_t (*image)[240]) {
+static void logo_frame_with(const uint16_t (*image)[240], const char *text) {
     assert(!memcmp(pixels, image, BOSUN_BOOT_LOGO_BYTES));
-    static const char version[] = "v" BOSUN_FIRMWARE_VERSION;
-    assert(display.count == 1 && display.labels[0].length == sizeof version - 1);
-    assert(!memcmp(display.labels[0].glyphs, version, sizeof version - 1));
+    assert(display.count == 1 && display.labels[0].length == strlen(text));
+    assert(!memcmp(display.labels[0].glyphs, text, strlen(text)));
     assert(display.labels[0].scale == 2 && display.labels[0].y == 208);
     assert(display.labels[0].x == (240 - (int)display.labels[0].width) / 2);
     unsigned label = 0;
@@ -226,6 +225,7 @@ static void logo_frame_is(const uint16_t (*image)[240]) {
         }
     assert(label > 0);
 }
+static void logo_frame_is(const uint16_t (*image)[240]) { logo_frame_with(image, "v" BOSUN_FIRMWARE_VERSION); }
 static void boot(const char *device) {
     load(device, "{\"name\":\"Clean\"}");
     bosun_display_init(&display); /* load() skipped the startup logo. */
@@ -302,7 +302,7 @@ static void startup_logo_skip_and_preview(void) {
     for (unsigned i = 0; i < 28; ++i) render_at(0);
     assert(writes == 240); logo_frame_is(builtin);
 }
-static void custom_logo_rows_and_fallback(void) {
+static void make_custom(void) {
     for (unsigned y = 0; y < BOSUN_BOOT_LOGO_HEIGHT; ++y)
         for (unsigned x = 0; x < 240; ++x) {
             uint16_t value = (uint16_t)(y * 263u + x * 7u + 1u);
@@ -310,6 +310,87 @@ static void custom_logo_rows_and_fallback(void) {
             custom_bytes[(y * 240u + x) * 2u] = (uint8_t)value;
             custom_bytes[(y * 240u + x) * 2u + 1u] = (uint8_t)(value >> 8);
         }
+}
+static void no_writes_until(uint32_t start, uint32_t end) {
+    uint32_t before = writes;
+    for (uint32_t t = start; t - start < end - start; t += 997) render_at(t);
+    render_at(end);
+    assert(writes == before);
+}
+static void updating_screen(void) {
+    /* Over the layout: the logo frame with "Updating" and no timeout. */
+    boot("{\"tft\":{\"boot_logo_seconds\":0}}");
+    assert(frame(0) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    bosun_display_updating(&display, true);
+    bosun_display_updating(&display, true); /* Repeated ticks keep the frame. */
+    assert(frame(10) == BOSUN_DISPLAY_OK); logo_frame_with(builtin, "Updating");
+    assert(display.labels[0].scale == 2 && display.labels[0].y == 208);
+    /* A switch press, context changes and a 10 minute lock (across the clock
+     * wrap) never end it. */
+    bosun_display_skip_logo(&display);
+    strcpy(kemper.rig_name, "Lead"); kemper.rig_name_fresh = true; ++kemper.revision;
+    ++config.revision; ++config.patch_revision;
+    no_writes_until(10, 600000);
+    no_writes_until(UINT32_MAX - 1000, 5000);
+    logo_frame_with(builtin, "Updating");
+    /* A logo preview meanwhile redraws the Updating frame and ends with it. */
+    bosun_display_logo(&display, 3000);
+    assert(frame(20) == BOSUN_DISPLAY_OK); logo_frame_with(builtin, "Updating");
+    bosun_display_logo(&display, 0);
+    no_writes_until(20, 10000);
+    /* Unlocking redraws the whole layout from row 0. */
+    bosun_display_updating(&display, false);
+    assert(frame(10001) == BOSUN_DISPLAY_OK); layout_is("Lead");
+    for (unsigned y = 0; y < 100; ++y) for (unsigned x = 0; x < 240; ++x) assert(!pixels[y][x]);
+    no_writes_until(10002, 20000);
+    bosun_display_updating(&display, false); render_at(20001); assert(writes == 240 * 4);
+
+    /* A startup hold is taken over and does not resume after the lock. */
+    boot("{\"tft\":{\"boot_logo_seconds\":5}}");
+    assert(frame(0) == BOSUN_DISPLAY_OK); logo_frame_is(builtin);
+    bosun_display_updating(&display, true);
+    assert(frame(100) == BOSUN_DISPLAY_OK); logo_frame_with(builtin, "Updating");
+    no_writes_until(100, 7000);
+    bosun_display_updating(&display, false);
+    assert(frame(7001) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    no_writes_until(7002, 9000);
+    /* Mid-draw takeover restarts at row 0; mid-draw unlock redraws the layout. */
+    boot("{}");
+    for (unsigned i = 0; i < 4; ++i) render_at(0);
+    assert(writes == 32);
+    bosun_display_updating(&display, true);
+    assert(frame(1) == BOSUN_DISPLAY_OK && writes == 32 + 240); logo_frame_with(builtin, "Updating");
+    bosun_display_updating(&display, false);
+    assert(frame(2) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    boot("{}");
+    assert(frame(0) == BOSUN_DISPLAY_OK); logo_frame_is(builtin);
+    bosun_display_updating(&display, true);
+    render_at(1); render_at(1); assert(writes == 240 + 16 && display.row == 16);
+    bosun_display_updating(&display, false);
+    assert(frame(2) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    /* A preview running when the lock starts does not come back either. */
+    bosun_display_logo(&display, 3000);
+    assert(frame(10) == BOSUN_DISPLAY_OK); logo_frame_is(builtin);
+    bosun_display_updating(&display, true);
+    assert(frame(20) == BOSUN_DISPLAY_OK); logo_frame_with(builtin, "Updating");
+    bosun_display_updating(&display, false);
+    assert(frame(30) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    no_writes_until(31, 5000);
+
+    /* The custom logo, read row by row like the startup logo. */
+    make_custom();
+    assert(bosun_store_mkdir(BOSUN_BOOT_LOGO_DIR) == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic(BOSUN_BOOT_LOGO_PATH, custom_bytes, sizeof custom_bytes) == BOSUN_STORE_OK);
+    boot("{}");
+    bosun_display_updating(&display, true); /* Before the first render: no startup logo. */
+    assert(frame(0) == BOSUN_DISPLAY_OK); logo_frame_with(custom, "Updating");
+    no_writes_until(0, 3000);
+    bosun_display_updating(&display, false);
+    assert(frame(3001) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    assert(bosun_store_remove(BOSUN_BOOT_LOGO_PATH) == BOSUN_STORE_OK);
+}
+static void custom_logo_rows_and_fallback(void) {
+    make_custom();
     assert(bosun_store_mkdir(BOSUN_BOOT_LOGO_DIR) == BOSUN_STORE_OK);
     assert(bosun_store_write_atomic(BOSUN_BOOT_LOGO_PATH, custom_bytes, sizeof custom_bytes) == BOSUN_STORE_OK);
     boot("{}");
@@ -348,10 +429,11 @@ int main(void) {
     momentary_hold_repaints_without_configuration_change();
     startup_logo_timing();
     startup_logo_skip_and_preview();
+    updating_screen();
     custom_logo_rows_and_fallback();
     assert(bosun_store_mount(root) && bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     printf("display snapshots, geometry, color, expression text, UTF-8, scrolling, tuner, startup logo "
-           "(built-in %u runs, custom rows, fallback, hold/skip/preview): PASS (%zu bytes)\n",
+           "(built-in %u runs, custom rows, fallback, hold/skip/preview), Updating screen: PASS (%zu bytes)\n",
            (unsigned)BOOT_LOGO_RUNS, sizeof display);
     return 0;
 }

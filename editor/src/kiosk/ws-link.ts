@@ -10,10 +10,22 @@
 // `{"type":"HUB","link":"up"|"down"}` frames reporting whether the hub
 // itself is talking to the pedal. Those are handled here (they drive the
 // reconnecting/reconnected events) and never reach the firmware bus.
+// While the hub updates the Captain's firmware they also carry
+// `"update": {"phase", "detail"}` (reported as `hub-update`).
 
 type Handler = (event: { payload: unknown }) => void;
 
+/** The hub's running firmware update or recovery check. */
+export type HubUpdate = { phase: string; detail: string };
+
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 3000, 5000];
+
+function parseUpdate(value: unknown): HubUpdate | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { phase, detail } = value as Record<string, unknown>;
+  if (typeof phase !== "string" || !phase) return null;
+  return { phase, detail: typeof detail === "string" ? detail : "" };
+}
 
 function wsUrl(): string {
   const override = new URLSearchParams(location.search).get("ws");
@@ -35,6 +47,8 @@ class WsLink {
   private backoffStep = 0;
   private socketOpen = false;
   linkUp = false;
+  /** Kept across a socket drop: only a HUB frame says the update ended. */
+  update: HubUpdate | null = null;
 
   start(): void {
     if (this.wantOpen) return;
@@ -110,9 +124,17 @@ class WsLink {
   private handleControl(line: string): boolean {
     if (line.indexOf('"HUB"') === -1) return false;
     try {
-      const obj = JSON.parse(line) as { type?: string; link?: string };
+      const obj = JSON.parse(line) as { type?: string; link?: string; update?: unknown };
       if (obj.type !== "HUB") return false;
-      const up = obj.link === "up";
+      const update = parseUpdate(obj.update);
+      if (update?.phase !== this.update?.phase || update?.detail !== this.update?.detail) {
+        this.update = update;
+        this.emit("hub-update", update);
+      }
+      // The hub refuses Stage's requests while it updates the Captain. Stay
+      // down until the frame without `update`, whose "up" then resyncs Stage
+      // like any reconnect.
+      const up = obj.link === "up" && update === null;
       if (up !== this.linkUp) {
         this.linkUp = up;
         this.emit(up ? "firmware-reconnected" : "firmware-disconnected");
@@ -152,10 +174,10 @@ class WsLink {
     return () => { set!.delete(handler); };
   }
 
-  private emit(event: string): void {
+  private emit(event: string, payload: unknown = null): void {
     const set = this.listeners.get(event);
-    if (set) for (const h of set) h({ payload: null });
-    try { window.dispatchEvent(new CustomEvent(event)); } catch { /* noop */ }
+    if (set) for (const h of set) h({ payload });
+    try { window.dispatchEvent(new CustomEvent(event, { detail: payload })); } catch { /* noop */ }
   }
 
   /** Test hook: drop the current socket and let the next start() open a
@@ -177,6 +199,7 @@ class WsLink {
     this.inbox = [];
     this.socketOpen = false;
     this.linkUp = false;
+    this.update = null;
     this.backoffStep = 0;
     this.wantOpen = false;
   }

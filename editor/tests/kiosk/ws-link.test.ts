@@ -165,6 +165,74 @@ describe("ws-link", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("reports the hub's update steps and stays disconnected until the frame without one", async () => {
+    const link = await freshLink();
+    const updates = vi.fn();
+    const disconnected = vi.fn();
+    const reconnected = vi.fn();
+    link.on("hub-update", updates);
+    link.on("firmware-disconnected", disconnected);
+    link.on("firmware-reconnected", reconnected);
+    link.start();
+    last()._open();
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(reconnected).toHaveBeenCalledTimes(1);
+    expect(updates).not.toHaveBeenCalled();
+
+    // The job starts while the hub still owns a live Captain link.
+    const validating = { phase: "validating", detail: "" };
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", update: validating }));
+    expect(updates).toHaveBeenLastCalledWith({ payload: validating });
+    expect(link.update).toEqual(validating);
+    expect(link.isConnected()).toBe(false);
+    expect(disconnected).toHaveBeenCalledTimes(1);
+
+    // Same step again: no event. A new detail: one event.
+    last()._msg(JSON.stringify({ type: "HUB", link: "down", update: validating }));
+    expect(updates).toHaveBeenCalledTimes(1);
+    const flashing = { phase: "flashing", detail: "flashing firmware" };
+    last()._msg(JSON.stringify({ type: "HUB", link: "down", update: flashing }));
+    expect(updates).toHaveBeenCalledTimes(2);
+    expect(updates).toHaveBeenLastCalledWith({ payload: flashing });
+
+    // The new firmware's link comes back before the hub ends the job.
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", update: { phase: "verifying", detail: "complete" } }));
+    expect(link.isConnected()).toBe(false);
+    expect(reconnected).toHaveBeenCalledTimes(1);
+
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(updates).toHaveBeenLastCalledWith({ payload: null });
+    expect(link.update).toBeNull();
+    expect(link.isConnected()).toBe(true);
+    expect(reconnected).toHaveBeenCalledTimes(2);
+    expect(link.drain()).toEqual([]); // HUB frames never reach the firmware bus
+  });
+
+  it("ignores a malformed update field and keeps a known update across a socket drop", async () => {
+    const link = await freshLink();
+    const updates = vi.fn();
+    link.on("hub-update", updates);
+    link.start();
+    last()._open();
+    for (const update of [null, "flashing", ["flashing"], { detail: "x" }, { phase: "" }]) {
+      last()._msg(JSON.stringify({ type: "HUB", link: "up", update }));
+    }
+    expect(updates).not.toHaveBeenCalled();
+    expect(link.isConnected()).toBe(true);
+
+    last()._msg(JSON.stringify({ type: "HUB", link: "down", update: { phase: "rebooting", detail: 7 } }));
+    expect(link.update).toEqual({ phase: "rebooting", detail: "" });
+    last().close();
+    expect(link.update).toEqual({ phase: "rebooting", detail: "" });
+    vi.advanceTimersByTime(600);
+    last()._open();
+    // The hub's first frame on the new socket is authoritative.
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(link.update).toBeNull();
+    expect(updates).toHaveBeenLastCalledWith({ payload: null });
+    expect(link.isConnected()).toBe(true);
+  });
+
   it("honours a ?ws= override", async () => {
     (location as unknown as { search: string }).search = "?ws=ws://10.0.0.9:9999/";
     const link = await freshLink();

@@ -249,6 +249,8 @@ impl Worker {
         if !restartable_bosun(&info) {
             return Err("Direct USB updates require Bosun firmware that can restart into its USB bootloader.".into());
         }
+        // Switches cannot change the configuration while it is read.
+        let lock = UpdateLock::hold(&runtime);
         let dirty = runtime.request("GET_DIRTY", "DIRTY")?;
         if dirty["patches"].as_array().is_none_or(|v| !v.is_empty()) {
             return Err("Save or discard pending patch edits before updating firmware".into());
@@ -264,6 +266,7 @@ impl Worker {
             0,
             "Restarting the Captain in its USB bootloader",
         )?;
+        lock.keep();
         runtime.bootloader()?;
         drop(runtime);
         let mut boot = Picoboot::wait_for(&self.job.identity, Duration::from_secs(30))?;
@@ -325,6 +328,7 @@ impl Worker {
         for port in self.job.identity.serial_ports() {
             if let Ok(runtime) = Runtime::open(&port) {
                 if runtime.request("GET_DEVICE_INFO", "DEVICE_INFO").is_ok() {
+                    runtime.update_lock(UPDATE_LOCK_SECONDS);
                     runtime.bootloader()?;
                     break;
                 }
@@ -510,6 +514,7 @@ impl Worker {
             }
             if let Ok(runtime) = Runtime::open(&port) {
                 if runtime.request("GET_DEVICE_INFO", "DEVICE_INFO").is_ok() {
+                    runtime.update_lock(UPDATE_LOCK_SECONDS);
                     let _ = runtime.bootloader();
                 }
             }
@@ -714,6 +719,38 @@ impl Runtime {
         let _ = self.0.flush();
         Ok(())
     }
+    /// Ignore the switches and show "Updating" on the TFT for `seconds`
+    /// (0 releases). Best effort: firmware before 0.8.5 answers ERROR, and a
+    /// lost reply only leaves the lease to expire on the pedal.
+    fn update_lock(&self, seconds: u32) {
+        let _ = self.request_with("UPDATE_LOCK", json!({"seconds": seconds}), "ACK");
+    }
+}
+
+const UPDATE_LOCK_SECONDS: u32 = 60;
+
+/// Holds the update lock while the configuration is read. Released when an
+/// error drops it; kept for a restart into BOOTSEL, which clears the lock
+/// while the TFT keeps its "Updating" frame.
+struct UpdateLock<'a> {
+    runtime: &'a Runtime,
+    armed: bool,
+}
+impl<'a> UpdateLock<'a> {
+    fn hold(runtime: &'a Runtime) -> Self {
+        runtime.update_lock(UPDATE_LOCK_SECONDS);
+        Self { runtime, armed: true }
+    }
+    fn keep(mut self) {
+        self.armed = false;
+    }
+}
+impl Drop for UpdateLock<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.runtime.update_lock(0);
+        }
+    }
 }
 fn verify_runtime(
     identity: &UsbIdentity,
@@ -729,6 +766,7 @@ fn verify_runtime(
                 if info["fw"] != version {
                     return Err("Unexpected firmware version after reboot".into());
                 }
+                let lock = UpdateLock::hold(&runtime);
                 let actual = runtime.snapshot()?;
                 if (!snapshot.is_null() && actual != *snapshot)
                     || (snapshot.is_null()
@@ -740,6 +778,7 @@ fn verify_runtime(
                 if stats["storage_ready"] != true {
                     return Err("Captain storage is not ready after reboot".into());
                 }
+                drop(lock);
                 Ok(())
             }) {
                 Ok(()) => return Ok(port),

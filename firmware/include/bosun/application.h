@@ -22,6 +22,7 @@ typedef struct {
     bosun_display_t display;
     bosun_expression_presence_t expression_presence;
     uint16_t expression_raw[2];
+    uint16_t switches_ignored; /* Logical switches held through an update lock. */
     bosun_application_midi_queue_t midi[2];
     uint8_t input[BOSUN_APPLICATION_IO_BYTES];
     size_t input_offset, input_length;

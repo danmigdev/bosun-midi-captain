@@ -516,6 +516,9 @@ def recovery_job(tmp_path, monkeypatch):
             if self.failure:
                 raise worker.FirmwareInstallError(self.failure)
             return self.after
+        def release_lock(self, pinned):
+            assert pinned == device
+            self.calls.append("release_lock")
         def __getattr__(self, name):
             raise AssertionError("Recovery cannot mutate device: " + name)
     io = RecoveryIO()
@@ -536,7 +539,7 @@ def test_public_recovery_verifies_original_configuration_without_writes_and_unbl
         result = request(sub, "HUB_UPDATE_STATUS", job=job)
         assert result["phase"] == "error" and result["recovery_verified"] is True
         assert result["error"] == "Original BOOTSEL failure"
-        assert io.calls == ["pin", "snapshot", "pin"]
+        assert io.calls == ["pin", "snapshot", "pin", "release_lock"]
         assert Path(result["recovery_record"]).is_file()
         assert (installation / "journal.json").read_bytes() == original
         assert hub.link.connected and hub.link.stops == 1 and hub.link.sent == []
@@ -686,4 +689,139 @@ def test_public_recovery_does_not_clear_failure_when_restarted_link_opens_anothe
         assert state["phase"] == "recovery-required" and state["recovery_verified"] is False
         assert "identity changed" in state["recovery_error"]
         assert (installation.parent / "recovery-record.json").exists()
+    asyncio.run(body())
+
+
+# -- Stage's "Updating" screen: HUB frames carry the running job's step -----
+
+def hub_frames(sub):
+    """HUB status frames queued for a subscriber, oldest first."""
+    frames = []
+    while not sub._queue.empty():
+        frame = json.loads(sub._queue.get_nowait())
+        assert frame["type"] == "HUB", frame
+        frames.append(frame)
+    return frames
+
+
+VALID = SimpleNamespace(manifest={"release": "0.8.5", "firmware_version": "0.8.5"})
+
+
+def test_stage_frames_follow_a_committed_update_and_end_without_it(tmp_path):
+    async def body():
+        installer = Installer()
+        installer.release.clear()
+        hub, sub = setup(tmp_path, installer)
+        stage = hub.subscribe(want_status=True)
+        assert hub_frames(stage) == [{"type": "HUB", "link": "up"}]
+        job = upload(sub)
+        assert hub_frames(stage) == []  # an upload may be abandoned: it never covers Stage
+        with patch("bosun_hub.update_package.validate_update_package", return_value=VALID):
+            request(sub, "HUB_UPDATE_COMMIT", job=job)
+            assert hub_frames(stage) == [{"type": "HUB", "link": "up", "update": {"phase": "validating", "detail": ""}}]
+            assert await asyncio.to_thread(installer.started.wait, 2)
+            await asyncio.sleep(0)
+            flashing = {"type": "HUB", "link": "down", "update": {"phase": "flashing", "detail": "flashing"}}
+            assert hub_frames(stage) == [flashing]
+            # A Stage that connects mid-update learns the step at once.
+            late = hub.subscribe(want_status=True)
+            assert hub_frames(late) == [flashing]
+            # Link transitions keep their meaning and carry the step as well.
+            hub._link_state(False)
+            assert hub_frames(stage) == hub_frames(late) == [flashing]
+            installer.release.set()
+            await asyncio.wait_for(hub.updates.wait(), 2)
+        assert hub_frames(stage) == hub_frames(late) == [{"type": "HUB", "link": "up"}]
+        assert hub.updates.progress is None
+        # The raw TCP view never gets HUB frames: only its own replies were queued.
+        assert sub._queue.empty()
+        assert request(sub, "HUB_UPDATE_STATUS", job=job)["phase"] == "done"
+    asyncio.run(body())
+
+
+class StepInstaller(Installer):
+    def run(self, *args, **kwargs):
+        for phase in ("preflight", "reading_configuration", "reading_configuration", "entering_bootloader",
+                      "flashing_firmware", "rebooting", "verifying_configuration", "complete"):
+            args[-1]({"phase": phase})
+        return {"status": self.result}
+
+
+def test_stage_gets_one_frame_per_installer_step(tmp_path):
+    async def body():
+        hub, sub = setup(tmp_path, StepInstaller())
+        stage = hub.subscribe(want_status=True)
+        hub_frames(stage)
+        job = upload(sub)
+        with patch("bosun_hub.update_package.validate_update_package", return_value=VALID):
+            request(sub, "HUB_UPDATE_COMMIT", job=job)
+            await asyncio.wait_for(hub.updates.wait(), 2)
+        frames = hub_frames(stage)
+        assert [(frame["link"], frame.get("update")) for frame in frames] == [
+            ("up", {"phase": "validating", "detail": ""}),
+            ("down", {"phase": "validating", "detail": "preflight"}),
+            ("down", {"phase": "backing-up", "detail": "reading configuration"}),
+            ("down", {"phase": "backing-up", "detail": "entering bootloader"}),
+            ("down", {"phase": "flashing", "detail": "flashing firmware"}),
+            ("down", {"phase": "rebooting", "detail": "rebooting"}),
+            ("down", {"phase": "verifying", "detail": "verifying configuration"}),
+            ("down", {"phase": "verifying", "detail": "complete"}),
+            ("up", None),
+        ]
+        assert sub._queue.empty()
+    asyncio.run(body())
+
+
+def test_rejected_package_ends_the_screen_without_touching_the_link(tmp_path):
+    async def body():
+        hub, sub = setup(tmp_path)
+        stage = hub.subscribe(want_status=True)
+        hub_frames(stage)
+        job = upload(sub)
+        (hub.updates.root / job / "package.zip").write_bytes(b"changed")
+        request(sub, "HUB_UPDATE_COMMIT", job=job)
+        await hub.updates.wait()
+        assert hub_frames(stage) == [
+            {"type": "HUB", "link": "up", "update": {"phase": "validating", "detail": ""}},
+            {"type": "HUB", "link": "up"},
+        ]
+        assert hub.link.stops == 0
+    asyncio.run(body())
+
+
+def test_stage_frames_cover_a_recovery_check(recovery_job):
+    async def body():
+        hub, sub, job, _, io = recovery_job
+        io.release.clear()
+        stage = hub.subscribe(want_status=True)
+        hub_frames(stage)
+        request(sub, "HUB_UPDATE_RECOVER", job=job)
+        checking = {"phase": "verifying", "detail": "Checking the original firmware and saved configuration"}
+        assert hub_frames(stage) == [{"type": "HUB", "link": "up", "update": checking}]
+        assert await asyncio.to_thread(io.started.wait, 2)
+        assert hub_frames(hub.subscribe(want_status=True)) == [{"type": "HUB", "link": "down", "update": checking}]
+        io.release.set()
+        await asyncio.wait_for(hub.updates.wait(), 2)
+        assert hub_frames(stage) == [{"type": "HUB", "link": "up"}]
+        assert sub._queue.empty()
+    asyncio.run(body())
+
+
+def test_link_frames_are_built_when_the_loop_dispatches_them(tmp_path):
+    async def body():
+        hub, _ = setup(tmp_path)
+        hub._loop = asyncio.get_running_loop()
+        stage = hub.subscribe(want_status=True)
+        hub_frames(stage)
+        step = {"phase": "verifying", "detail": "complete"}
+        hub.updates.active = "a" * 32
+        hub.updates._announce({"job": "a" * 32, **step})
+        hub._on_upstream_state(True, "/dev/ttyACM1")  # as the link thread posts it
+        hub.updates.active = None
+        hub.updates._announce()
+        hub.updates._announce({"job": "a" * 32, **step})  # a late callback of the ended job
+        await asyncio.sleep(0)
+        # The posted link frame must not resurrect the step of the ended job.
+        assert hub_frames(stage) == [{"type": "HUB", "link": "up", "update": step},
+                                     {"type": "HUB", "link": "up"}, {"type": "HUB", "link": "up"}]
     asyncio.run(body())

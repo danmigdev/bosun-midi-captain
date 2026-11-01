@@ -84,6 +84,10 @@ class FakeIO:
             result["profiles"]["backup"]["device"]["lost_setting"] = True
         return result
 
+    def release_lock(self, device):
+        assert device == self.device
+        self.hit("release_lock")
+
     def enter_bootloader(self, device):
         self.hit("bootloader")
         return self.target
@@ -513,6 +517,9 @@ def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty, b
             pass
         def request(self, command, response, **fields):
             calls.append(command)
+            if command == "UPDATE_LOCK":
+                assert fields == {"seconds": install.UPDATE_LOCK_SECONDS}
+                return {"type": "ACK"}
             if command == "GET_DEVICE_INFO":
                 return expected["info"]
             if command == "GET_DIRTY":
@@ -538,10 +545,12 @@ def test_readonly_snapshot_never_saves_or_changes_profiles(monkeypatch, dirty, b
     if dirty:
         with pytest.raises(install.FirmwareInstallError, match="Save edits"):
             io.snapshot(device, save_dirty=True, expected_info=expected["info"])
-        assert calls == ["GET_DEVICE_INFO", "GET_DIRTY"]
+        assert calls == ["UPDATE_LOCK", "GET_DEVICE_INFO", "GET_DIRTY"]
     else:
         assert io.snapshot(device, save_dirty=True, expected_info=expected["info"]) == expected
-        assert set(calls) <= {"GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "GET_GLOBAL", "LIST_PATCHES", "GET_PATCH"}
+        # UPDATE_LOCK lives in RAM only; it is the first request of every snapshot.
+        assert calls[0] == "UPDATE_LOCK"
+        assert set(calls) <= {"UPDATE_LOCK", "GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "GET_GLOBAL", "LIST_PATCHES", "GET_PATCH"}
 
 
 def test_changed_firmware_is_rejected_at_first_readonly_response(monkeypatch):
@@ -560,7 +569,7 @@ def test_changed_firmware_is_rejected_at_first_readonly_response(monkeypatch):
     with pytest.raises(install.FirmwareInstallError, match="firmware changed"):
         io.snapshot(install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"),
                     save_dirty=True, expected_info={"fw": "0.6.5-native"})
-    assert calls == ["GET_DEVICE_INFO"]
+    assert calls == ["UPDATE_LOCK", "GET_DEVICE_INFO"]
 
 
 @pytest.mark.parametrize("failure", [OSError("USB disconnected"), install.FirmwareResponseTimeout("ACK lost")])
@@ -895,6 +904,8 @@ def test_readonly_snapshot_rejects_unsaved_edits_that_appear_during_read(monkeyp
     commands = []
     def request(command, response, **kwargs):
         commands.append(command)
+        if command == "UPDATE_LOCK":
+            return {"type": "ACK"}
         if command == "GET_DEVICE_INFO":
             return {"fw": "0.6.5-native"}
         if command == "GET_DIRTY":
@@ -906,4 +917,215 @@ def test_readonly_snapshot_rejects_unsaved_edits_that_appear_during_read(monkeyp
     monkeypatch.setattr(io, "_open_runtime_client", lambda _: SimpleNamespace(request=request, close=lambda: None))
     with pytest.raises(install.FirmwareInstallError, match="Unsaved changes appeared"):
         io.snapshot(install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"), save_dirty=False)
-    assert commands == ["GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "LIST_PROFILES", "GET_DIRTY"]
+    assert commands == ["UPDATE_LOCK", "GET_DEVICE_INFO", "GET_DIRTY", "LIST_PROFILES", "LIST_PROFILES", "GET_DIRTY"]
+
+
+# -- UPDATE_LOCK: the Captain ignores its switches while Bosun reads it ------
+
+def test_update_locks_each_snapshot_and_releases_after_the_new_firmware_check(environment):
+    io = FakeIO()
+    result = run_job(environment, io, lambda state: io.calls.append("report:" + state["phase"]))
+    assert result["status"] == "complete"
+    steps = [call for call in io.calls
+             if call in {"snapshot_before", "bootloader", "snapshot_after", "release_lock", "report:complete"}]
+    # BOOTSEL ends the first lock; the second ends once the readback matched.
+    assert steps == ["snapshot_before", "bootloader", "snapshot_after", "release_lock", "report:complete"]
+
+
+def test_failed_lock_release_never_fails_a_verified_update(environment):
+    io = FakeIO(failure="release_lock")
+    result = run_job(environment, io)
+    assert result["status"] == "complete" and result["configuration_verified"] is True
+    assert io.calls.count("release_lock") == 1
+
+
+@pytest.mark.parametrize("failure,released", [
+    ("pin", False), ("snapshot_before", True), ("configuration_write", True),
+    ("bootloader", False), ("backup", False),
+])
+def test_failure_before_writing_releases_a_lock_still_held_by_the_old_firmware(environment, monkeypatch, failure, released):
+    io = FakeIO(failure=failure)
+    if failure == "configuration_write":
+        normal_write = install._write_new
+        def write(path, data):
+            if path.name == "configuration-before.json":
+                raise OSError("state disk is full")
+            normal_write(path, data)
+        monkeypatch.setattr(install, "_write_new", write)
+    assert run_job(environment, io)["status"] == "failed"
+    # A failure after entering BOOTSEL reboots the Captain, which clears its lock.
+    assert io.calls.count("release_lock") == int(released)
+    if released:
+        assert io.calls[-1] == "release_lock"
+
+
+def test_bootsel_failure_without_a_resumed_captain_still_tries_to_release(environment):
+    class IO(FakeIO):
+        def recover_bootloader(self, device):
+            self.hit("recovery_bootloader")
+            raise install.FirmwareInstallError("The pinned Captain did not enumerate in BOOTSEL")
+    io = IO(failure="bootloader")
+    result = run_job(environment, io)
+    assert result["status"] == "manual_recovery" and result["flash_may_be_modified"] is False
+    assert io.calls[-3:] == ["bootloader", "recovery_bootloader", "release_lock"]
+
+
+def test_rollback_keeps_the_new_firmware_locked_into_bootsel_and_releases_the_restored_one(environment):
+    io = FakeIO(failure="configuration_mismatch")
+    assert run_job(environment, io)["status"] == "rolled_back"
+    steps = [call for call in io.calls if call in {"snapshot_after", "recovery_bootloader", "release_lock"}]
+    assert steps == ["snapshot_after", "recovery_bootloader", "snapshot_after", "release_lock"]
+
+
+def test_restored_firmware_that_fails_its_check_is_still_released(environment):
+    io = FakeIO(failure="load_firmware")
+    def progress(state):
+        if state.get("rollback_flash_verified"):
+            io.failure = "snapshot_after"
+    result = run_job(environment, io, progress)
+    assert result["status"] == "manual_recovery" and result["rollback_flash_verified"] is True
+    assert io.calls[-2:] == ["snapshot_after", "release_lock"]
+
+
+class FakeSerial:
+    """A CDC port answering each request type from a table; absent types stay silent."""
+
+    def __init__(self, answers):
+        self.answers, self.requests, self.pending = answers, [], b""
+
+    def write(self, wire):
+        request = json.loads(wire)
+        self.requests.append(request)
+        if request["type"] in self.answers:
+            self.pending += (json.dumps({**self.answers[request["type"]], "id": request["id"]}) + "\n").encode()
+        return len(wire)
+
+    def flush(self):
+        pass
+
+    def read(self, size):
+        data, self.pending = self.pending[:size], self.pending[size:]
+        return data
+
+
+def protocol_client(port):
+    client = object.__new__(install._ProtocolClient)
+    client.port, client._pending = port, bytearray()
+    return client
+
+
+def test_update_lock_ignores_an_error_reply_but_not_silence(monkeypatch):
+    port = FakeSerial({"UPDATE_LOCK": {"type": "ERROR", "error": "unknown_type", "of": "UPDATE_LOCK"},
+                       "GET_DEVICE_INFO": {"type": "ERROR", "error": "busy", "of": "GET_DEVICE_INFO"}})
+    client = protocol_client(port)
+    install._update_lock(client, 60)  # firmware before 0.8.5
+    assert port.requests == [{"type": "UPDATE_LOCK", "id": port.requests[0]["id"], "seconds": 60}]
+    with pytest.raises(install.FirmwareRequestRefused, match="busy"):
+        client.request("GET_DEVICE_INFO", "DEVICE_INFO")
+    # Every Bosun firmware answers an unknown command, so silence is a dead
+    # session: it fails like any other request instead of being skipped.
+    clock = iter(range(100))
+    monkeypatch.setattr(install.time, "monotonic", lambda: next(clock))
+    with pytest.raises(install.FirmwareResponseTimeout, match="UPDATE_LOCK"):
+        install._update_lock(protocol_client(FakeSerial({})), 60)
+
+
+class ScriptedCaptain:
+    """Answers a snapshot on a fake clock; each request takes delay(command) seconds."""
+
+    def __init__(self, monkeypatch, *, delay=lambda command: 1.0, lock=lambda seconds: {"type": "ACK"}):
+        self.now, self.delay, self.lock = 0.0, delay, lock
+        self.requests, self.closed, self.opened = [], 0, []
+        self.config = snapshot("0.8.5")
+        self.config["profiles"]["live"]["patches"] = {
+            f"01/{slot:02}": {"name": f"Rig {slot}", "bindings": []} for slot in range(1, 11)}
+        self.device = install.PinnedDevice("/sys/pinned", "1234567890ABCDEF")
+        monkeypatch.setattr(install.time, "monotonic", lambda: self.now)
+        self.io = object.__new__(install.LinuxInstallIO)
+        monkeypatch.setattr(self.io, "_open_runtime_client",
+                            lambda device, timeout=20: self.opened.append(timeout) or self)
+
+    def close(self):
+        self.closed += 1
+
+    def request(self, command, response, **fields):
+        self.requests.append((self.now, command, fields))
+        self.now += self.delay(command)
+        if command == "UPDATE_LOCK":
+            return self.lock(fields["seconds"])
+        if command == "GET_DEVICE_INFO":
+            return self.config["info"]
+        if command == "GET_DIRTY":
+            return {"patches": []}
+        if command == "LIST_PROFILES":
+            return {"active": self.config["active"],
+                    "profiles": [row["metadata"] for row in self.config["profiles"].values()]}
+        row = self.config["profiles"][fields["profile"]]
+        data = {"type": response, "profile": fields["profile"]}
+        if command == "GET_GLOBAL":
+            return {**data, "device": row["device"]}
+        if command == "LIST_PATCHES":
+            return {**data, "patches": [{"bank": int(key[:2]), "slot": int(key[3:])} for key in row["patches"]]}
+        key = f"{fields['bank']:02}/{fields['slot']:02}"
+        return {**data, "bank": fields["bank"], "slot": fields["slot"], "patch": row["patches"][key]}
+
+    def locks(self):
+        return [(at, fields["seconds"]) for at, command, fields in self.requests if command == "UPDATE_LOCK"]
+
+
+@pytest.mark.parametrize("slow", [None, "GET_GLOBAL", "UPDATE_LOCK"])
+def test_snapshot_locks_first_and_renews_between_requests(monkeypatch, slow):
+    # One reply may take its full 15 s timeout; renewals still stay <= 20 s apart.
+    captain = ScriptedCaptain(monkeypatch, delay=lambda command: 15.0 if command == slow else 1.0)
+    assert captain.io.snapshot(captain.device, save_dirty=True) == captain.config
+    locks = captain.locks()
+    assert captain.requests[0][1] == "UPDATE_LOCK" and locks[0] == (0.0, 60)
+    assert len(locks) > 2 and all(seconds == 60 for _, seconds in locks)  # the installer releases it
+    sends = [at for at, _ in locks] + [captain.now]
+    assert max(later - earlier for earlier, later in zip(sends, sends[1:])) <= 20
+    assert all(later - earlier >= install.UPDATE_LOCK_RENEW_S for earlier, later in zip(sends, sends[1:-1]))
+    assert captain.closed == 1
+
+
+def test_snapshot_of_firmware_without_update_lock_ignores_its_refusal(monkeypatch):
+    def refuse(seconds):
+        raise install.FirmwareRequestRefused("UPDATE_LOCK failed: unknown_type")
+    captain = ScriptedCaptain(monkeypatch, lock=refuse)
+    assert captain.io.snapshot(captain.device, save_dirty=True) == captain.config
+    # Asked once: renewing would only add an ERROR every 5 s on the old firmware.
+    assert captain.locks() == [(0.0, 60)] and captain.now > 3 * install.UPDATE_LOCK_RENEW_S
+
+
+@pytest.mark.parametrize("renewal", [False, True])
+def test_unanswered_update_lock_fails_the_snapshot_like_any_request(monkeypatch, renewal):
+    answered = []
+    def lock(seconds):
+        if renewal and not answered:
+            answered.append(seconds)
+            return {"type": "ACK"}
+        raise install.FirmwareResponseTimeout("No correlated response to UPDATE_LOCK")
+    captain = ScriptedCaptain(monkeypatch, lock=lock)
+    with pytest.raises(install.FirmwareResponseTimeout, match="UPDATE_LOCK"):
+        captain.io.snapshot(captain.device, save_dirty=True)
+    assert captain.closed == 1
+    commands = [command for _, command, _ in captain.requests]
+    assert commands[-1] == "UPDATE_LOCK"
+    assert len(commands) > 2 if renewal else commands == ["UPDATE_LOCK"]
+
+
+@pytest.mark.parametrize("reply", ["ACK", "ERROR"])
+def test_release_sends_zero_on_a_briefly_awaited_client(monkeypatch, reply):
+    def lock(seconds):
+        if reply == "ERROR":
+            raise install.FirmwareRequestRefused("UPDATE_LOCK failed: unknown_type")
+        return {"type": "ACK"}
+    captain = ScriptedCaptain(monkeypatch, lock=lock)
+    captain.io.release_lock(captain.device)
+    assert captain.opened == [5]
+    assert captain.locks() == [(0.0, 0)] and captain.closed == 1
+
+
+def test_release_helper_swallows_every_failure():
+    def unreachable(device):
+        raise install.FirmwareInstallError("The pinned Captain data port did not return")
+    install._release_lock(SimpleNamespace(release_lock=unreachable), install.PinnedDevice("/sys/pinned", "1234567890ABCDEF"))

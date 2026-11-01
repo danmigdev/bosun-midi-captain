@@ -508,6 +508,68 @@ static void request_at(const char *json, const char *type, uint32_t now) {
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)"\n", 1, now) == 1);
     read_reply(type, NULL);
 }
+static void locked_between(uint32_t first, uint32_t end) {
+    assert(bosun_protocol_update_locked(&protocol, first) && bosun_protocol_update_locked(&protocol, end - 1));
+    assert(!bosun_protocol_update_locked(&protocol, end) && !protocol.update_lock_seconds);
+    /* Cleared once expired: the same instant one clock wrap later stays unlocked. */
+    assert(!bosun_protocol_update_locked(&protocol, first));
+}
+/* Runs on activate_switch()'s profile: switch 1 is a bound momentary note. */
+static void update_lock(void) {
+    static const char *const invalid[] = {
+        "", "\"seconds\":true", "\"seconds\":false", "\"seconds\":null", "\"seconds\":1.5",
+        "\"seconds\":60.0", "\"seconds\":1e1", "\"seconds\":\"10\"", "\"seconds\":-1", "\"seconds\":121",
+        "\"seconds\":4294967356", "\"seconds\":999999999999", "\"seconds\":[]", "\"seconds\":{}",
+        "\"second\":10"
+    };
+    char command[160];
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        snprintf(command, sizeof command, "{\"type\":\"UPDATE_LOCK\"%s%s}", *invalid[i] ? "," : "", invalid[i]);
+        request_at(command, "ERROR", 1000); is_error("invalid_request");
+        assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "of"), "UPDATE_LOCK"));
+        assert(!bosun_protocol_update_locked(&protocol, 1000) && !protocol.update_lock_seconds);
+    }
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":10,\"seconds\":0}", "ERROR", 1000); is_error("invalid_json");
+    assert(!bosun_protocol_update_locked(&protocol, 1000));
+    request_at("{\"type\":\"UPDATE_LOCK\",\"id\":\"lock\",\"seconds\":60}", "ACK", 1000);
+    assert(!strcmp(output, "{\"type\":\"ACK\",\"id\":\"lock\"}\n")); /* No extra fields. */
+    locked_between(1000, 61000);
+    /* Renewal restarts the lease from its own time, shorter or longer. */
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":60}", "ACK", 1000);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":5}", "ACK", 30000);
+    locked_between(30000, 35000);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":120}", "ACK", 0);
+    locked_between(0, 120000);
+    /* 0 releases at once; releasing while unlocked is a harmless ACK. */
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":20}", "ACK", 5000);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":0}", "ACK", 6000);
+    assert(!bosun_protocol_update_locked(&protocol, 6000) && !protocol.update_lock_seconds);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":-0}", "ACK", 6000);
+    assert(!bosun_protocol_update_locked(&protocol, 6000));
+    /* The lease runs across the millisecond clock wrap. */
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":1}", "ACK", UINT32_MAX - 100u);
+    assert(bosun_protocol_update_locked(&protocol, UINT32_MAX) && bosun_protocol_update_locked(&protocol, 0));
+    locked_between(UINT32_MAX - 100u, 899);
+    /* While locked ACTIVATE_SWITCH is refused before its arguments are read;
+     * other commands work and a session reset keeps the lease. */
+    physical_switch_mask = 0; sent = 0;
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":30}", "ACK", 2000);
+    request_at("{\"type\":\"ACTIVATE_SWITCH\",\"id\":\"tap\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ERROR", 2001);
+    is_error("update_lock"); assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "of"), "ACTIVATE_SWITCH"));
+    request_at("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"UP\"}", "ERROR", 2002); is_error("update_lock");
+    assert(!sent && !runtime.queue_count && runtime.switches[0].stable);
+    request_at("{\"type\":\"PING\"}", "ACK", 2003);
+    request_at("{\"type\":\"GET_CONTEXT\"}", "CONTEXT", 2004);
+    bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
+    assert(bosun_protocol_update_locked(&protocol, 2005));
+    request_at("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ERROR", 31999); is_error("update_lock");
+    request_at("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ACK", 32000); /* Expired. */
+    assert(sent == 2 && !protocol.update_lock_seconds);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":30}", "ACK", 40000);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":0}", "ACK", 40001);
+    request_at("{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "ACK", 40002);
+    assert(sent == 4 && !runtime.queue_count);
+}
 static void identity_status_is(const char *status) {
     assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "status"), status));
 }
@@ -810,7 +872,8 @@ int main(void) {
     request("{\"type\":\"PING\"}", "ACK");
     assert(sent == 0);
     full_catalog();
-    monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); active_patch_profile_and_draft();
+    monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); update_lock();
+    active_patch_profile_and_draft();
     kemper_identity(); draft_limit(); startup_logo();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
@@ -825,6 +888,6 @@ int main(void) {
     put_logo(0, logo_image, 3, "ERROR"); is_error("storage_unavailable");
     request("{\"type\":\"REBOOT\",\"mode\":\"bootloader\"}", "ACK");
     assert(protocol.reboot_requested && protocol.reboot_bootloader);
-    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect, startup logo upload passed");
+    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect, startup logo upload, update lock passed");
     return 0;
 }

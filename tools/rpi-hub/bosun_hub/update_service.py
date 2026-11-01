@@ -38,6 +38,23 @@ class UpdateService:
         self._volatile_status = None
         self._recovery_jobs = set()
         self._recovery_scan_complete = False
+        # {"phase", "detail"} of the running job for Stage's HUB frames.
+        self.progress = None
+
+    def _announce(self, state=None):
+        """Report a running job's step to Stage, or its end without a state.
+
+        An upload owns nothing yet and may be abandoned, so it never covers
+        Stage; the screen appears once a committed job starts.
+        """
+        if state is not None and state["job"] != self.active:
+            return  # a late callback from a job that has already ended
+        progress = None
+        if state is not None and state["phase"] not in TERMINAL | {"uploading"}:
+            progress = {"phase": state["phase"], "detail": state.get("detail") or ""}
+        if progress != self.progress:
+            self.progress = progress
+            self.hub._update_progress()
 
     def _remember_recovery(self, state):
         if state["phase"] == "recovery-required":
@@ -272,6 +289,7 @@ class UpdateService:
         state["phase"] = "validating"
         self._save(state)
         self.active = state["job"]
+        self._announce(state)
         self.task = asyncio.create_task(self._run(state, dict(self.hub._update_device_info), port, identity))
         self._reply(sub, request, state)
 
@@ -303,6 +321,7 @@ class UpdateService:
             self._volatile_status = None
         self.active = state["job"]
         self.maintenance = True
+        self._announce(state)
         self.task = asyncio.create_task(self._run_recovery(state, port, identity))
         self._reply(sub, request, state)
 
@@ -356,6 +375,7 @@ class UpdateService:
                 self._remember_recovery(state)
                 self.maintenance = False
                 self.active = None
+                self._announce()
 
     async def _run(self, state, info, port, identity):
         stopped = False
@@ -379,6 +399,7 @@ class UpdateService:
                     # write. A UI-status failure cannot cancel its rollback.
                     self._volatile_status = dict(state)
                     log.exception("Cannot persist update progress")
+                self._announce(state)
             loop.call_soon_threadsafe(apply)
         try:
             from .update_package import validate_update_package
@@ -442,6 +463,7 @@ class UpdateService:
                 self._remember_recovery(state)
                 self.maintenance = False
                 self.active = None
+                self._announce()
 
     def stop(self):
         self._stopping = True

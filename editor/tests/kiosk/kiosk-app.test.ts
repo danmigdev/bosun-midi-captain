@@ -1054,6 +1054,83 @@ describe("kiosk integration", () => {
     expect(sentCount("GET_GLOBAL")).toBe(0);
   });
 
+  it("covers Stage with the Updating screen while the hub updates the Captain, then resyncs", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+    const overlay = () => container.querySelector(".kiosk-updating");
+
+    reply({ type: "HUB", link: "up", update: { phase: "validating", detail: "" } });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    expect(overlay()).toHaveAttribute("role", "status");
+    expect(overlay()!.querySelector("strong")).toHaveTextContent("Updating");
+    expect(overlay()).toHaveTextContent("Checking the update package");
+    expect(overlay()).toHaveTextContent("Do not unplug the Captain or power off the Raspberry Pi.");
+    expect(overlay()!.querySelector("img")).toHaveAttribute("src", "/boot-logo.png");
+
+    // The Captain link goes down for BOOTSEL: the screen replaces "reconnecting".
+    reply({ type: "HUB", link: "down", update: { phase: "flashing", detail: "flashing firmware" } });
+    await waitFor(() => expect(overlay()).toHaveTextContent("Flashing firmware"));
+    expect(container.textContent).not.toContain("reconnecting");
+
+    // The new firmware's link is back while the hub still owns it: no bootstrap yet.
+    const deviceInfoBefore = sentCount("GET_DEVICE_INFO");
+    const contextBefore = sentCount("GET_CONTEXT");
+    reply({ type: "HUB", link: "up", update: { phase: "verifying", detail: "verifying configuration" } });
+    await waitFor(() => expect(overlay()).toHaveTextContent("Verifying configuration"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sentCount("GET_DEVICE_INFO")).toBe(deviceInfoBefore);
+
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(overlay()).toBeNull());
+    await waitFor(() => {
+      expect(sentCount("GET_DEVICE_INFO")).toBeGreaterThan(deviceInfoBefore);
+      expect(sentCount("GET_CONTEXT")).toBeGreaterThan(contextBefore);
+    });
+    expect(container.querySelector(".stage")).not.toBeNull();
+    expect(container.textContent).not.toContain("reconnecting");
+  });
+
+  it("falls back to the bundled Bosun icon and retries the custom logo on the next update", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+    const logo = () => container.querySelector(".kiosk-updating img");
+
+    reply({ type: "HUB", link: "down", update: { phase: "backing-up", detail: "" } });
+    await waitFor(() => expect(logo()).toHaveAttribute("src", "/boot-logo.png"));
+    expect(container.querySelector(".kiosk-updating")).toHaveTextContent("Backing up the pedal");
+    await fireEvent.error(logo()!); // the hub answers 404 without a custom logo
+    await waitFor(() => expect(logo()).toHaveAttribute("src", expect.stringContaining("128x128@2x.png")));
+
+    // An update that ends with the Captain still away shows the usual badge.
+    reply({ type: "HUB", link: "down" });
+    await waitFor(() => expect(container.querySelector(".kiosk-updating")).toBeNull());
+    expect(container.textContent).toContain("reconnecting");
+
+    reply({ type: "HUB", link: "down", update: { phase: "queued", detail: "" } });
+    await waitFor(() => expect(logo()).toHaveAttribute("src", "/boot-logo.png"));
+    expect(container.querySelector(".kiosk-updating small")).toHaveTextContent("Queued");
+  });
+
+  it("shows the Updating screen to a Stage that opens during an update", async () => {
+    const { container } = mountKiosk();
+    sock()._open();
+    reply({ type: "HUB", link: "down", update: { phase: "verifying",
+      detail: "Checking the original firmware and saved configuration" } });
+    await waitFor(() => expect(container.querySelector(".kiosk-updating"))
+      .toHaveTextContent("Checking the original firmware and saved configuration"));
+    expect(sentCount("GET_DEVICE_INFO")).toBe(0);
+
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(lastSent("GET_DEVICE_INFO")).toBeTruthy());
+    expect(container.querySelector(".kiosk-updating")).toBeNull();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+  });
+
   it("never requests the heavy manifest at all", async () => {
     // On the RP2040 the manifest streams as a background generator for
     // ~7 s and a GET_PATCH mid-stream (every rig change) can wedge it,

@@ -74,7 +74,8 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
      * envelope must have one unambiguous meaning before any I/O. */
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
-        "on", "request", "mode", "switch", "model", "offset", "data", "size", "fnv1a"};
+        "on", "request", "mode", "switch", "model", "offset", "data", "size", "fnv1a",
+        "seconds"};
     _Static_assert(sizeof names / sizeof *names <= 32, "one bit per argument name");
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
@@ -532,6 +533,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     }
     else if (!strcmp(p->type, "ACTIVATE_SWITCH")) {
         char name[8];
+        if (bosun_protocol_update_locked(p, now_ms)) { error(p, "update_lock"); goto done; }
         if (!coordinates(p, &bank, &slot, false) || !text_arg(p, "switch", name, sizeof name, false))
             { error(p, "invalid_request"); goto done; }
         bosun_input_result_t result = bosun_runtime_activate_switch(rt, name, bank, slot,
@@ -716,6 +718,12 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     } else if (!strcmp(p->type, "PUT_LOGO")) r = put_logo(p);
     else if (!strcmp(p->type, "COMMIT_LOGO")) r = commit_logo(p);
     else if (!strcmp(p->type, "DELETE_LOGO")) r = delete_logo(p);
+    else if (!strcmp(p->type, "UPDATE_LOCK")) {
+        int32_t seconds;
+        if (!bosun_json_integer(&p->request, get(p, "seconds"), &seconds) || seconds < 0 || seconds > 120)
+            r = BOSUN_STORE_INVALID;
+        else { p->update_lock_ms = now_ms; p->update_lock_seconds = (uint8_t)seconds; }
+    }
     else if (!strcmp(p->type, "REBOOT")) {
         int mode = get(p, "mode");
         bool bootloader = mode >= 0 && bosun_json_equal(&p->request, mode, "bootloader");
@@ -778,6 +786,11 @@ void bosun_protocol_consume_output(bosun_protocol_t *p, size_t length) {
     if (length > p->tx_length - p->tx_offset) length = p->tx_length - p->tx_offset;
     p->tx_offset += length;
     if (p->tx_offset == p->tx_length) p->tx_offset = p->tx_length = 0;
+}
+bool bosun_protocol_update_locked(bosun_protocol_t *p, uint32_t now_ms) {
+    if (p->update_lock_seconds && now_ms - p->update_lock_ms >= p->update_lock_seconds * 1000u)
+        p->update_lock_seconds = 0;
+    return p->update_lock_seconds != 0;
 }
 void bosun_protocol_tick(bosun_protocol_t *p, uint32_t now_ms) {
     if (!p->connected || p->reboot_requested) return;

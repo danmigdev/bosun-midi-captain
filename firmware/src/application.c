@@ -320,14 +320,19 @@ void bosun_application_tick(bosun_application_t *app) {
         app->runtime.patch_revision != app->config.patch_revision)
         bosun_runtime_config_changed(&app->runtime);
     expression_input(app);
-    bosun_runtime_tick(&app->runtime, now,
-                       bosun_hardware_logical_mask(app->runtime.hardware, bosun_board_switches()),
+    /* An update lock releases every switch; one still held when it ends stays
+     * released until it is let go, so a lock never produces a press. */
+    bool locked = bosun_protocol_update_locked(&app->protocol, now);
+    uint16_t pressed = bosun_hardware_logical_mask(app->runtime.hardware, bosun_board_switches());
+    app->switches_ignored = locked ? UINT16_MAX : (uint16_t)(app->switches_ignored & pressed);
+    bosun_runtime_tick(&app->runtime, now, (uint16_t)(pressed & ~app->switches_ignored),
                        app->expression_raw[0], app->expression_raw[1]);
     bosun_config_tick(&app->config, now);
     flush_midi(app);
     if (!app->input_length && !app->reboot_pending) bosun_protocol_tick(&app->protocol, now);
     if (app->connected) flush_protocol(app);
     render_leds(app, now);
+    bosun_display_updating(&app->display, locked);
     if (app->protocol.logo_preview) {
         app->protocol.logo_preview = false;
         bosun_display_logo(&app->display, 3000);

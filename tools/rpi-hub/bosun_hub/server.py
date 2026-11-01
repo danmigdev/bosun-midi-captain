@@ -8,9 +8,11 @@ stream:
               reads locally while preserving each caller's correlation id.
   - ``ws``    the same protocol lines as WebSocket text messages (one
               line per message) for the Stage kiosk browser, plus
-              ``{"type":"HUB","link":...}`` status frames.
+              ``{"type":"HUB","link":...}`` status frames (with ``update``
+              while a firmware update runs).
   - ``http``  static file server for the built Stage kiosk bundle. A custom
-              startup logo is substituted into ``index.html`` as it is sent.
+              startup logo is substituted into ``index.html`` as it is sent
+              and served as ``/boot-logo.png`` (404 without one).
 
 UDP discovery on :9877 advertises the TCP endpoint without contacting the
 Captain or subscribing to its protocol stream.
@@ -156,10 +158,22 @@ class _QuietHandler(SimpleHTTPRequestHandler):
         log.debug("http %s - %s", self.address_string(), fmt % args)
 
     def send_head(self):
+        path = urlsplit(self.path).path
+        if path == "/boot-logo.png":
+            # Stage's "Updating" screen; on 404 it shows the bundled Bosun icon.
+            png = self.boot_logo.custom_png() if self.boot_logo is not None else None
+            if png is None:
+                self.send_error(404, "No custom startup logo")
+                return None
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.end_headers()
+            return io.BytesIO(png)
         # Brand the loading screen per request: the installed bundle is never
         # rewritten, so a custom logo survives Stage redeploys.
         png = None
-        if self.boot_logo is not None and urlsplit(self.path).path in ("/", "/index.html"):
+        if self.boot_logo is not None and path in ("/", "/index.html"):
             png = self.boot_logo.custom_png()
         if png is not None:
             try:

@@ -23,8 +23,11 @@ Rules:
     ACK/ERROR.
   - link up/down transitions are delivered to subscribers that asked
     for status (the Stage kiosk, so it can show a "reconnecting"
-    overlay). The raw TCP endpoint does not get these: it stays a
-    line-JSON protocol-compatible endpoint with exact request ids.
+    overlay). While a firmware update or recovery check runs, these
+    frames also carry ``"update": {"phase", "detail"}``, re-sent on every
+    step and once without it when the job ends. The raw TCP endpoint
+    does not get these: it stays a line-JSON protocol-compatible
+    endpoint with exact request ids.
 """
 
 from __future__ import annotations
@@ -322,7 +325,12 @@ class Hub:
 
     def _on_upstream_state(self, up: bool, detail: str) -> None:
         log.info("upstream link %s (%s)", "up" if up else "down", detail)
-        self._post(self._dispatch_status, self._status_line(up))
+        # Build the frame on the loop: a line made here could carry update
+        # progress that the loop has already replaced or ended.
+        self._post(self._link_state, up)
+
+    def _link_state(self, up: bool) -> None:
+        self._dispatch_status(self._status_line(up))
 
     # -- reads still queued on the Captain -----------------------------
 
@@ -1118,6 +1126,16 @@ class Hub:
             if sub._want_status:
                 sub._offer(line)
 
-    @staticmethod
-    def _status_line(up: bool) -> str:
-        return json.dumps({"type": "HUB", "link": "up" if up else "down"})
+    def _update_progress(self) -> None:
+        """A new update step, or its end, for Stage; never a link transition."""
+        line = self._status_line(self.link.connected)
+        for sub in self._subs:
+            if sub._want_status:
+                sub._offer(line)
+
+    def _status_line(self, up: bool) -> str:
+        status = {"type": "HUB", "link": "up" if up else "down"}
+        # Stage shows an "Updating" screen while an update or recovery job runs.
+        if self.updates.progress is not None:
+            status["update"] = self.updates.progress
+        return json.dumps(status)

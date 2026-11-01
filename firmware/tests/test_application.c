@@ -647,6 +647,78 @@ static void test_startup_logo(void) {
     assert(!shows(version) && rows == 8);
 }
 
+static bool replied(const char *text) { return strstr((char *)output, text) != NULL; }
+static void update_lock(unsigned seconds) {
+    char command[80];
+    snprintf(command, sizeof command, "{\"type\":\"UPDATE_LOCK\",\"id\":\"lock\",\"seconds\":%u}\n", seconds);
+    output_length = 0; output[0] = 0; queue_command(command);
+    for (unsigned i = 0; i < 20 && !replied("{\"type\":\"ACK\",\"id\":\"lock\"}\n"); ++i) tick();
+    assert(replied("{\"type\":\"ACK\",\"id\":\"lock\"}\n"));
+}
+static void ticks(unsigned count) { while (count--) tick(); }
+static void midi_tail_is(size_t length, const uint8_t *bytes, size_t count) {
+    for (unsigned port = 0; port < 2; ++port)
+        assert(midi_length[port] == length && !memcmp(midi_output[port] + length - count, bytes, count));
+}
+static void test_update_lock(void) {
+    static const uint8_t note_on[] = {0x90, 60, 100}, note_off[] = {0x80, 60, 64}, cc[] = {0xb0, 20, 127};
+    fixture();
+    assert(bosun_config_create("test", "Test", "generic", NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&app.config, "test", false) == BOSUN_STORE_OK);
+    const char patch[] = "{\"name\":\"Clean\",\"bindings\":[{\"switch\":\"1\",\"mode\":\"momentary\",\"actions\":{"
+        "\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}},"
+        "{\"switch\":\"2\",\"mode\":\"tap\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":20,\"value\":127}]}}}]}";
+    assert(bosun_config_put_patch(&app.config, NULL, 1, 1, patch, sizeof patch - 1, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&app.config, 1, 1) == BOSUN_STORE_OK);
+    cdc = true;
+    /* The lock takes over the startup logo hold with the Updating frame. */
+    ticks(40);
+    assert(rows == 240 && shows("v" BOSUN_FIRMWARE_VERSION));
+    update_lock(60);
+    ticks(30);
+    assert(rows == 480 && shows("Updating"));
+    /* Presses do nothing, not even dismiss it, well past the startup hold. */
+    switches = 2; ticks(100); switches = 0; ticks(100);
+    switches = 1; ticks(100); switches = 0;
+    while (now < 5000) tick();
+    assert(rows == 480 && shows("Updating") && !midi_length[0] && !midi_length[1] && !app.runtime.midi_tx_count);
+    assert(app.runtime.switches[0].stable && app.runtime.switches[1].stable);
+    output_length = 0; output[0] = 0;
+    queue_command("{\"type\":\"ACTIVATE_SWITCH\",\"id\":\"tap\",\"switch\":\"2\",\"bank\":1,\"slot\":1}\n");
+    for (unsigned i = 0; i < 20 && !replied("\"id\":\"tap\""); ++i) tick();
+    assert(replied("\"error\":\"update_lock\"") && !midi_length[0] && !midi_length[1]);
+    /* Release: the layout returns with a full redraw and switches work. */
+    update_lock(0);
+    ticks(30);
+    assert(rows == 720 && shows("Clean"));
+    switches = 2; ticks(20); switches = 0; ticks(20);
+    midi_tail_is(3, cc, sizeof cc);
+    /* Held when the lock starts: released (its momentary off is sent). Still
+     * held when the lock ends: ignored until let go. */
+    switches = 1; ticks(20);
+    midi_tail_is(6, note_on, sizeof note_on);
+    update_lock(30);
+    ticks(20);
+    midi_tail_is(9, note_off, sizeof note_off);
+    ticks(200);
+    update_lock(0);
+    ticks(200);
+    assert(midi_length[0] == 9 && app.runtime.switches[0].stable && shows("Clean"));
+    switches = 0; ticks(20); assert(midi_length[0] == 9);
+    switches = 1; ticks(20); midi_tail_is(12, note_on, sizeof note_on);
+    switches = 0; ticks(20); midi_tail_is(15, note_off, sizeof note_off);
+    /* The lease expires on its own; a switch held across the expiry stays ignored. */
+    uint32_t base = rows;
+    update_lock(1);
+    uint32_t started = now;
+    switches = 2;
+    while (now - started < 999) { tick(); assert(shows("Updating")); }
+    ticks(40);
+    assert(rows - base == 480 && shows("Clean") && midi_length[0] == 15);
+    switches = 0; ticks(20); switches = 2; ticks(20); switches = 0; ticks(20);
+    midi_tail_is(18, cc, sizeof cc);
+}
+
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
@@ -658,7 +730,8 @@ int main(void) {
     test_usb_diagnostics_console();
     test_remote_tap_gpio_and_disconnect();
     test_startup_logo();
+    test_update_lock();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
-    puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display and watchdog passed");
+    puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display, update lock and watchdog passed");
     return 0;
 }

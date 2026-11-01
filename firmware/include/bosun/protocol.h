@@ -20,6 +20,9 @@
  * accepted) and replies received. COMMIT_LOGO {size: 96000, fnv1a} verifies
  * the staged bytes and atomically replaces the logo; DELETE_LOGO restores the
  * built-in one. Both then set logo_preview for the application.
+ * UPDATE_LOCK {seconds: 0..120} locks the physical switches until now + seconds
+ * (renewing restarts the lease; 0 releases). RAM only; ACTIVATE_SWITCH answers
+ * update_lock meanwhile, every other command is unaffected.
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;
@@ -31,7 +34,7 @@ typedef struct {
     bosun_json_writer_t writer;
     size_t rx_length, tx_length, tx_offset;
     uint32_t last_rx_ms, last_context_ms, context_revision, kemper_revision;
-    uint32_t requests, errors;
+    uint32_t requests, errors, update_lock_ms;
     uint32_t midi_events_dropped;
     uint8_t midi_events[BOSUN_PROTOCOL_EVENT_BYTES];
     uint16_t event_head, event_length;
@@ -48,6 +51,7 @@ typedef struct {
     bool discarding, connected, reboot_requested, reboot_bootloader, ui_observed;
     bool hardware_configured; /* A valid hardware record selected runtime->hardware. */
     bool logo_preview; /* The startup logo changed; the consumer clears it. */
+    uint8_t update_lock_seconds; /* Lease from update_lock_ms; 0 is unlocked. */
 } bosun_protocol_t;
 
 void bosun_protocol_init(bosun_protocol_t *protocol, bosun_runtime_t *runtime);
@@ -57,4 +61,7 @@ size_t bosun_protocol_feed(bosun_protocol_t *protocol, const uint8_t *data,
 const uint8_t *bosun_protocol_output(const bosun_protocol_t *protocol, size_t *length);
 void bosun_protocol_consume_output(bosun_protocol_t *protocol, size_t length);
 void bosun_protocol_tick(bosun_protocol_t *protocol, uint32_t now_ms);
+/* True while an UPDATE_LOCK lease runs. An expired lease is cleared, so it
+ * cannot return when the millisecond clock wraps. */
+bool bosun_protocol_update_locked(bosun_protocol_t *protocol, uint32_t now_ms);
 #endif

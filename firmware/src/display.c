@@ -292,7 +292,7 @@ static bool logo(bosun_display_t *display, const bosun_config_t *config, uint32_
         display->status = BOSUN_DISPLAY_OK;
         display->count = 0; display->scrolling = false;
         panel(display, config);
-        simple_label(display, "v" BOSUN_FIRMWARE_VERSION, 2, rgb565(0x9aa1ad), 220);
+        simple_label(display, display->updating ? "Updating" : "v" BOSUN_FIRMWARE_VERSION, 2, rgb565(0x9aa1ad), 220);
         display->row = 0; display->logo_run = 0; display->logo_custom = true;
         display->logo = LOGO_DRAW;
     }
@@ -310,7 +310,7 @@ static bool logo(bosun_display_t *display, const bosun_config_t *config, uint32_
         display->logo = LOGO_HOLD; display->logo_ms = now_ms;
         return true;
     }
-    if (now_ms - display->logo_ms < display->logo_duration) return true;
+    if (display->updating || now_ms - display->logo_ms < display->logo_duration) return true;
     bosun_display_skip_logo(display);
     return false;
 }
@@ -320,8 +320,14 @@ void bosun_display_logo(bosun_display_t *display, uint16_t duration_ms) {
     display->logo = LOGO_START; display->logo_duration = duration_ms;
 }
 void bosun_display_skip_logo(bosun_display_t *display) {
-    if (!display || display->logo == LOGO_OFF) return;
+    if (!display || display->updating || display->logo == LOGO_OFF) return;
     display->logo = LOGO_OFF; display->has_frame = false; display->row = 240;
+}
+void bosun_display_updating(bosun_display_t *display, bool active) {
+    if (!display || display->updating == active) return;
+    display->updating = active;
+    if (active) display->logo = LOGO_START; /* Takes over any logo or layout frame. */
+    else bosun_display_skip_logo(display);
 }
 void bosun_display_init(bosun_display_t *display) {
     if (!display) return;
