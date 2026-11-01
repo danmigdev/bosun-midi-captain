@@ -15,4 +15,4 @@ kernel, with no userspace process in the path. This service only carries
 the protocol/state channel that feeds the display and the editor.
 """
 
-__version__ = "0.8.5"
+__version__ = "0.8.6"
