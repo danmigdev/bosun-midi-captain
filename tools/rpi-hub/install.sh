@@ -153,9 +153,10 @@ systemctl start bosun-stage-vnc-web.service
 # the start job.  Type=simple can still leave the active state immediately
 # afterwards (for example on an import or bind failure), so never let the
 # diagnostic `status || true` below turn a broken hub install into exit 0.
+# The reason comes last: the Pi self-update reports the final output line.
 if ! systemctl is-active --quiet bosun-hub.service; then
-    echo "bosun-hub.service is not active after restart" >&2
     systemctl --no-pager --lines=30 status bosun-hub.service >&2 || true
+    echo "bosun-hub.service is not active after restart" >&2
     exit 1
 fi
 
