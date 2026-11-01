@@ -142,8 +142,12 @@ test('effect commands and external feedback update Captain and unsolicited Stage
 
 test('rapid Clean to Crunch then Delay recovers after deliberately stale effect replies', async t => {
   const { captain, bridge } = await fixture(t, 'kemper_head', 1);
-  const delay = bridge.model.parameter(60, 3); delay.setValue(0); delay.send();
-  await until(async () => (await captain.context()).kemper_block_Delay === 'off', 'initial delay off');
+  const delay = bridge.model.parameter(60, 3); delay.setValue(0);
+  // The initial rig selection starts a 500 ms settle window. A state for a
+  // slot no switch is bound to (Delay here) that arrives inside it is cached
+  // but never queried or published, so emit the value until Bosun shows it.
+  await until(async () => { delay.send(); return (await captain.context()).kemper_block_Delay === 'off'; },
+    'initial delay off');
   // Capture a real upstream off reply and deliver it after the later on command.
   bridge.hold = m => m[0] === 0xf0 && m[6] === 1 && m[8] === 60 && m[9] === 3 && m[11] === 0;
   delay.send(); bridge.flush(); assert.ok(bridge.held.length);
