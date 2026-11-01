@@ -2,7 +2,8 @@
   import BrowseProgramMap from "./BrowseProgramMap.svelte";
   import KemperIdentity from "./KemperIdentity.svelte";
   import { untrack } from "svelte";
-  import { cmd, type Manifest, type ExpressionConfig } from "../lib/protocol";
+  import { cmd, isScreensaverEffect, SCREENSAVER_EFFECTS,
+    type Manifest, type ExpressionConfig, type ScreensaverEffect } from "../lib/protocol";
   import { pluginSectionsToShow } from "../lib/plugin-sections";
   import { getBankCount, getRigsPerBank, MAX_BANKS, MAX_RIGS_PER_BANK } from "../lib/bank-layout";
   import { CAPTAIN_10, expressionJacks, hasSwitch, missingSwitches, type HardwareLayout } from "../lib/hardware";
@@ -26,7 +27,8 @@
     autosave?: { enabled?: boolean; debounce_ms?: number };
     leds?: { brightness?: number; dim?: number };
     preset_navigation?: { switches?: Record<string, number>; bank_colors?: Record<string, string> };
-    tft?: { brightness?: number; rotation?: number; boot_logo_seconds?: number };
+    tft?: { brightness?: number; rotation?: number; boot_logo_seconds?: number;
+            screensaver_minutes?: number; screensaver_effect?: ScreensaverEffect };
     expression?: ExpressionConfig[];
     [k: string]: unknown;
   };
@@ -39,9 +41,11 @@
     bootLogo?: PedalLogoState | null;
     networkSession?: boolean;
     firmwareVersion?: string;
+    /** DEVICE_INFO.screensaver: the firmware has the TFT screensaver. */
+    screensaver?: boolean;
   };
   let { device, manifest = null, activeKind = "", connected = true, hardware = CAPTAIN_10,
-    bootLogo = null, networkSession = false, firmwareVersion = "" }: Props = $props();
+    bootLogo = null, networkSession = false, firmwareVersion = "", screensaver = false }: Props = $props();
 
   /** A full expression-jack entry with sensible defaults (disabled, CC 11). */
   function defaultExpression(jack: number): ExpressionConfig {
@@ -89,6 +93,11 @@
     if (!w.tft) w.tft = { brightness: 80, rotation: 180 };
     // Only firmware with a startup logo knows this key.
     if (bootLogo && w.tft.boot_logo_seconds == null) w.tft.boot_logo_seconds = 2;
+    // Likewise the screensaver keys. The firmware reads an unknown effect as Mix.
+    if (screensaver) {
+      if (w.tft.screensaver_minutes == null) w.tft.screensaver_minutes = 0;
+      if (!isScreensaverEffect(w.tft.screensaver_effect)) w.tft.screensaver_effect = "mix";
+    }
     // Expression jacks: one default per jack this model has (none on a
     // pedal without jacks), each backfilled to a complete entry so the
     // editor can bind enable/invert/curve/message without null checks.
@@ -153,8 +162,9 @@
       // The jack count is part of the fingerprint: expression defaults are
       // seeded per model, so hardware reported after the config arrived (or
       // a pedal swap) reseeds instead of keeping the other model's jacks.
-      // So is startup logo support, which seeds tft.boot_logo_seconds.
-      const fp = `${hardware.expression_jacks}:${bootLogo ? 1 : 0}:${JSON.stringify(device)}`;
+      // So is startup logo support, which seeds tft.boot_logo_seconds, and
+      // screensaver support, which seeds tft.screensaver_minutes/_effect.
+      const fp = `${hardware.expression_jacks}:${bootLogo ? 1 : 0}:${screensaver ? 1 : 0}:${JSON.stringify(device)}`;
       if (fp !== lastFingerprint) {
         working = withDefaults(device);
         lastFingerprint = fp;
@@ -167,6 +177,12 @@
     saving = true; saveErr = "";
     const seconds = working.tft?.boot_logo_seconds;
     if (typeof seconds === "number") working.tft!.boot_logo_seconds = Math.min(60, Math.max(0, Math.round(seconds)));
+    if (screensaver && working.tft) {
+      // A cleared field saves as 0 (off), not null.
+      const minutes = working.tft.screensaver_minutes;
+      working.tft.screensaver_minutes = typeof minutes === "number" && Number.isFinite(minutes)
+        ? Math.min(120, Math.max(0, Math.round(minutes))) : 0;
+    }
     try {
       await cmd.putGlobal(working as Record<string, unknown>);
       savedAt = new Date().toLocaleTimeString();
@@ -178,6 +194,27 @@
       saving = false;
     }
   }
+
+  // Show now: a preview with the selected (possibly unsaved) effect. The pedal
+  // engages it even when the timeout is 0; the next switch press wakes it.
+  let startingScreensaver = $state(false);
+  let screensaverErr = $state("");
+  async function showScreensaver() {
+    startingScreensaver = true; screensaverErr = "";
+    try {
+      await cmd.startScreensaver(working.tft?.screensaver_effect ?? "mix");
+    } catch (e) {
+      screensaverErr = e instanceof Error && e.message === "error: update_lock"
+        ? "An update is running. Try again when it has finished."
+        : "The pedal could not start the screensaver.";
+    } finally {
+      startingScreensaver = false;
+    }
+  }
+
+  const SCREENSAVER_EFFECT_LABELS: Record<ScreensaverEffect, string> = {
+    bounce: "Bounce", breathe: "Breathe", drift: "Drift", mix: "Mix",
+  };
 
   const ROTATIONS = [0, 90, 180, 270];
   // The pickers follow the connected model. Keys saved for switches or jacks
@@ -512,9 +549,34 @@
             <input type="number" min="0" max="60" step="1" bind:value={working.tft!.boot_logo_seconds} />
           </label>
         {/if}
+        {#if screensaver}
+          <label>Screensaver after (minutes)
+            <input type="number" min="0" max="120" step="1" bind:value={working.tft!.screensaver_minutes} />
+          </label>
+          <label>Screensaver effect
+            <select bind:value={working.tft!.screensaver_effect}>
+              {#each SCREENSAVER_EFFECTS as effect}<option value={effect}>{SCREENSAVER_EFFECT_LABELS[effect]}</option>{/each}
+            </select>
+          </label>
+        {/if}
       </div>
       {#if bootLogo}
         <p class="hint small">How long the startup logo stays on screen at power-on. 0 turns it off; a switch press skips it.</p>
+      {/if}
+      {#if screensaver}
+        <p class="hint small">
+          After this many minutes without a switch press or a patch change, the
+          pedal screen and a Raspberry Pi Stage display show the startup logo
+          with the chosen effect. 0 turns it off. Mix rotates through Bounce,
+          Breathe and Drift. The first switch press only wakes the screen.
+          Applies when you save, without a reboot.
+        </p>
+        <div class="previewrow">
+          <button type="button" onclick={showScreensaver}
+                  disabled={!connected || startingScreensaver || saving}>Show now</button>
+          <span class="hint small">Previews the selected effect on the pedal, even when the screensaver is off. Press a switch to wake it.</span>
+        </div>
+        {#if screensaverErr}<p class="previewerr" role="alert">{screensaverErr}</p>{/if}
       {/if}
     </section>
 
@@ -623,6 +685,9 @@
   .saverow .err { color: var(--err); font-size: 0.8rem; }
   .saverow .grow { flex: 1; }
   .muted { color: var(--text-muted); }
+  .previewrow { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.4rem; }
+  .previewrow .hint { margin: 0; }
+  .previewerr { color: var(--err); font-size: 0.8rem; margin: 0.4rem 0 0; }
   .hint { color: var(--text-muted); font-size: 0.8rem; margin: 0.2rem 0 0.4rem; }
   .hint.small { font-size: 0.75rem; }
   .orphans { margin-top: 0.7rem; padding: 0.5rem 0.7rem; border: 1px dashed var(--border-strong); border-radius: 4px; }
@@ -651,6 +716,8 @@
     .grid input[type="checkbox"] { width: auto; min-height: auto; }
     .cb { flex-wrap: wrap; gap: 0.35rem; }
     .orphans button { min-height: 44px; }
+    .previewrow { flex-direction: column; align-items: stretch; gap: 0.35rem; }
+    .previewrow button { width: 100%; min-height: 44px; }
     .saverow { flex-direction: column; gap: 0.35rem; }
     .saverow button { width: 100%; min-height: 44px; }
   }

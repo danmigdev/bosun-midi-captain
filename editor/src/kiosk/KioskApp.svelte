@@ -20,7 +20,8 @@
     type Manifest,
     type PatchSummary,
   } from "../lib/protocol";
-  import { wsLink, type HubUpdate } from "./ws-link";
+  import { wsLink, type HubScreensaver, type HubUpdate } from "./ws-link";
+  import { screensaverMotion } from "./screensaver";
   import bosunIcon from "../../src-tauri/icons/128x128@2x.png";
 
   type DeviceInfo = {
@@ -44,6 +45,8 @@
   let everBooted = $state(false);
   // Set while the hub updates the Captain's firmware or checks a recovery.
   let update = $state<HubUpdate | null>(null);
+  // Set while the Captain's screensaver is on; the update screen covers it.
+  let screensaver = $state<HubScreensaver | null>(null);
   let customLogoFailed = $state(false);
 
   const UPDATE_STEPS: Record<string, string> = {
@@ -65,6 +68,12 @@
     // Every new screen tries the custom logo again: it may have been set since.
     if (next && !update) customLogoFailed = false;
     update = next;
+  }
+
+  function showScreensaver(next: HubScreensaver | null): void {
+    // Like the update screen, each new screensaver tries the custom logo again.
+    if (next && !screensaver && !update) customLogoFailed = false;
+    screensaver = next;
   }
 
   let hasPatchList = false;
@@ -186,6 +195,8 @@
     // Kiosk only, so straight from the transport rather than protocol.ts.
     offs.push(wsLink.on("hub-update", ({ payload }) => showUpdate(payload as HubUpdate | null)));
     showUpdate(wsLink.update);
+    offs.push(wsLink.on("hub-screensaver", ({ payload }) => showScreensaver(payload as HubScreensaver | null)));
+    showScreensaver(wsLink.screensaver);
 
     async function sync() {
       const up = await isConnected();
@@ -353,6 +364,24 @@
   <div class="kiosk-waiting">Waiting for the pedal…</div>
 {/if}
 
+{#if screensaver && !update}
+  <!-- Bounce and Drift move a half-size logo; Breathe keeps the full one centered. -->
+  <div
+    class="kiosk-screensaver"
+    class:kiosk-screensaver--small={screensaver.effect !== "breathe"}
+    data-effect={screensaver.effect}
+    aria-hidden="true"
+  >
+    <img
+      class={customLogoFailed ? "kiosk-screensaver__icon" : "kiosk-screensaver__logo"}
+      src={customLogoFailed ? bosunIcon : "/boot-logo.png"}
+      alt=""
+      onerror={() => (customLogoFailed = true)}
+      use:screensaverMotion={screensaver.effect}
+    />
+  </div>
+{/if}
+
 {#if update}
   <div class="kiosk-updating" role="status" aria-live="polite">
     {#if customLogoFailed}
@@ -406,6 +435,41 @@
   .kiosk-updating p {
     margin: 28px 0 0;
     font-size: 16px;
+  }
+
+  /* Above the boot splash too, like the update screen it gives way to. */
+  .kiosk-screensaver {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    overflow: hidden;
+    background: #000;
+  }
+  .kiosk-screensaver img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Hidden until the first frame places it. */
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .kiosk-screensaver__logo {
+    width: auto;
+    height: auto;
+    max-width: min(80vw, 400px);
+    max-height: min(60vh, 222px);
+  }
+  .kiosk-screensaver__icon {
+    width: min(50vh, 192px);
+    height: min(50vh, 192px);
+  }
+  .kiosk-screensaver--small .kiosk-screensaver__logo {
+    max-width: min(40vw, 200px);
+    max-height: min(30vh, 111px);
+  }
+  .kiosk-screensaver--small .kiosk-screensaver__icon {
+    width: min(25vh, 96px);
+    height: min(25vh, 96px);
   }
 
   .kiosk-reconnecting {

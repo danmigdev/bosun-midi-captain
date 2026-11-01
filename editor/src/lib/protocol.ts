@@ -341,6 +341,16 @@ export interface DeviceStats {
                        armed?: boolean; present?: boolean }>;
 }
 
+/** tft.screensaver_effect values. Mix rotates through the other three. */
+export const SCREENSAVER_EFFECTS = ["bounce", "breathe", "drift", "mix"] as const;
+export type ScreensaverEffect = typeof SCREENSAVER_EFFECTS[number];
+/** The effect actually on screen: the firmware never reports "mix". */
+export type ScreensaverShownEffect = Exclude<ScreensaverEffect, "mix">;
+
+export function isScreensaverEffect(value: unknown): value is ScreensaverEffect {
+  return typeof value === "string" && (SCREENSAVER_EFFECTS as readonly string[]).includes(value);
+}
+
 export type FirmwareMessage =
   | { type: "ACK"; id?: string; fw?: string; received?: number }
   | { type: "CONTEXT"; id?: string; context: Record<string, unknown> }
@@ -367,6 +377,8 @@ export type FirmwareMessage =
       stage_input?: boolean;
       /** Startup logo the TFT shows; absent when the firmware has none. */
       boot_logo?: "custom" | "default";
+      /** Firmware has the TFT screensaver (tft.screensaver_*, SCREENSAVER_START). */
+      screensaver?: boolean;
       /** Fast-path subset used by Stage. Optional for pre-fast-path firmware. */
       bank_count?: number;
       preset_navigation?: Record<string, unknown>;
@@ -389,6 +401,10 @@ export type FirmwareMessage =
   // is tagged to the rig the device is currently on.
   | { type: "KEMPER_IDENTITY"; profile: string; status: "received" | "pending" | "unavailable"; raw: number[]; model: null; os_version: null; mode: null }
   | { type: "RIG_INFO"; id?: string; name: string; rig: number | null; color: string | null; fresh: boolean }
+  // Screensaver state: unsolicited (no id) whenever it engages, wakes or the
+  // shown effect changes, and as the GET_SCREENSAVER reply. `effect` is only
+  // present while active.
+  | { type: "SCREENSAVER"; id?: string; active: boolean; effect?: ScreensaverShownEffect }
   | { type: "EVENT"; event: string; [k: string]: unknown };
 
 
@@ -783,6 +799,24 @@ async function putGlobal(device: Record<string, unknown>): Promise<Extract<Firmw
   }
 }
 
+/** Engage the screensaver now (a Settings preview, also when the timeout is 0).
+ * Without `effect` the pedal uses its configured one. Rejects with
+ * "error: update_lock" while an update runs; firmware without a screensaver
+ * answers "error: unknown_type". */
+async function startScreensaver(effect?: ScreensaverEffect): Promise<void> {
+  const reply = await sendAndAwait({ type: "SCREENSAVER_START", ...(effect ? { effect } : {}) }, 4000);
+  if (reply.type !== "ACK") throw new Error("Unexpected response while starting the screensaver.");
+}
+
+/** Read the screensaver state without waking it. */
+async function getScreensaver(): Promise<{ active: boolean; effect?: ScreensaverShownEffect }> {
+  const reply = await sendAndAwait({ type: "GET_SCREENSAVER" }, 4000);
+  if (reply.type !== "SCREENSAVER") throw new Error("Unexpected response while reading the screensaver.");
+  const active = reply.active === true;
+  const effect: unknown = reply.effect;
+  return active && isScreensaverEffect(effect) && effect !== "mix" ? { active, effect } : { active };
+}
+
 type PatchListRefresh = { generation: number; promise: Promise<void> };
 let _patchListRefresh: PatchListRefresh | null = null;
 let _patchListRevision = 0;
@@ -881,6 +915,10 @@ export const cmd = {
                     sendAndAwait<{ type: "ACK"; model?: string; reboot?: boolean }>(
                       { type: "SET_HARDWARE", model }, 4000),
   getStats:       () => sendAndAwait<{ type: "STATS" } & DeviceStats>({ type: "STATS" }, 6000),
+
+  // ----- screensaver (DEVICE_INFO.screensaver) -----
+  startScreensaver,
+  getScreensaver,
 
   // ----- profiles -----
   listProfiles:   () => sendAndAwait<{ type: "PROFILE_LIST"; profiles: ProfileInfo[]; active: string }>(

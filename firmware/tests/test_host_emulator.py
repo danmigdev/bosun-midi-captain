@@ -95,6 +95,16 @@ class Client:
             self.events.append(message)
         raise AssertionError(f"response timeout for {request_id!r}")
 
+    def screensaver_event(self):
+        """The oldest unsolicited SCREENSAVER frame, buffered or still to come."""
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            for index, message in enumerate(self.events):
+                if message.get("type") == "SCREENSAVER":
+                    return self.events.pop(index)
+            self.events.append(self.receive(None))
+        raise AssertionError("no SCREENSAVER event")
+
     def request(self, kind, expected, **fields):
         self.counter += 1
         request_id = f"socket-{self.counter}"
@@ -196,6 +206,25 @@ class HostApplicationTests(unittest.TestCase):
         self.assertEqual((hardware["model"], hardware["configured"]), ("captain10", True))
         self.assertEqual(len(client.request("LED_DUMP", "LED_DUMP")["pixels"]), 30)
         self.assertEqual((self.root / "untouched.txt").read_text(), "original sentinel")
+
+    def test_screensaver_preview_and_wake(self):
+        _, client = self.start()
+        self.assertIs(client.request("GET_DEVICE_INFO", "DEVICE_INFO")["screensaver"], True)
+        state = client.request("GET_SCREENSAVER", "SCREENSAVER")
+        self.assertEqual(state, {"type": "SCREENSAVER", "id": state["id"], "active": False})
+        rejected = client.request("SCREENSAVER_START", "ERROR", effect="sparkle")
+        self.assertEqual(rejected["error"], "invalid_request")
+        client.request("SCREENSAVER_START", "ACK", effect="breathe")
+        self.assertEqual(client.screensaver_event(),
+                         {"type": "SCREENSAVER", "id": None, "active": True, "effect": "breathe"})
+        # Polling and reads leave it on; a state-changing request ends it.
+        client.request("PING", "ACK")
+        client.request("STATS", "STATS")
+        state = client.request("GET_SCREENSAVER", "SCREENSAVER")
+        self.assertEqual((state["active"], state["effect"]), (True, "breathe"))
+        client.request("SET_MIDI_MONITOR", "ACK", on=False)
+        self.assertEqual(client.screensaver_event(), {"type": "SCREENSAVER", "id": None, "active": False})
+        self.assertFalse(client.request("GET_SCREENSAVER", "SCREENSAVER")["active"])
 
     def test_startup_logo_upload_commit_and_delete(self):
         _, client = self.start()

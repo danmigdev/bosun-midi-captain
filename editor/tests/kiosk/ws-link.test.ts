@@ -233,6 +233,69 @@ describe("ws-link", () => {
     expect(link.isConnected()).toBe(true);
   });
 
+  it("reports the Captain's screensaver from HUB up frames without counting a reconnect", async () => {
+    const link = await freshLink();
+    const screensavers = vi.fn();
+    const reconnected = vi.fn();
+    link.on("hub-screensaver", ({ payload }) => screensavers(payload));
+    link.on("firmware-reconnected", reconnected);
+    link.start();
+    last()._open();
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(screensavers).not.toHaveBeenCalled();
+
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "bounce" } }));
+    expect(link.screensaver).toEqual({ effect: "bounce" });
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "bounce" } }));
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "drift" } }));
+    // An effect this Stage does not know (or none) still covers it, calmly.
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "starfield" } }));
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: {} }));
+    last()._msg(JSON.stringify({ type: "HUB", link: "up" }));
+    expect(screensavers.mock.calls).toEqual([
+      [{ effect: "bounce" }], [{ effect: "drift" }], [{ effect: "breathe" }], [null],
+    ]);
+    expect(link.screensaver).toBeNull();
+    for (const screensaver of [null, "bounce", ["bounce"]]) {
+      last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver }));
+    }
+    expect(screensavers).toHaveBeenCalledTimes(4);
+
+    expect(link.isConnected()).toBe(true);
+    expect(reconnected).toHaveBeenCalledTimes(1);
+    expect(link.drain()).toEqual([]); // HUB frames never reach the firmware bus
+  });
+
+  it("turns the screensaver off when the Captain link or the hub socket is lost", async () => {
+    const link = await freshLink();
+    const screensavers = vi.fn();
+    link.on("hub-screensaver", ({ payload }) => screensavers(payload));
+    link.start();
+    last()._open();
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "breathe" } }));
+    expect(link.screensaver).toEqual({ effect: "breathe" });
+
+    // Only an up frame can carry it: a lost Captain cannot show one.
+    last()._msg(JSON.stringify({ type: "HUB", link: "down", screensaver: { effect: "breathe" } }));
+    expect(link.screensaver).toBeNull();
+    expect(link.isConnected()).toBe(false);
+
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "drift" } }));
+    expect(link.screensaver).toEqual({ effect: "drift" });
+    last().close();
+    expect(link.screensaver).toBeNull();
+    expect(screensavers.mock.calls).toEqual([
+      [{ effect: "breathe" }], [null], [{ effect: "drift" }], [null],
+    ]);
+
+    // A Stage reopened while the screensaver shows learns it from the first frame.
+    vi.advanceTimersByTime(600);
+    last()._open();
+    last()._msg(JSON.stringify({ type: "HUB", link: "up", screensaver: { effect: "drift" } }));
+    expect(link.screensaver).toEqual({ effect: "drift" });
+    expect(link.isConnected()).toBe(true);
+  });
+
   it("honours a ?ws= override", async () => {
     (location as unknown as { search: string }).search = "?ws=ws://10.0.0.9:9999/";
     const link = await freshLink();

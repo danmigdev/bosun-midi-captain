@@ -729,6 +729,134 @@ static void startup_logo(void) {
     protocol.logo_preview = false;
 }
 
+/* Any reply; true when the request counted as activity. */
+static bool wakes(const char *json) {
+    protocol.activity = false;
+    size_t n = strlen(json), length;
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)json, n, 50000) == n);
+    assert(bosun_protocol_feed(&protocol, (const uint8_t *)"\n", 1, 50000) == 1);
+    (void)bosun_protocol_output(&protocol, &length);
+    assert(length); bosun_protocol_consume_output(&protocol, length);
+    bool woke = protocol.activity; protocol.activity = false;
+    return woke;
+}
+/* One tick: exactly frame, or (NULL) anything but a screensaver frame. */
+static void tick_is(uint32_t now, const char *frame) {
+    bosun_protocol_tick(&protocol, now);
+    size_t length; const uint8_t *bytes = bosun_protocol_output(&protocol, &length);
+    assert(length < sizeof output);
+    memcpy(output, bytes, length); output[length] = 0;
+    bosun_protocol_consume_output(&protocol, length);
+    if (frame) assert(!strcmp(output, frame));
+    else assert(!strstr(output, "SCREENSAVER"));
+}
+static void quiet(uint32_t now) { for (unsigned i = 0; i < 20; ++i) tick_is(now + i * 100, NULL); }
+static void screensaver_protocol(void) {
+    static const char bounce[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"bounce\"}\n";
+    static const char breathe[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"breathe\"}\n";
+    static const char inactive[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":false}\n";
+    bosun_runtime_init(&runtime, &config, send_midi, NULL);
+    bosun_protocol_init(&protocol, &runtime); bosun_protocol_session(&protocol, true);
+    const char device[] = "{\"tft\":{\"screensaver_effect\":\"drift\"}}";
+    assert(bosun_config_put_device(&config, NULL, device, sizeof device - 1) == BOSUN_STORE_OK);
+    request("{\"type\":\"GET_DEVICE_INFO\"}", "DEVICE_INFO");
+    assert(bosun_config_bool(&reply, 0, "screensaver", false));
+    request("{\"type\":\"GET_SCREENSAVER\",\"id\":\"ss\"}", "SCREENSAVER");
+    assert(!strcmp(output, "{\"type\":\"SCREENSAVER\",\"id\":\"ss\",\"active\":false}\n"));
+    quiet(1000);
+    /* Every change of the shown effect is announced once, to the session. */
+    protocol.screensaver = BOSUN_SCREENSAVER_BOUNCE;
+    tick_is(3000, bounce); quiet(3100);
+    request("{\"type\":\"GET_SCREENSAVER\",\"id\":7}", "SCREENSAVER");
+    assert(!strcmp(output, "{\"type\":\"SCREENSAVER\",\"id\":7,\"active\":true,\"effect\":\"bounce\"}\n"));
+    protocol.screensaver = BOSUN_SCREENSAVER_BREATHE;
+    tick_is(6000, breathe);
+    protocol.screensaver = BOSUN_SCREENSAVER_DRIFT;
+    tick_is(6100, "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"drift\"}\n");
+    /* A new session learns an active screensaver at once. */
+    bosun_protocol_session(&protocol, false);
+    tick_is(6200, NULL);
+    protocol.screensaver = BOSUN_SCREENSAVER_BREATHE;
+    bosun_protocol_session(&protocol, true);
+    tick_is(6300, breathe); quiet(6400);
+    protocol.screensaver = BOSUN_SCREENSAVER_OFF;
+    tick_is(9000, inactive); quiet(9100);
+    bosun_protocol_session(&protocol, false); bosun_protocol_session(&protocol, true);
+    quiet(12000); /* Inactive: nothing to announce. */
+    /* SCREENSAVER_START: the given effect, else the configured one. */
+    request("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\"}", "ACK");
+    assert(!strcmp(output, "{\"type\":\"ACK\",\"id\":\"go\"}\n") && protocol.screensaver_start == BOSUN_SCREENSAVER_DRIFT);
+    static const char *const effects[] = {"bounce", "breathe", "drift", "mix"};
+    char command[160];
+    for (unsigned i = 0; i < 4; ++i) {
+        protocol.screensaver_start = 0;
+        snprintf(command, sizeof command, "{\"type\":\"SCREENSAVER_START\",\"effect\":\"%s\"}", effects[i]);
+        request(command, "ACK"); assert(protocol.screensaver_start == i + 1);
+    }
+    static const char *const invalid[] = {"\"sparkle\"", "\"Bounce\"", "\"off\"", "\"\"", "null", "1", "[]", "{}", "true"};
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        protocol.screensaver_start = 0;
+        snprintf(command, sizeof command, "{\"type\":\"SCREENSAVER_START\",\"effect\":%s}", invalid[i]);
+        request(command, "ERROR"); is_error("invalid_request");
+        assert(bosun_json_equal(&reply, bosun_json_get(&reply, 0, "of"), "SCREENSAVER_START"));
+        assert(!protocol.screensaver_start);
+    }
+    request("{\"type\":\"SCREENSAVER_START\",\"effect\":\"drift\",\"effect\":\"mix\"}", "ERROR"); is_error("invalid_json");
+    assert(!protocol.screensaver_start);
+    const char unknown[] = "{\"tft\":{\"screensaver_effect\":\"sparkle\"}}";
+    assert(bosun_config_put_device(&config, NULL, unknown, sizeof unknown - 1) == BOSUN_STORE_OK);
+    request("{\"type\":\"SCREENSAVER_START\"}", "ACK"); assert(protocol.screensaver_start == BOSUN_SCREENSAVER_MIX);
+    protocol.screensaver_start = 0;
+    /* Refused while the update lock is held, before the effect is read. */
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":30}", "ACK", 20000);
+    request_at("{\"type\":\"SCREENSAVER_START\",\"id\":\"no\"}", "ERROR", 20001); is_error("update_lock");
+    request_at("{\"type\":\"SCREENSAVER_START\",\"effect\":\"sparkle\"}", "ERROR", 20002); is_error("update_lock");
+    assert(!protocol.screensaver_start);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":0}", "ACK", 20003);
+    request_at("{\"type\":\"SCREENSAVER_START\",\"effect\":\"bounce\"}", "ACK", 20004);
+    assert(protocol.screensaver_start == BOSUN_SCREENSAVER_BOUNCE);
+    protocol.screensaver_start = 0;
+    /* Reads, polling, the lock and the screensaver's own requests never wake it. */
+    static const char *const passive[] = {
+        "{\"type\":\"PING\",\"id\":\"__hub_keepalive\"}", "{\"type\":\"GET_CONTEXT\"}",
+        "{\"type\":\"GET_DEVICE_INFO\"}", "{\"type\":\"GET_GLOBAL\"}", "{\"type\":\"GET_PATCH\",\"bank\":1,\"slot\":1}",
+        "{\"type\":\"GET_DIRTY\"}", "{\"type\":\"GET_MANIFEST\"}", "{\"type\":\"LIST_PATCHES\",\"limit\":8}",
+        "{\"type\":\"LIST_PROFILES\"}", "{\"type\":\"STATS\"}", "{\"type\":\"LED_DUMP\"}",
+        "{\"type\":\"GET_RIG_INFO\"}", "{\"type\":\"GET_KEMPER_IDENTITY\"}", "{\"type\":\"GET_SCREENSAVER\"}",
+        "{\"type\":\"SCREENSAVER_START\",\"effect\":\"drift\"}", "{\"type\":\"UPDATE_LOCK\",\"seconds\":0}",
+        "{\"type\":\"HUB_INFO\"}", "{\"type\":\"PUT_SOMETHING\"}", "{\"type\":\"SET_ANYTHING\"}",
+        "{\"type\":\"PING\",\"type\":\"PUT_GLOBAL\"}", "{bad", "{\"id\":\"no-type\"}"
+    };
+    for (unsigned i = 0; i < sizeof passive / sizeof *passive; ++i) {
+        bool woke = wakes(passive[i]);
+        if (woke) fprintf(stderr, "Woke on %s\n", passive[i]);
+        assert(!woke);
+    }
+    protocol.screensaver_start = 0;
+    /* State-changing requests wake it, accepted or refused. */
+    static const char *const changing[] = {
+        "{\"type\":\"PUT_GLOBAL\",\"device\":{\"tft\":{\"screensaver_minutes\":5}}}",
+        "{\"type\":\"PUT_PATCH\",\"bank\":2,\"slot\":5,\"patch\":{\"name\":\"Saver\"}}",
+        "{\"type\":\"PUT_BINDING\",\"bank\":2,\"slot\":5,\"binding\":{}}",
+        "{\"type\":\"DISCARD\"}", "{\"type\":\"SAVE_NOW\"}",
+        "{\"type\":\"SWITCH_PATCH\",\"bank\":1,\"slot\":1}", "{\"type\":\"DELETE_PATCH\",\"bank\":9,\"slot\":9}",
+        "{\"type\":\"ACTIVATE_SWITCH\",\"switch\":\"1\",\"bank\":1,\"slot\":1}", "{\"type\":\"ACTIVATE_SWITCH\"}",
+        "{\"type\":\"MORPH_CONTROL\"}", "{\"type\":\"SET_MIDI_MONITOR\",\"on\":false}",
+        "{\"type\":\"CREATE_PROFILE\",\"profile_id\":\"BAD ID\"}", "{\"type\":\"RENAME_PROFILE\",\"profile_id\":\"BAD ID\"}",
+        "{\"type\":\"SWITCH_PROFILE\",\"profile_id\":\"test\"}", "{\"type\":\"DELETE_PROFILE\",\"profile_id\":\"BAD ID\"}",
+        "{\"type\":\"SET_HARDWARE\",\"model\":\"unknown\"}", "{\"type\":\"PUT_LOGO\"}",
+        "{\"type\":\"COMMIT_LOGO\"}", "{\"type\":\"DELETE_LOGO\"}",
+        "{\"type\":\"PUT_GLOBAL\",\"profile\":\"missing\",\"device\":{}}"
+    };
+    for (unsigned i = 0; i < sizeof changing / sizeof *changing; ++i) {
+        bool woke = wakes(changing[i]);
+        if (!woke) fprintf(stderr, "Did not wake on %s\n", changing[i]);
+        assert(woke);
+    }
+    protocol.logo_preview = false;
+    assert(bosun_config_put_device(&config, NULL, "{}", 2) == BOSUN_STORE_OK);
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-protocol-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -874,7 +1002,7 @@ int main(void) {
     full_catalog();
     monitor_events(); rig_info(); ui_events(); morph_control(); activate_switch(); update_lock();
     active_patch_profile_and_draft();
-    kemper_identity(); draft_limit(); startup_logo();
+    kemper_identity(); draft_limit(); startup_logo(); screensaver_protocol();
     const char *stats = "{\"type\":\"STATS\"}\n";
     assert(bosun_protocol_feed(&protocol, (const uint8_t *)stats, strlen(stats), UINT32_MAX) == strlen(stats));
     read_reply("STATS", NULL); assert(strstr(output, "\"uptime_ms\":4294967295"));
@@ -888,6 +1016,6 @@ int main(void) {
     put_logo(0, logo_image, 3, "ERROR"); is_error("storage_unavailable");
     request("{\"type\":\"REBOOT\",\"mode\":\"bootloader\"}", "ACK");
     assert(protocol.reboot_requested && protocol.reboot_bootloader);
-    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect, startup logo upload, update lock passed");
+    puts("protocol: CRUD, manifest, exact bounds, storage failures, MIDI/UI events, auto-save/discard, binding callbacks, external rigs, backpressure, timeout/reboot/reconnect, startup logo upload, update lock, screensaver passed");
     return 0;
 }

@@ -23,6 +23,14 @@
  * UPDATE_LOCK {seconds: 0..120} locks the physical switches until now + seconds
  * (renewing restarts the lease; 0 releases). RAM only; ACTIVATE_SWITCH answers
  * update_lock meanwhile, every other command is unaffected.
+ * GET_SCREENSAVER replies SCREENSAVER {active, effect while active} with the
+ * application's screensaver; the same frame goes out unsolicited (id null)
+ * whenever it changes, and once on a new session while it is active.
+ * SCREENSAVER_START {effect?: bounce|breathe|drift|mix, default the configured
+ * one} sets screensaver_start for the application; update_lock while locked.
+ * A state-changing request (configuration, patch or profile changes, switch,
+ * morph, logo, hardware, MIDI monitor) sets activity; reads, PING, UPDATE_LOCK
+ * and the screensaver requests never do.
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;
@@ -51,7 +59,10 @@ typedef struct {
     bool discarding, connected, reboot_requested, reboot_bootloader, ui_observed;
     bool hardware_configured; /* A valid hardware record selected runtime->hardware. */
     bool logo_preview; /* The startup logo changed; the consumer clears it. */
+    bool activity; /* A state-changing request ran; the consumer clears it. */
     uint8_t update_lock_seconds; /* Lease from update_lock_ms; 0 is unlocked. */
+    uint8_t screensaver_start; /* Requested effect (1..4); the consumer clears it. */
+    uint8_t screensaver, screensaver_sent; /* Shown effect (0 inactive), last announced. */
 } bosun_protocol_t;
 
 void bosun_protocol_init(bosun_protocol_t *protocol, bosun_runtime_t *runtime);

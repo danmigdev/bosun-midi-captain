@@ -216,7 +216,7 @@
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean; boot_logo?: "custom" | "default"; hardware: HardwareLayout }) | null>(null);
+  let deviceInfo = $state<(FirmwareIdentity & { device: string; bank: number; slot: number; profile?: string; stage_input?: boolean; boot_logo?: "custom" | "default"; screensaver?: boolean; hardware: HardwareLayout }) | null>(null);
   // The connected pedal's switch layout. Kept across the transient
   // deviceInfo resets (reconnect, resync, profile switch) so a Mini 6 never
   // flashes the 10-switch layout while DEVICE_INFO is re-read.
@@ -1234,6 +1234,7 @@
           profile: msg.profile ?? "",
           stage_input: msg.stage_input === true,
           boot_logo: msg.boot_logo === "custom" || msg.boot_logo === "default" ? msg.boot_logo : undefined,
+          screensaver: msg.screensaver === true,
           hardware: reported,
         };
         // NOTE: do NOT auto-fetch the current Captain patch on connect.
@@ -1859,7 +1860,8 @@
             <button onclick={() => cmd.getGlobal()}>Reload</button>
           </header>
           <Settings device={globalDevice} {manifest} {activeKind} {connected} {hardware}
-                    bootLogo={deviceInfo?.boot_logo ?? null} {networkSession} firmwareVersion={deviceInfo?.fw ?? ""} />
+                    bootLogo={deviceInfo?.boot_logo ?? null} {networkSession} firmwareVersion={deviceInfo?.fw ?? ""}
+                    screensaver={deviceInfo?.screensaver === true} />
 
         {:else if page === "maint"}
           <header class="pageHead">

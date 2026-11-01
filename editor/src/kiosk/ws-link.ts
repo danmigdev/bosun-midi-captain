@@ -11,12 +11,21 @@
 // itself is talking to the pedal. Those are handled here (they drive the
 // reconnecting/reconnected events) and never reach the firmware bus.
 // While the hub updates the Captain's firmware they also carry
-// `"update": {"phase", "detail"}` (reported as `hub-update`).
+// `"update": {"phase", "detail"}` (reported as `hub-update`), and while
+// the Captain's screensaver is on, `up` frames carry
+// `"screensaver": {"effect"}` (reported as `hub-screensaver`).
 
 type Handler = (event: { payload: unknown }) => void;
 
 /** The hub's running firmware update or recovery check. */
 export type HubUpdate = { phase: string; detail: string };
+
+/** The concrete effect on the Captain's screen; its Mix setting rotates these. */
+export type ScreensaverEffect = "bounce" | "breathe" | "drift";
+/** The Captain's screensaver while it is on. */
+export type HubScreensaver = { effect: ScreensaverEffect };
+
+const SCREENSAVER_EFFECTS: readonly string[] = ["bounce", "breathe", "drift"];
 
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 3000, 5000];
 
@@ -25,6 +34,16 @@ function parseUpdate(value: unknown): HubUpdate | null {
   const { phase, detail } = value as Record<string, unknown>;
   if (typeof phase !== "string" || !phase) return null;
   return { phase, detail: typeof detail === "string" ? detail : "" };
+}
+
+function parseScreensaver(value: unknown): HubScreensaver | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { effect } = value as Record<string, unknown>;
+  // An effect from newer firmware still covers Stage, with the calmest one.
+  return {
+    effect: typeof effect === "string" && SCREENSAVER_EFFECTS.includes(effect)
+      ? effect as ScreensaverEffect : "breathe",
+  };
 }
 
 function wsUrl(): string {
@@ -49,6 +68,8 @@ class WsLink {
   linkUp = false;
   /** Kept across a socket drop: only a HUB frame says the update ended. */
   update: HubUpdate | null = null;
+  /** Cleared when the socket drops: without the hub, Stage cannot know it. */
+  screensaver: HubScreensaver | null = null;
 
   start(): void {
     if (this.wantOpen) return;
@@ -95,6 +116,7 @@ class WsLink {
       this.socketOpen = false;
       this.linkUp = false;
       this.ws = null;
+      this.showScreensaver(null);
       if (this.wantOpen) {
         this.emit("firmware-disconnected");
         this.scheduleReopen(generation);
@@ -124,13 +146,17 @@ class WsLink {
   private handleControl(line: string): boolean {
     if (line.indexOf('"HUB"') === -1) return false;
     try {
-      const obj = JSON.parse(line) as { type?: string; link?: string; update?: unknown };
+      const obj = JSON.parse(line) as {
+        type?: string; link?: string; update?: unknown; screensaver?: unknown;
+      };
       if (obj.type !== "HUB") return false;
       const update = parseUpdate(obj.update);
       if (update?.phase !== this.update?.phase || update?.detail !== this.update?.detail) {
         this.update = update;
         this.emit("hub-update", update);
       }
+      // Present only while the screensaver is on; a lost Captain link is off.
+      this.showScreensaver(obj.link === "up" ? parseScreensaver(obj.screensaver) : null);
       // The hub refuses Stage's requests while it updates the Captain. Stay
       // down until the frame without `update`, whose "up" then resyncs Stage
       // like any reconnect.
@@ -143,6 +169,12 @@ class WsLink {
     } catch {
       return false;
     }
+  }
+
+  private showScreensaver(next: HubScreensaver | null): void {
+    if (next?.effect === this.screensaver?.effect) return;
+    this.screensaver = next;
+    this.emit("hub-screensaver", next);
   }
 
   // -- surface used by the tauri-core / tauri-event shims ---------------
@@ -200,6 +232,7 @@ class WsLink {
     this.socketOpen = false;
     this.linkUp = false;
     this.update = null;
+    this.screensaver = null;
     this.backoffStep = 0;
     this.wantOpen = false;
   }

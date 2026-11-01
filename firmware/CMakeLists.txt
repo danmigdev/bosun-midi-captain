@@ -46,7 +46,7 @@ target_include_directories(bosun_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gener
 # partial application. No source glob can pull host fakes into the ARM image.
 target_sources(bosun_core PRIVATE src/config.c src/runtime.c src/protocol.c
     src/application.c src/storage_path.c src/display.c src/expression_presence.c
-    src/hardware.c)
+    src/hardware.c src/screensaver.c)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/littlefs/lfs.c")
     add_library(bosun_littlefs STATIC third_party/littlefs/lfs.c third_party/littlefs/lfs_util.c)

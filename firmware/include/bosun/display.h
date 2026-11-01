@@ -4,6 +4,7 @@
 #include "bosun/board.h"
 #include "bosun/config.h"
 #include "bosun/kemper.h"
+#include "bosun/screensaver.h"
 
 #define BOSUN_DISPLAY_LABELS 16u
 #define BOSUN_DISPLAY_GLYPHS 128u
@@ -29,13 +30,15 @@ typedef struct {
     bosun_display_label_t labels[BOSUN_DISPLAY_LABELS];
     uint16_t line[BOSUN_DISPLAY_WIDTH];
     uint32_t config_revision, patch_revision, kemper_revision;
-    uint32_t frame_ms, animation_started_ms, logo_ms;
+    uint32_t frame_ms, animation_started_ms, logo_ms, saver_ms, saver_seed;
     char hold_effect[129];
     uint16_t row, rotation, tuner_x, tuner_color, logo_duration, logo_run;
-    uint8_t count, brightness, logo;
+    int16_t saver_x, saver_y; /* Logo box origin while the screensaver shows. */
+    uint8_t count, brightness, logo, saver, saver_phase, saver_level;
     bool updating;
     unsigned status;
     bool has_frame, scrolling, tuner, logo_custom;
+    int8_t saver_dx, saver_dy;
 } bosun_display_t;
 
 /* Retains one bounded label snapshot and one 480-byte RGB565 stripe. A call
@@ -57,4 +60,17 @@ void bosun_display_skip_logo(bosun_display_t *display);
  * the next render, with no timeout; skip does not end it. Turning it off
  * ends any logo, including a preview requested meanwhile, with a full redraw. */
 void bosun_display_updating(bosun_display_t *display, bool active);
+/* True while a logo or the Updating frame owns the panel, and from init until
+ * the first render has shown or skipped the startup logo. */
+bool bosun_display_logo_active(const bosun_display_t *display);
+/* Shows BOUNCE, BREATHE or DRIFT from the next render on a black panel with
+ * the startup logo (custom or built-in, no version); LEDs are not touched.
+ * OFF ends it: the configured backlight and a full layout redraw return. A
+ * different effect restarts from a cleared panel. A logo or the Updating frame
+ * ends it. A render draws at most eight rows with one storage read each.
+ * Bounce: the half-size logo (2x2 average) moves and bounces off the edges.
+ * Breathe: the full logo box, centered, with the backlight fading between
+ * an eighth and all of the configured level. Drift: the half-size logo fades
+ * in at a pseudo-random place, holds, fades out and moves. */
+void bosun_display_screensaver(bosun_display_t *display, unsigned effect);
 #endif

@@ -8,7 +8,8 @@
 
 static bosun_application_t app;
 static char root[] = "/tmp/bosun-application-XXXXXX";
-static uint32_t now, feeds, tasks, writes, drops, rows;
+static uint32_t now, feeds, tasks, writes, drops, rows, fills;
+static uint8_t backlight;
 static uint32_t data_stall_ms;
 static bool cdc, midi_up[2], led_busy, overrun_on_read;
 static size_t midi_limit[2], data_limit;
@@ -105,11 +106,17 @@ void bosun_board_leds_set(uint8_t index, uint32_t rgb) { leds[index] = rgb; }
 bool bosun_board_leds_show(void) { return !led_busy; }
 uint32_t bosun_board_leds_get(uint8_t index) { return index < BOSUN_LED_COUNT ? leds[index] : 0; }
 bool bosun_board_display_rotation(uint16_t degrees) { return degrees <= 270 && degrees % 90 == 0; }
-void bosun_board_display_brightness(uint8_t value) { (void)value; }
+void bosun_board_display_brightness(uint8_t value) { backlight = value; }
 bool bosun_board_display_blit_rgb565(int16_t x, int16_t y, uint16_t width, uint16_t height,
                                    const uint16_t *pixels, uint16_t stride) {
-    assert(x == 0 && y >= 0 && y < 240 && width == 240 && height == 1 && stride == 240 && pixels);
+    /* Whole rows, or rows of the half-size screensaver logo. */
+    assert(x >= 0 && y >= 0 && y < 240 && x + width <= 240 && height == 1 && stride == width && pixels);
+    assert(width == 240 || width == 120);
     ++rows; return true;
+}
+bool bosun_board_display_fill_rect(int16_t x, int16_t y, uint16_t width, uint16_t height, uint16_t rgb565) {
+    assert(x >= 0 && y >= 0 && width && height && x + width <= 240 && y + height <= 240 && !rgb565);
+    ++fills; return true;
 }
 bool bosun_board_watchdog_enable(uint32_t timeout) { assert(timeout == 8000); return true; }
 void bosun_board_watchdog_feed(void) { ++feeds; }
@@ -118,8 +125,8 @@ void bosun_board_reboot(bool bootloader) {
 }
 
 static void tick(void) {
-    uint32_t before = rows; ++now; bosun_application_tick(&app);
-    assert(rows - before <= 8 && feeds == app.ticks && tasks == app.ticks);
+    uint32_t before = rows, filled = fills; ++now; bosun_application_tick(&app);
+    assert(rows - before <= 8 && fills - filled <= 2 && feeds == app.ticks && tasks == app.ticks);
 }
 static void fixture(void) {
     assert(bosun_store_mount(root));
@@ -128,7 +135,7 @@ static void fixture(void) {
     assert(bosun_store_format() == BOSUN_STORE_OK);
     static const char marker[] = "pre-existing storage survives boot";
     assert(bosun_store_write_atomic("/preserve", marker, sizeof marker) == BOSUN_STORE_OK);
-    now = feeds = tasks = writes = drops = rows = data_stall_ms = 0;
+    now = feeds = tasks = writes = drops = rows = fills = data_stall_ms = 0;
     reboots = 0; reboot_bootloader = reboot_allowed = false;
     switches = 0;
     usb_session_generation = 0; observed_cdc = false;
@@ -719,6 +726,212 @@ static void test_update_lock(void) {
     midi_tail_is(18, cc, sizeof cc);
 }
 
+static const char saver_bounce[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"bounce\"}\n";
+static const char saver_breathe[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"breathe\"}\n";
+static const char saver_drift[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":true,\"effect\":\"drift\"}\n";
+static const char saver_off[] = "{\"type\":\"SCREENSAVER\",\"id\":null,\"active\":false}\n";
+static void clear_output(void) { output_length = 0; output[0] = 0; }
+static void host(const char *line, const char *reply) {
+    clear_output(); queue_command(line);
+    for (unsigned i = 0; i < 20 && !replied(reply); ++i) tick();
+    assert(replied(reply));
+}
+/* One tick at the given time, later than now. */
+static void at(uint32_t when) { assert(when - now - 1 < UINT32_MAX / 2); now = when - 1; tick(); }
+static void announced(const char *frame) {
+    for (unsigned i = 0; i < 20 && !replied(frame); ++i) tick();
+    assert(replied(frame)); clear_output();
+}
+static bool saver_frames(void) { return strstr((char *)output, "\"type\":\"SCREENSAVER\"") != NULL; }
+static void saver_fixture(const char *kind, const char *device) {
+    fixture();
+    assert(bosun_config_create("saver", "Saver", kind, NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_activate(&app.config, "saver", true) == BOSUN_STORE_OK);
+    assert(bosun_config_put_device(&app.config, NULL, device, strlen(device)) == BOSUN_STORE_OK);
+    const char patch[] = "{\"name\":\"Clean\",\"bindings\":["
+        "{\"switch\":\"1\",\"mode\":\"tap\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":20,\"value\":127}]}}},"
+        "{\"switch\":\"2\",\"mode\":\"momentary\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"note_on\",\"note\":60}]},"
+        "\"release\":{\"messages\":[{\"type\":\"note_off\",\"note\":60}]}}},"
+        "{\"switch\":\"3\",\"mode\":\"long_press_alt\",\"actions\":{\"press\":{\"messages\":[{\"type\":\"cc\",\"cc\":21}]},"
+        "\"long_press\":{\"messages\":[{\"type\":\"cc\",\"cc\":22}]}}}]}";
+    assert(bosun_config_put_patch(&app.config, NULL, 1, 1, patch, sizeof patch - 1, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_put_patch(&app.config, NULL, 1, 2, "{\"name\":\"Lead\"}", 15, 0) == BOSUN_STORE_OK);
+    assert(bosun_config_save(&app.config, 0, 0, false, NULL) == BOSUN_STORE_OK);
+    assert(bosun_config_select(&app.config, 1, 1) == BOSUN_STORE_OK);
+    now = feeds = tasks = 0;
+    assert(bosun_application_init(&app, root));
+    cdc = true;
+    ticks(40); clear_output();
+}
+
+static void test_screensaver_idle_and_wake(void) {
+    static const uint8_t cc[] = {0xb0, 20, 127}, note_on[] = {0x90, 60, 100}, note_off[] = {0x80, 60, 64};
+    saver_fixture("generic", "{\"tft\":{\"boot_logo_seconds\":0,\"screensaver_minutes\":1,"
+        "\"screensaver_effect\":\"bounce\"},\"expression\":[{\"jack\":1,\"enabled\":true,"
+        "\"calibration\":{\"min\":0,\"max\":65535},\"message\":{\"type\":\"cc\",\"cc\":11}}]}");
+    assert(shows("Clean") && !app.saver_shown && !midi_length[0]);
+    adc_present[0] = true; adc[0] = 50000;
+    for (unsigned i = 0; i < 20000 && !app.runtime.expression[0].present; ++i) tick();
+    assert(app.runtime.expression[0].present && now < 30000);
+    /* The boot tick was the last activity: one minute later, not sooner. */
+    at(60000); assert(!app.saver_shown && !saver_frames());
+    uint32_t leds_before[BOSUN_LED_COUNT]; memcpy(leds_before, leds, sizeof leds);
+    at(60001); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    announced(saver_bounce);
+    ticks(200);
+    assert(app.display.saver == BOSUN_SCREENSAVER_BOUNCE && backlight == 204);
+    assert(!memcmp(leds, leds_before, sizeof leds)); /* LEDs keep the patch state. */
+    /* Polling and reads never wake it, nor does the pedal. */
+    host("{\"type\":\"PING\",\"id\":\"p\"}\n", "\"id\":\"p\"");
+    host("{\"type\":\"GET_CONTEXT\",\"id\":\"c\"}\n", "\"id\":\"c\"");
+    host("{\"type\":\"LIST_PATCHES\",\"id\":\"l\"}\n", "\"id\":\"l\"");
+    host("{\"type\":\"STATS\",\"id\":\"s\"}\n", "\"id\":\"s\"");
+    host("{\"type\":\"GET_DEVICE_INFO\",\"id\":\"d\"}\n", "\"screensaver\":true");
+    host("{\"type\":\"GET_SCREENSAVER\",\"id\":\"g\"}\n",
+         "{\"type\":\"SCREENSAVER\",\"id\":\"g\",\"active\":true,\"effect\":\"bounce\"}\n");
+    clear_output();
+    size_t expression_bytes = midi_length[0];
+    adc[0] = 0; ticks(200);
+    assert(midi_length[0] > expression_bytes && midi_output[0][midi_length[0] - 3] == 0xb0 &&
+           midi_output[0][midi_length[0] - 2] == 11);
+    assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE && !saver_frames());
+    /* A press wakes it and is swallowed whole: no action, even held long. */
+    size_t sent = midi_length[0];
+    switches = 1; tick();
+    uint32_t pressed_at = now;
+    assert(!app.saver_shown && app.switches_ignored == 1);
+    announced(saver_off);
+    ticks(2000);
+    assert(midi_length[0] == sent && shows("Clean") && !app.display.saver && backlight == 204);
+    /* Contact bounce on the release is not a new press. */
+    switches = 0; tick(); switches = 1; tick(); switches = 0; ticks(20);
+    assert(midi_length[0] == sent && !app.switches_ignored);
+    /* The press restarted the idle time; holding is not activity. */
+    at(pressed_at + 59999); assert(!app.saver_shown);
+    at(pressed_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    announced(saver_bounce);
+    /* Bounce at the start of the waking press, then a long press binding held. */
+    switches = 1; tick(); switches = 0; tick(); switches = 1; ticks(300); switches = 0; ticks(20);
+    assert(midi_length[0] == sent && !app.saver_shown);
+    clear_output();
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    announced(saver_bounce);
+    switches = 4; ticks(1500); switches = 0; ticks(20);
+    assert(midi_length[0] == sent && !app.saver_shown);
+    /* Afterwards switches act normally. */
+    switches = 1; ticks(20); switches = 0; ticks(20);
+    midi_tail_is(sent + 3, cc, sizeof cc);
+    /* A momentary held before the screensaver keeps working: only new presses wake. */
+    switches = 2; ticks(20);
+    midi_tail_is(sent + 6, note_on, sizeof note_on);
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    announced(saver_bounce);
+    switches = 0; ticks(20);
+    midi_tail_is(sent + 9, note_off, sizeof note_off);
+    assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    /* A state-changing request wakes it; the new settings apply at once. */
+    host("{\"type\":\"PUT_GLOBAL\",\"id\":\"put\",\"device\":{\"tft\":{\"boot_logo_seconds\":0,"
+         "\"screensaver_minutes\":2,\"screensaver_effect\":\"drift\"}}}\n", "\"id\":\"put\"");
+    uint32_t saved_at = now;
+    assert(!app.saver_shown);
+    announced(saver_off);
+    at(saved_at + 119000); assert(!app.saver_shown);
+    at(saved_at + 121000); assert(app.saver_shown == BOSUN_SCREENSAVER_DRIFT);
+    announced(saver_drift);
+    ticks(100); assert(app.display.saver == BOSUN_SCREENSAVER_DRIFT && backlight < 204);
+    /* ACTIVATE_SWITCH from a host wakes it and acts; the backlight returns. */
+    host("{\"type\":\"ACTIVATE_SWITCH\",\"id\":\"tap\",\"switch\":\"1\",\"bank\":1,\"slot\":1}\n",
+         "{\"type\":\"ACK\",\"id\":\"tap\"}\n");
+    ticks(40);
+    assert(!app.saver_shown && backlight == 204 && shows("Clean"));
+    midi_tail_is(sent + 12, cc, sizeof cc);
+}
+
+static void test_screensaver_selection(void) {
+    /* A Kemper rig change from the unit wakes it; the same rig again does not. */
+    saver_fixture("kemper_player", "{\"tft\":{\"boot_logo_seconds\":0,\"screensaver_minutes\":1}}");
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\",\"effect\":\"breathe\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    announced(saver_breathe);
+    const uint8_t rig2[] = {0xc0, 1};
+    memcpy(midi_input[0], rig2, sizeof rig2); midi_input_length[0] = sizeof rig2;
+    tick();
+    assert(app.config.bank == 1 && app.config.slot == 2 && !app.saver_shown);
+    announced(saver_off);
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\",\"effect\":\"breathe\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    announced(saver_breathe);
+    for (unsigned i = 0; i < 3; ++i) {
+        memcpy(midi_input[0], rig2, sizeof rig2); midi_input_length[0] = sizeof rig2;
+        ticks(50);
+    }
+    assert(app.saver_shown == BOSUN_SCREENSAVER_BREATHE && app.config.slot == 2 && !saver_frames());
+    /* Default effect Mix starts with bounce once the minute passes. */
+    host("{\"type\":\"SWITCH_PATCH\",\"id\":\"sw\",\"bank\":1,\"slot\":1}\n", "\"id\":\"sw\"");
+    uint32_t switched_at = now;
+    assert(!app.saver_shown);
+    announced(saver_off);
+    at(switched_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE && app.saver_mix);
+    announced(saver_bounce);
+    /* A generic selection change (any source) wakes it too. */
+    assert(bosun_runtime_switch_patch(&app.runtime, 1, 2, false) == BOSUN_STORE_OK);
+    tick(); assert(!app.saver_shown);
+}
+
+static void test_screensaver_preview_mix_and_lock(void) {
+    saver_fixture("generic", "{\"tft\":{\"boot_logo_seconds\":0}}");
+    /* Off by default: nothing after an hour. */
+    at(3600000); assert(!app.saver_shown && app.display.row == 240);
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"bad\",\"effect\":\"sparkle\"}\n", "\"error\":\"invalid_request\"");
+    ticks(5); assert(!app.saver_shown && !saver_frames());
+    /* The preview engages with minutes 0 and Mix rotates every minute. */
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"mix\",\"effect\":\"mix\"}\n", "{\"type\":\"ACK\",\"id\":\"mix\"}\n");
+    uint32_t started = now;
+    announced(saver_bounce);
+    at(started + 59999); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE && !saver_frames());
+    at(started + 60000); announced(saver_breathe);
+    ticks(40); assert(app.display.saver == BOSUN_SCREENSAVER_BREATHE);
+    at(started + 120000); announced(saver_drift);
+    at(started + 180000); announced(saver_bounce);
+    at(started + 600000); assert(app.saver_shown); clear_output();
+    /* The update lock takes it over and leaves it inactive. */
+    update_lock(30);
+    assert(!app.saver_shown);
+    announced(saver_off);
+    ticks(40); assert(shows("Updating") && !app.display.saver);
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"locked\"}\n", "\"error\":\"update_lock\"");
+    switches = 1; ticks(50); switches = 0; ticks(50);
+    assert(!app.saver_shown && !midi_length[0]);
+    update_lock(0);
+    ticks(40); assert(shows("Clean") && !app.saver_shown);
+    at(now + 3600000); assert(!app.saver_shown);
+    /* With a timeout the idle time restarts when the lock ends. */
+    host("{\"type\":\"PUT_GLOBAL\",\"id\":\"put\",\"device\":{\"tft\":{\"boot_logo_seconds\":0,"
+         "\"screensaver_minutes\":1}}}\n", "\"id\":\"put\"");
+    update_lock(120);
+    uint32_t locked_at = now;
+    at(locked_at + 110000); assert(!app.saver_shown);
+    update_lock(0);
+    uint32_t unlocked_at = now;
+    at(unlocked_at + 59000); assert(!app.saver_shown);
+    at(unlocked_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+}
+
+static void test_screensaver_startup_logo(void) {
+    /* The idle time waits for the startup logo. */
+    saver_fixture("generic", "{\"tft\":{\"boot_logo_seconds\":60,\"screensaver_minutes\":1}}");
+    assert(shows("v" BOSUN_FIRMWARE_VERSION));
+    at(60000); assert(!app.saver_shown && bosun_display_logo_active(&app.display));
+    at(61000); assert(!bosun_display_logo_active(&app.display) && !app.saver_shown);
+    at(120999); assert(!app.saver_shown);
+    at(121000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    /* A preview replaces the logo. */
+    saver_fixture("generic", "{\"tft\":{\"boot_logo_seconds\":60}}");
+    assert(bosun_display_logo_active(&app.display));
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\",\"effect\":\"drift\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    tick();
+    assert(app.saver_shown == BOSUN_SCREENSAVER_DRIFT && !bosun_display_logo_active(&app.display));
+    ticks(100); assert(app.display.saver == BOSUN_SCREENSAVER_DRIFT);
+}
+
 int main(void) {
     assert(mkdtemp(root));
     test_midi_backpressure(); test_cdc_and_overruns(); test_leds_and_expression(); test_expression_presence();
@@ -731,7 +944,11 @@ int main(void) {
     test_remote_tap_gpio_and_disconnect();
     test_startup_logo();
     test_update_lock();
+    test_screensaver_idle_and_wake();
+    test_screensaver_selection();
+    test_screensaver_preview_mix_and_lock();
+    test_screensaver_startup_logo();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
-    puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display, update lock and watchdog passed");
+    puts("Application: non-destructive boot, bounded/atomic dual MIDI queues, partial CDC, session reset, DMA overrun, LED parity, absent expression, display, update lock, screensaver and watchdog passed");
     return 0;
 }

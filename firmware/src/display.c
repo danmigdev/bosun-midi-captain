@@ -11,6 +11,10 @@
 enum { CELL_W = 6, CELL_H = 12,
        SCROLL_MARGIN = 6, SCROLL_PAUSE = 800, ROWS_PER_TICK = 8 };
 enum { LOGO_OFF, LOGO_BOOT, LOGO_START, LOGO_DRAW, LOGO_HOLD };
+enum { SAVER_START, SAVER_CLEAR, SAVER_DRAW, SAVER_SHOW };
+enum { LOGO_ROW_BYTES = BOSUN_DISPLAY_WIDTH * 2, HALF_W = BOSUN_DISPLAY_WIDTH / 2,
+       HALF_H = BOSUN_BOOT_LOGO_HEIGHT / 2, BOUNCE_STEP = 2, BOUNCE_MS = 40,
+       BREATHE_MS = 6000, DRIFT_FADE_MS = 1200, DRIFT_HOLD_MS = 4000 };
 
 static int clamp(int value, int minimum, int maximum) {
     return value < minimum ? minimum : value > maximum ? maximum : value;
@@ -257,34 +261,43 @@ static void row_label(bosun_display_t *display, const bosun_display_label_t *lab
         ++character;
     }
 }
+/* Fills out with row y (0..199) of the logo box: one bounded storage read of
+ * the custom logo, else the built-in runs from *run, left after the row.
+ * False when the custom file cannot supply the row. */
+static bool logo_row(bool custom, unsigned y, uint16_t *out, uint16_t *run) {
+    if (custom) {
+        size_t length = 0;
+        if (bosun_store_read_at(BOSUN_BOOT_LOGO_PATH, y * (uint32_t)LOGO_ROW_BYTES, out,
+                                LOGO_ROW_BYTES, &length) != BOSUN_STORE_OK || length != LOGO_ROW_BYTES)
+            return false;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        for (unsigned x = 0; x < 240; ++x) out[x] = (uint16_t)(out[x] << 8 | out[x] >> 8);
+#endif
+        return true;
+    }
+    memset(out, 0, LOGO_ROW_BYTES);
+    if (y >= BOOT_LOGO_Y && y < BOOT_LOGO_Y + BOOT_LOGO_SIZE)
+        for (unsigned x = BOOT_LOGO_X; x < BOOT_LOGO_X + BOOT_LOGO_SIZE && *run < BOOT_LOGO_RUNS; ++*run)
+            for (unsigned n = 0; n < boot_logo_runs[*run][0] && x < BOOT_LOGO_X + BOOT_LOGO_SIZE; ++n)
+                out[x++] = boot_logo_runs[*run][1];
+    return true;
+}
 /* Fills line with logo row display->row and returns the built-in run cursor
  * after it; the caller keeps that cursor only once the row is on the panel.
  * A custom row costs one bounded storage read; any failure redraws the whole
  * frame with the built-in logo instead. */
 static uint16_t logo_line(bosun_display_t *display) {
-    unsigned y = display->row, run = display->logo_run;
-    memset(display->line, 0, sizeof display->line);
-    if (y >= BOSUN_BOOT_LOGO_HEIGHT) {
-        for (unsigned label = 0; label < display->count; ++label) row_label(display, &display->labels[label]);
-        return (uint16_t)run;
-    }
-    if (display->logo_custom) {
-        size_t length = 0;
-        if (bosun_store_read_at(BOSUN_BOOT_LOGO_PATH, y * (uint32_t)sizeof display->line, display->line,
-                                sizeof display->line, &length) == BOSUN_STORE_OK && length == sizeof display->line) {
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            for (unsigned x = 0; x < 240; ++x) display->line[x] = (uint16_t)(display->line[x] << 8 | display->line[x] >> 8);
-#endif
-            return (uint16_t)run;
-        }
-        display->logo_custom = false; display->row = 0; y = 0; run = 0;
+    uint16_t run = display->logo_run;
+    if (display->row >= BOSUN_BOOT_LOGO_HEIGHT) {
         memset(display->line, 0, sizeof display->line);
+        for (unsigned label = 0; label < display->count; ++label) row_label(display, &display->labels[label]);
+        return run;
     }
-    if (y >= BOOT_LOGO_Y && y < BOOT_LOGO_Y + BOOT_LOGO_SIZE)
-        for (unsigned x = BOOT_LOGO_X; x < BOOT_LOGO_X + BOOT_LOGO_SIZE && run < BOOT_LOGO_RUNS; ++run)
-            for (unsigned n = 0; n < boot_logo_runs[run][0] && x < BOOT_LOGO_X + BOOT_LOGO_SIZE; ++n)
-                display->line[x++] = boot_logo_runs[run][1];
-    return (uint16_t)run;
+    if (!logo_row(display->logo_custom, display->row, display->line, &run)) {
+        display->logo_custom = false; display->row = 0; run = 0;
+        (void)logo_row(false, 0, display->line, &run);
+    }
+    return run;
 }
 /* True while the startup logo owns the panel. */
 static bool logo(bosun_display_t *display, const bosun_config_t *config, uint32_t now_ms) {
@@ -314,10 +327,153 @@ static bool logo(bosun_display_t *display, const bosun_config_t *config, uint32_
     bosun_display_skip_logo(display);
     return false;
 }
+static uint16_t average(uint16_t a, uint16_t b, uint16_t c, uint16_t d) {
+    unsigned red = (a >> 11) + (b >> 11) + (c >> 11) + (d >> 11);
+    unsigned green = (a >> 5 & 63u) + (b >> 5 & 63u) + (c >> 5 & 63u) + (d >> 5 & 63u);
+    unsigned blue = (a & 31u) + (b & 31u) + (c & 31u) + (d & 31u);
+    return (uint16_t)((red + 2) / 4 << 11 | (green + 2) / 4 << 5 | (blue + 2) / 4);
+}
+/* Row y of the half-size logo in line[0..119]: each pixel averages a 2x2
+ * block of the two source rows; the second one is a stack temporary. */
+static bool half_row(bosun_display_t *display, unsigned y, uint16_t *run) {
+    uint16_t below[BOSUN_DISPLAY_WIDTH];
+    if (!logo_row(display->logo_custom, 2 * y, display->line, run) ||
+        !logo_row(display->logo_custom, 2 * y + 1, below, run)) return false;
+    for (unsigned x = 0; x < HALF_W; ++x)
+        display->line[x] = average(display->line[2 * x], display->line[2 * x + 1], below[2 * x], below[2 * x + 1]);
+    return true;
+}
+static void backlight(bosun_display_t *display, unsigned level) {
+    if (level == display->saver_level) return;
+    display->saver_level = (uint8_t)level;
+    bosun_board_display_brightness((uint8_t)level);
+}
+/* From low (amount 0) to the configured level (amount 1024). The squared
+ * smoothstep makes the fade look even on the linear PWM backlight. */
+static unsigned fade(const bosun_display_t *display, unsigned low, uint32_t amount) {
+    uint32_t eased = amount * amount * (3072u - 2u * amount) >> 20;
+    return low + ((display->brightness - low) * (eased * eased >> 10) >> 10);
+}
+static unsigned saver_random(bosun_display_t *display, unsigned range) {
+    display->saver_seed = display->saver_seed * 1664525u + 1013904223u;
+    return (display->saver_seed >> 16) % range;
+}
+static void blank(bosun_display_t *display, int x, int y, int width, int height) {
+    if (!bosun_board_display_fill_rect((int16_t)x, (int16_t)y, (uint16_t)width, (uint16_t)height, 0))
+        display->status |= BOSUN_DISPLAY_IO;
+}
+/* The panel is black: place the logo box for the effect and draw it. */
+static void saver_begin(bosun_display_t *display, uint32_t now_ms) {
+    display->saver_seed ^= now_ms;
+    if (display->saver == BOSUN_SCREENSAVER_BREATHE) {
+        display->saver_x = 0; display->saver_y = (240 - BOSUN_BOOT_LOGO_HEIGHT) / 2;
+    } else {
+        display->saver_x = (int16_t)saver_random(display, 240 - HALF_W + 1);
+        display->saver_y = (int16_t)saver_random(display, 240 - HALF_H + 1);
+    }
+    display->saver_dx = saver_random(display, 2) ? BOUNCE_STEP : -BOUNCE_STEP;
+    display->saver_dy = saver_random(display, 2) ? BOUNCE_STEP : -BOUNCE_STEP;
+    /* Drift fades in from a dark panel; the others draw at the configured level. */
+    backlight(display, display->saver == BOSUN_SCREENSAVER_DRIFT ? 0 : display->brightness);
+    display->saver_phase = SAVER_DRAW; display->saver_ms = now_ms;
+    display->row = 0; display->logo_run = 0;
+}
+/* Moves the half-size logo one step, reversing at the panel edges, and
+ * blanks only the strips of the old box that the new one leaves exposed. */
+static void bounce_step(bosun_display_t *display) {
+    int x = display->saver_x, y = display->saver_y;
+    if (x + display->saver_dx < 0 || x + display->saver_dx > 240 - HALF_W) display->saver_dx = (int8_t)-display->saver_dx;
+    if (y + display->saver_dy < 0 || y + display->saver_dy > 240 - HALF_H) display->saver_dy = (int8_t)-display->saver_dy;
+    int nx = x + display->saver_dx, ny = y + display->saver_dy;
+    if (nx > x) blank(display, x, y, nx - x, HALF_H);
+    else blank(display, nx + HALF_W, y, x - nx, HALF_H);
+    if (ny > y) blank(display, x, y, HALF_W, ny - y);
+    else blank(display, x, ny + HALF_H, HALF_W, y - ny);
+    display->saver_x = (int16_t)nx; display->saver_y = (int16_t)ny;
+    display->saver_phase = SAVER_DRAW; display->row = 0; display->logo_run = 0;
+}
+static void screensaver(bosun_display_t *display, const bosun_config_t *config, uint32_t now_ms) {
+    if (display->saver_phase == SAVER_START) {
+        display->status = BOSUN_DISPLAY_OK;
+        panel(display, config);
+        display->saver_level = display->brightness;
+        display->row = 0; display->logo_custom = true;
+        display->saver_phase = SAVER_CLEAR;
+    }
+    if (display->saver_phase == SAVER_CLEAR) {
+        blank(display, 0, display->row, 240, ROWS_PER_TICK);
+        display->row = (uint16_t)(display->row + ROWS_PER_TICK);
+        if (display->row >= 240) saver_begin(display, now_ms);
+        return;
+    }
+    if (display->saver_phase == SAVER_DRAW) {
+        /* Half-size rows read two source rows: four of them per render. */
+        bool half = display->saver != BOSUN_SCREENSAVER_BREATHE;
+        unsigned width = half ? HALF_W : 240, height = half ? HALF_H : BOSUN_BOOT_LOGO_HEIGHT;
+        for (unsigned rows = 0; rows < (half ? ROWS_PER_TICK / 2 : ROWS_PER_TICK) && display->row < height; ++rows) {
+            uint16_t run = display->logo_run;
+            if (!(half ? half_row(display, display->row, &run)
+                       : logo_row(display->logo_custom, display->row, display->line, &run))) {
+                /* The custom file failed: redraw the box with the built-in logo. */
+                display->logo_custom = false; display->row = 0; display->logo_run = 0;
+                return;
+            }
+            if (!bosun_board_display_blit_rgb565(display->saver_x, (int16_t)(display->saver_y + display->row),
+                                                 (uint16_t)width, 1, display->line, (uint16_t)width)) {
+                display->status |= BOSUN_DISPLAY_IO;
+                return;
+            }
+            display->logo_run = run;
+            ++display->row;
+        }
+        if (display->row < height) return;
+        display->saver_phase = SAVER_SHOW;
+        if (display->saver != BOSUN_SCREENSAVER_BOUNCE) display->saver_ms = now_ms;
+        return;
+    }
+    uint32_t elapsed = now_ms - display->saver_ms;
+    if (display->saver == BOSUN_SCREENSAVER_BOUNCE) {
+        /* Paced from the start of the previous step, however long it drew. */
+        if (elapsed < BOUNCE_MS) return;
+        display->saver_ms = now_ms;
+        bounce_step(display);
+    } else if (display->saver == BOSUN_SCREENSAVER_BREATHE) {
+        uint32_t phase = elapsed % BREATHE_MS, half = BREATHE_MS / 2;
+        backlight(display, fade(display, (display->brightness + 7u) / 8u,
+                                (phase < half ? half - phase : phase - half) * 1024u / half));
+    } else if (elapsed < DRIFT_FADE_MS) {
+        backlight(display, fade(display, 0, elapsed * 1024u / DRIFT_FADE_MS));
+    } else if (elapsed < DRIFT_FADE_MS + DRIFT_HOLD_MS) {
+        backlight(display, display->brightness);
+    } else if (elapsed < 2u * DRIFT_FADE_MS + DRIFT_HOLD_MS) {
+        backlight(display, fade(display, 0, (2u * DRIFT_FADE_MS + DRIFT_HOLD_MS - elapsed) * 1024u / DRIFT_FADE_MS));
+    } else {
+        /* Dark: clear the panel and appear somewhere else. */
+        backlight(display, 0);
+        display->saver_phase = SAVER_CLEAR; display->row = 0;
+    }
+}
+void bosun_display_screensaver(bosun_display_t *display, unsigned effect) {
+    if (!display || effect > BOSUN_SCREENSAVER_DRIFT || effect == display->saver) return;
+    if (display->saver && effect) {
+        /* Mix: clear at the current backlight, so the old effect never flashes. */
+        display->saver = (uint8_t)effect; display->saver_phase = SAVER_CLEAR;
+        display->row = 0; display->logo_custom = true;
+        return;
+    }
+    display->saver = (uint8_t)effect; display->saver_phase = SAVER_START;
+    /* The layout, or a logo that owns the panel meanwhile, resends the backlight. */
+    display->has_frame = false;
+    if (!effect && display->logo == LOGO_OFF) display->row = 240;
+}
+bool bosun_display_logo_active(const bosun_display_t *display) {
+    return display && display->logo != LOGO_OFF;
+}
 void bosun_display_logo(bosun_display_t *display, uint16_t duration_ms) {
     if (!display) return;
     if (!duration_ms) { bosun_display_skip_logo(display); return; }
     display->logo = LOGO_START; display->logo_duration = duration_ms;
+    display->saver = BOSUN_SCREENSAVER_OFF;
 }
 void bosun_display_skip_logo(bosun_display_t *display) {
     if (!display || display->updating || display->logo == LOGO_OFF) return;
@@ -326,8 +482,9 @@ void bosun_display_skip_logo(bosun_display_t *display) {
 void bosun_display_updating(bosun_display_t *display, bool active) {
     if (!display || display->updating == active) return;
     display->updating = active;
-    if (active) display->logo = LOGO_START; /* Takes over any logo or layout frame. */
-    else bosun_display_skip_logo(display);
+    if (active) { /* Takes over any logo, screensaver or layout frame. */
+        display->logo = LOGO_START; display->saver = BOSUN_SCREENSAVER_OFF;
+    } else bosun_display_skip_logo(display);
 }
 void bosun_display_init(bosun_display_t *display) {
     if (!display) return;
@@ -346,6 +503,7 @@ unsigned bosun_display_render(bosun_display_t *display, const bosun_config_t *co
         bosun_display_logo(display, (uint16_t)(seconds * 1000));
     }
     if (display->logo != LOGO_OFF && logo(display, config, now_ms)) return display->status;
+    if (display->saver) { screensaver(display, config, now_ms); return display->status; }
     uint32_t kemper_revision = kemper ? kemper->revision : 0;
     if (display->row >= 240) {
         bool changed = !display->has_frame || config->revision != display->config_revision ||

@@ -273,6 +273,59 @@ static void console_status(bosun_application_t *app, uint32_t now) {
     }
 }
 
+/* An update lock releases every switch, and the press that wakes the
+ * screensaver never reaches the runtime. Either switch stays ignored until it
+ * is let go, so neither produces a press later. Letting go must outlast the
+ * switch debounce, so contact bounce cannot become a fresh press. */
+static void switch_input(bosun_application_t *app, uint32_t now, bool locked, uint16_t pressed) {
+    enum { SWITCH_DEBOUNCE_MS = 5 };
+    uint16_t presses = (uint16_t)(pressed & ~app->switches_down & ~app->switches_ignored);
+    if (locked) app->switches_ignored = UINT16_MAX;
+    else if (app->saver_shown) app->switches_ignored |= presses;
+    if ((pressed ^ app->switches_down) & app->switches_ignored) app->ignored_ms = now;
+    else if (!locked && now - app->ignored_ms >= SWITCH_DEBOUNCE_MS) app->switches_ignored &= pressed;
+    app->switches_down = pressed;
+    /* Activity restarts the idle time and ends the screensaver; the lock holds both. */
+    uint32_t selection = bosun_runtime_selection(&app->runtime);
+    if (locked || presses || app->protocol.activity || selection != app->saver_selection) {
+        app->saver_idle_ms = now; app->saver_shown = BOSUN_SCREENSAVER_OFF;
+    }
+    app->protocol.activity = false; app->saver_selection = selection;
+}
+
+static void engage(bosun_application_t *app, uint32_t now, unsigned effect) {
+    app->saver_mix = effect == BOSUN_SCREENSAVER_MIX;
+    app->saver_shown = (uint8_t)(app->saver_mix ? BOSUN_SCREENSAVER_BOUNCE : effect);
+    app->saver_ms = now;
+}
+
+/* After the lock and logo requests of this tick: a SCREENSAVER_START preview
+ * replaces any logo; the idle time does not run during the lock or a logo.
+ * Mix moves on every minute. Each configuration change rereads the settings,
+ * so a saved change to them applies at once. */
+static void screensaver(bosun_application_t *app, uint32_t now, bool locked) {
+    unsigned request = app->protocol.screensaver_start;
+    app->protocol.screensaver_start = 0;
+    if (app->saver_revision != app->config.revision) {
+        app->saver_revision = app->config.revision;
+        app->saver_minutes = (uint8_t)bosun_screensaver_minutes(&app->config);
+    }
+    if (request && !locked) {
+        bosun_display_skip_logo(&app->display);
+        engage(app, now, request);
+    } else if (locked || bosun_display_logo_active(&app->display)) {
+        app->saver_idle_ms = now;
+    } else if (!app->saver_shown) {
+        if (app->saver_minutes && now - app->saver_idle_ms >= app->saver_minutes * 60000u)
+            engage(app, now, bosun_screensaver_effect(&app->config));
+    } else if (app->saver_mix && now - app->saver_ms >= 60000u) {
+        app->saver_shown = (uint8_t)(app->saver_shown % BOSUN_SCREENSAVER_DRIFT + 1u);
+        app->saver_ms = now;
+    }
+    app->protocol.screensaver = app->saver_shown;
+    bosun_display_screensaver(&app->display, app->saver_shown);
+}
+
 bool bosun_application_init(bosun_application_t *app, const char *host_root) {
     if (!app) return false;
     memset(app, 0, sizeof *app);
@@ -296,6 +349,7 @@ bool bosun_application_init(bosun_application_t *app, const char *host_root) {
     };
     bosun_expression_presence_init(&app->expression_presence, &presence_backend, app);
     app->leds_dirty = true;
+    app->saver_revision = app->config.revision - 1u; /* Read the settings on the first tick. */
     app->console_ms = bosun_board_millis() - 3000u;
     return bosun_board_watchdog_enable(8000);
 }
@@ -320,11 +374,9 @@ void bosun_application_tick(bosun_application_t *app) {
         app->runtime.patch_revision != app->config.patch_revision)
         bosun_runtime_config_changed(&app->runtime);
     expression_input(app);
-    /* An update lock releases every switch; one still held when it ends stays
-     * released until it is let go, so a lock never produces a press. */
     bool locked = bosun_protocol_update_locked(&app->protocol, now);
     uint16_t pressed = bosun_hardware_logical_mask(app->runtime.hardware, bosun_board_switches());
-    app->switches_ignored = locked ? UINT16_MAX : (uint16_t)(app->switches_ignored & pressed);
+    switch_input(app, now, locked, pressed);
     bosun_runtime_tick(&app->runtime, now, (uint16_t)(pressed & ~app->switches_ignored),
                        app->expression_raw[0], app->expression_raw[1]);
     bosun_config_tick(&app->config, now);
@@ -340,6 +392,7 @@ void bosun_application_tick(bosun_application_t *app) {
     /* Any debounced press ends a startup logo or preview; MIDI never does. */
     for (unsigned sw = 0; sw < app->runtime.hardware->switch_count; ++sw)
         if (!app->runtime.switches[sw].stable) { bosun_display_skip_logo(&app->display); break; }
+    screensaver(app, now, locked);
     char hold_effect[129];
     bosun_runtime_hold_effect(&app->runtime, hold_effect, sizeof hold_effect);
     (void)bosun_display_render(&app->display, &app->config,

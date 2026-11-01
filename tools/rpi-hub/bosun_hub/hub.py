@@ -28,6 +28,13 @@ Rules:
     step and once without it when the job ends. The raw TCP endpoint
     does not get these: it stays a line-JSON protocol-compatible
     endpoint with exact request ids.
+  - the Captain's screensaver reaches Stage the same way: while it is on,
+    ``up`` frames carry ``"screensaver": {"effect"}``, re-sent whenever
+    the Captain's ``SCREENSAVER`` events change it and once without it
+    when it ends. The hub remembers it for Stage clients that connect
+    later, asks ``GET_SCREENSAVER`` on every Captain (re)connect (an
+    ERROR from older firmware means off) and treats a lost link as off.
+    The ``SCREENSAVER`` lines themselves are relayed like any other.
 """
 
 from __future__ import annotations
@@ -71,6 +78,7 @@ _TRACKED_READS = frozenset({
 _CONTEXT_ID_STEM = "__bosun_ctx_"
 _PATCH_ID_STEM = "__bosun_patch_"
 _REQUEST_ID_STEM = "__bosun_req_"
+_SCREENSAVER_ID_STEM = "__bosun_ss_"
 
 # Commands which can make a snapshot already in progress stale.  If one is
 # forwarded during a flight, later GET_CONTEXT callers wait for a second
@@ -252,6 +260,15 @@ class Hub:
         # out its promise does not withdraw a request which is already queued
         # on the Captain.
         self._upstream_reads: set[str] = set()
+        # The Captain's screensaver for Stage's HUB frames: {"effect": ...}
+        # while it is on, None while it is off, unsupported or the link is
+        # down. Only the reply to the hub's latest GET_SCREENSAVER counts.
+        self._screensaver: Optional[dict] = None
+        self._screensaver_query: Optional[str] = None
+        self._screensaver_seq = 0
+        self._screensaver_id_prefix = (
+            _SCREENSAVER_ID_STEM + secrets.token_hex(8) + "_"
+        )
 
     # -- lifecycle -------------------------------------------------------
 
@@ -331,7 +348,58 @@ class Hub:
         self._post(self._link_state, up)
 
     def _link_state(self, up: bool) -> None:
+        # A lost Captain shows no screensaver, and a new session's is unknown
+        # until the Captain answers: off until then.
+        self._screensaver = None
+        self._screensaver_query = None
         self._dispatch_status(self._status_line(up))
+        if up:
+            self._query_screensaver()
+
+    # -- the Captain's screensaver, for Stage --------------------------
+
+    def _query_screensaver(self) -> None:
+        self._screensaver_seq += 1
+        query_id = f"{self._screensaver_id_prefix}{self._screensaver_seq}"
+        if self.link.send(json.dumps(
+            {"type": "GET_SCREENSAVER", "id": query_id}, separators=(",", ":")
+        )):
+            self._screensaver_query = query_id
+
+    def _consume_screensaver_reply(self, msg: dict) -> bool:
+        """Apply the reply to the hub's own GET_SCREENSAVER, never relayed.
+
+        Firmware without a screensaver answers ERROR (``unknown_type``); any
+        reply other than SCREENSAVER therefore means off.
+        """
+        response_id = msg.get("id")
+        if not (
+            isinstance(response_id, str)
+            and response_id.startswith(self._screensaver_id_prefix)
+        ):
+            return False
+        if response_id != self._screensaver_query:
+            log.debug("dropping stale GET_SCREENSAVER reply %s", response_id)
+            return True
+        self._screensaver_query = None
+        if msg.get("type") == "SCREENSAVER":
+            self._set_screensaver(msg)
+        else:
+            self._set_screensaver({"active": False})
+        return True
+
+    def _set_screensaver(self, msg: dict) -> None:
+        active = msg.get("active")
+        if not isinstance(active, bool):
+            log.debug("ignoring malformed SCREENSAVER %r", msg)
+            return
+        effect = msg.get("effect")
+        state = None
+        if active:
+            state = {"effect": effect} if isinstance(effect, str) else {}
+        if state != self._screensaver:
+            self._screensaver = state
+            self._resend_status()
 
     # -- reads still queued on the Captain -----------------------------
 
@@ -1091,6 +1159,12 @@ class Hub:
             msg = None
         if isinstance(msg, dict) and msg.get("type") == "DEVICE_INFO":
             self._update_device_info = dict(msg)
+        if isinstance(msg, dict) and self._consume_screensaver_reply(msg):
+            return
+        if isinstance(msg, dict) and msg.get("type") == "SCREENSAVER":
+            # Unsolicited events and the replies to a client's own
+            # GET_SCREENSAVER both describe the Captain's screen right now.
+            self._set_screensaver(msg)
         if isinstance(msg, dict) and self._consume_context_reply(msg):
             return
         if isinstance(msg, dict) and self._consume_patch_reply(msg):
@@ -1133,6 +1207,9 @@ class Hub:
 
     def _update_progress(self) -> None:
         """A new update step, or its end, for Stage; never a link transition."""
+        self._resend_status()
+
+    def _resend_status(self) -> None:
         line = self._status_line(self.link.connected)
         for sub in self._subs:
             if sub._want_status:
@@ -1143,4 +1220,7 @@ class Hub:
         # Stage shows an "Updating" screen while an update or recovery job runs.
         if self.updates.progress is not None:
             status["update"] = self.updates.progress
+        # And covers itself while the Captain's screensaver is on.
+        if up and self._screensaver is not None:
+            status["screensaver"] = self._screensaver
         return json.dumps(status)

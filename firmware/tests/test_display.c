@@ -12,21 +12,32 @@ static uint16_t pixels[240][240]; /* Host fake only: never linked into RP2040. *
 static uint32_t writes;
 static uint16_t rotation;
 static uint8_t brightness;
-static bool fail_write;
+static uint32_t fills, brightness_writes;
+static bool fail_write, half_rows;
 static bosun_config_t config;
 static bosun_display_t display;
 static bosun_kemper_state kemper;
 static char hold_effect[129];
 
 bool bosun_board_display_rotation(uint16_t value) { rotation = value; return value <= 270 && value % 90 == 0; }
-void bosun_board_display_brightness(uint8_t value) { brightness = value; }
+void bosun_board_display_brightness(uint8_t value) { brightness = value; ++brightness_writes; }
 bool bosun_board_display_blit_rgb565(int16_t x, int16_t y, uint16_t w, uint16_t h,
                                     const uint16_t *source, uint16_t stride) {
     assert(x >= 0 && y >= 0 && x + w <= 240 && y + h <= 240);
-    assert(w == 240 && h == 1 && stride == 240); /* A single 480-byte stripe. */
+    /* A single stripe of at most 480 bytes: a whole row, or a half-size
+     * screensaver row while half_rows allows it. */
+    assert(h == 1 && stride == w && (w == 240 || (half_rows && w == 120)));
     if (fail_write) return false;
     memcpy(&pixels[y][x], source, w * sizeof(*source));
     ++writes;
+    return true;
+}
+bool bosun_board_display_fill_rect(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t color) {
+    assert(x >= 0 && y >= 0 && w && h && x + w <= 240 && y + h <= 240);
+    if (fail_write) return false;
+    for (unsigned row = 0; row < h; ++row)
+        for (unsigned column = 0; column < w; ++column) pixels[y + row][x + column] = color;
+    ++fills;
     return true;
 }
 static void load(const char *device, const char *patch) {
@@ -414,6 +425,206 @@ static void custom_logo_rows_and_fallback(void) {
     assert(frame(0) == BOSUN_DISPLAY_OK); logo_frame_is(builtin);
 }
 
+static uint16_t half_image[BOSUN_BOOT_LOGO_HEIGHT / 2][120];
+static unsigned channel_mean(unsigned a, unsigned b, unsigned c, unsigned d) { return (a + b + c + d + 2) / 4; }
+static void make_half(const uint16_t (*image)[240]) {
+    for (unsigned y = 0; y < BOSUN_BOOT_LOGO_HEIGHT / 2; ++y)
+        for (unsigned x = 0; x < 120; ++x) {
+            uint16_t a = image[2 * y][2 * x], b = image[2 * y][2 * x + 1];
+            uint16_t c = image[2 * y + 1][2 * x], d = image[2 * y + 1][2 * x + 1];
+            half_image[y][x] = (uint16_t)(channel_mean(a >> 11, b >> 11, c >> 11, d >> 11) << 11 |
+                channel_mean(a >> 5 & 63, b >> 5 & 63, c >> 5 & 63, d >> 5 & 63) << 5 |
+                channel_mean(a & 31, b & 31, c & 31, d & 31));
+        }
+}
+/* Bounded work: at most eight rows and two rectangles per render. */
+static void renders(unsigned count, uint32_t now) {
+    while (count--) {
+        uint32_t before = writes, filled = fills;
+        (void)bosun_display_render(&display, &config, &kemper, hold_effect, now);
+        assert(writes - before <= 8 && fills - filled <= 2);
+    }
+}
+static bool black(void) {
+    for (unsigned y = 0; y < 240; ++y) for (unsigned x = 0; x < 240; ++x) if (pixels[y][x]) return false;
+    return true;
+}
+static void half_box_at(int left, int top) {
+    assert(left >= 0 && left <= 120 && top >= 0 && top <= 140);
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 240; ++x) {
+            bool inside = x >= left && x < left + 120 && y >= top && y < top + 100;
+            assert(pixels[y][x] == (inside ? half_image[y - top][x - left] : 0));
+        }
+}
+static void full_box(const uint16_t (*image)[240]) {
+    for (unsigned y = 0; y < 240; ++y)
+        for (unsigned x = 0; x < 240; ++x)
+            assert(pixels[y][x] == (y >= 20 && y < 220 ? image[y - 20][x] : 0));
+}
+static void screensaver_settings(void) {
+    static const struct { const char *device; unsigned minutes, effect; } cases[] = {
+        {"{}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":[]}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":5,\"screensaver_effect\":\"bounce\"}}", 5, BOSUN_SCREENSAVER_BOUNCE},
+        {"{\"tft\":{\"screensaver_minutes\":120,\"screensaver_effect\":\"breathe\"}}", 120, BOSUN_SCREENSAVER_BREATHE},
+        {"{\"tft\":{\"screensaver_minutes\":121,\"screensaver_effect\":\"drift\"}}", 120, BOSUN_SCREENSAVER_DRIFT},
+        {"{\"tft\":{\"screensaver_minutes\":100000,\"screensaver_effect\":\"mix\"}}", 120, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":-1,\"screensaver_effect\":\"Bounce\"}}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":1.5,\"screensaver_effect\":\"off\"}}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":\"5\",\"screensaver_effect\":1}}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":true,\"screensaver_effect\":null}}", 0, BOSUN_SCREENSAVER_MIX},
+        {"{\"tft\":{\"screensaver_minutes\":0,\"screensaver_effect\":\"\\u0062ounce\"}}", 0, BOSUN_SCREENSAVER_BOUNCE},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; ++i) {
+        load(cases[i].device, "{}");
+        assert(bosun_screensaver_minutes(&config) == cases[i].minutes);
+        assert(bosun_screensaver_effect(&config) == cases[i].effect);
+    }
+    load(bosun_default_device, "{}");
+    assert(!bosun_screensaver_minutes(&config) && bosun_screensaver_effect(&config) == BOSUN_SCREENSAVER_MIX);
+    assert(strstr(bosun_default_device, "\"screensaver_minutes\":0,\"screensaver_effect\":\"mix\""));
+    static const char *const names[] = {"off", "bounce", "breathe", "drift", "mix", "off"};
+    for (unsigned effect = 0; effect < 6; ++effect) assert(!strcmp(bosun_screensaver_name(effect), names[effect]));
+}
+static void screensaver_effects(void) {
+    boot("{\"tft\":{\"boot_logo_seconds\":0,\"brightness\":80}}");
+    assert(frame(0) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    assert(!bosun_display_logo_active(&display));
+    half_rows = true; make_half(builtin);
+    /* Bounce: the panel is cleared, then the half-size logo drawn. */
+    uint32_t t = 1000;
+    rotation = 0; brightness = 0;
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BOUNCE);
+    renders(30, t);
+    assert(black() && rotation == 180 && brightness == 204);
+    renders(26, t); /* The first render finds no custom logo. */
+    half_box_at(display.saver_x, display.saver_y);
+    uint32_t before = writes;
+    renders(5, t + 39); assert(writes == before);
+    int x = display.saver_x, y = display.saver_y, dx = display.saver_dx, dy = display.saver_dy;
+    bool turned_x = false, turned_y = false;
+    for (unsigned step = 0; step < 160; ++step) {
+        t += 40;
+        uint32_t filled = fills;
+        renders(1, t); assert(fills - filled == 2); /* Only the two exposed strips. */
+        renders(25, t);
+        assert(abs(display.saver_x - x) == 2 && abs(display.saver_y - y) == 2);
+        turned_x |= display.saver_dx != dx; turned_y |= display.saver_dy != dy;
+        x = display.saver_x; y = display.saver_y; dx = display.saver_dx; dy = display.saver_dy;
+        half_box_at(x, y);
+    }
+    assert(turned_x && turned_y && brightness == 204);
+    /* Breathe: a change of effect clears and draws the full logo box, centered. */
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BREATHE);
+    renders(30, t); assert(black());
+    renders(26, t); full_box(builtin);
+    assert(brightness == 204);
+    unsigned lowest = 255, previous = brightness;
+    before = writes;
+    for (uint32_t elapsed = 0; elapsed <= 12000; elapsed += 20) {
+        renders(1, t + elapsed);
+        assert(brightness >= 26 && brightness <= 204);
+        assert(abs((int)brightness - (int)previous) <= 4); /* Smooth. */
+        if (brightness < lowest) lowest = brightness;
+        previous = brightness;
+    }
+    assert(writes == before && lowest == 26); /* Never off; no redraw. */
+    renders(1, t + 3000); assert(brightness == 26);
+    renders(1, t + 6000); assert(brightness == 204);
+    /* Drift: fades in from dark, holds, fades out and moves. */
+    t += 20000;
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_DRIFT);
+    renders(30, t); assert(black() && brightness == 0);
+    renders(26, t); half_box_at(display.saver_x, display.saver_y);
+    bool moved = false;
+    for (unsigned cycle = 0; cycle < 3; ++cycle) {
+        int left = display.saver_x, top = display.saver_y;
+        previous = 0;
+        for (uint32_t elapsed = 0; elapsed <= 1200; elapsed += 20) {
+            renders(1, t + elapsed); assert(brightness >= previous); previous = brightness;
+        }
+        assert(brightness == 204);
+        renders(1, t + 5200); assert(brightness == 204);
+        renders(1, t + 5800); assert(brightness > 0 && brightness < 204);
+        previous = brightness;
+        for (uint32_t elapsed = 5820; elapsed < 6400; elapsed += 20) {
+            renders(1, t + elapsed); assert(brightness <= previous); previous = brightness;
+        }
+        t += 6400;
+        renders(1, t); assert(brightness == 0);
+        renders(30, t); assert(black() && brightness == 0);
+        renders(25, t); half_box_at(display.saver_x, display.saver_y);
+        moved |= display.saver_x != left || display.saver_y != top;
+    }
+    assert(moved);
+    /* Leaving dark Drift for Bounce clears without lighting the old frame. */
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BOUNCE);
+    renders(29, t); assert(brightness == 0);
+    renders(1, t); assert(black() && brightness == 204);
+    renders(26, t); half_box_at(display.saver_x, display.saver_y);
+    /* Off: the layout returns with the configured backlight. */
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_OFF);
+    brightness = 0; rotation = 0;
+    assert(frame(t) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    assert(brightness == 204 && rotation == 180);
+    before = writes; renders(5, t + 1000); assert(writes == before);
+    /* The Updating frame and a logo preview take over and end it. */
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BREATHE);
+    renders(70, t);
+    bosun_display_updating(&display, true);
+    assert(!display.saver && bosun_display_logo_active(&display));
+    assert(frame(t) == BOSUN_DISPLAY_OK); logo_frame_with(builtin, "Updating");
+    bosun_display_updating(&display, false);
+    assert(frame(t) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_DRIFT);
+    renders(40, t);
+    bosun_display_logo(&display, 3000);
+    assert(!display.saver);
+    assert(frame(t) == BOSUN_DISPLAY_OK); logo_frame_is(builtin);
+    holds_until(t, t + 3000); layout_is("Clean");
+    assert(brightness == 204);
+    /* Requested while a logo shows: it starts from a cleared panel afterwards. */
+    boot("{}");
+    renders(2, 0);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BOUNCE);
+    renders(28, 0); logo_frame_is(builtin);
+    renders(10, 1000); logo_frame_is(builtin);
+    renders(30, 2100); assert(black());
+    renders(26, 2100); half_box_at(display.saver_x, display.saver_y);
+    /* A failed row keeps its place for the retry. */
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_OFF);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BOUNCE);
+    renders(30, 3000); renders(3, 3000);
+    fail_write = true;
+    assert(bosun_display_render(&display, &config, &kemper, hold_effect, 3000) & BOSUN_DISPLAY_IO);
+    assert(display.row == 8);
+    fail_write = false;
+    renders(23, 3000); half_box_at(display.saver_x, display.saver_y);
+    half_rows = false;
+}
+static void screensaver_custom_logo(void) {
+    make_custom();
+    assert(bosun_store_mkdir(BOSUN_BOOT_LOGO_DIR) == BOSUN_STORE_OK);
+    assert(bosun_store_write_atomic(BOSUN_BOOT_LOGO_PATH, custom_bytes, sizeof custom_bytes) == BOSUN_STORE_OK);
+    boot("{\"tft\":{\"boot_logo_seconds\":0}}");
+    assert(frame(0) == BOSUN_DISPLAY_OK); layout_is("Clean");
+    half_rows = true; make_half(custom);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_DRIFT);
+    renders(55, 0); half_box_at(display.saver_x, display.saver_y);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BREATHE);
+    renders(55, 0); full_box(custom);
+    /* A short file fails part way: the box is redrawn with the built-in logo. */
+    assert(bosun_store_write_atomic(BOSUN_BOOT_LOGO_PATH, custom_bytes, sizeof custom_bytes / 2) == BOSUN_STORE_OK);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BOUNCE);
+    make_half(builtin);
+    renders(100, 0); half_box_at(display.saver_x, display.saver_y);
+    bosun_display_screensaver(&display, BOSUN_SCREENSAVER_BREATHE);
+    renders(100, 0); full_box(builtin);
+    assert(bosun_store_remove(BOSUN_BOOT_LOGO_PATH) == BOSUN_STORE_OK);
+    half_rows = false;
+}
+
 int main(void) {
     char root[] = "/tmp/bosun-display-XXXXXX";
     assert(mkdtemp(root) && bosun_store_mount(root));
@@ -430,10 +641,14 @@ int main(void) {
     startup_logo_timing();
     startup_logo_skip_and_preview();
     updating_screen();
+    screensaver_settings();
+    screensaver_effects();
+    screensaver_custom_logo();
     custom_logo_rows_and_fallback();
     assert(bosun_store_mount(root) && bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);
     printf("display snapshots, geometry, color, expression text, UTF-8, scrolling, tuner, startup logo "
-           "(built-in %u runs, custom rows, fallback, hold/skip/preview), Updating screen: PASS (%zu bytes)\n",
+           "(built-in %u runs, custom rows, fallback, hold/skip/preview), Updating screen, screensaver "
+           "(bounce, breathe, drift, custom logo): PASS (%zu bytes)\n",
            (unsigned)BOOT_LOGO_RUNS, sizeof display);
     return 0;
 }

@@ -163,6 +163,15 @@ bool bosun_board_display_blit_rgb565(int16_t x, int16_t y, uint16_t width, uint1
     }
     return true;
 }
+bool bosun_board_display_fill_rect(int16_t x, int16_t y, uint16_t width, uint16_t height, uint16_t rgb565) {
+    int32_t left = x < 0 ? 0 : x, top = y < 0 ? 0 : y;
+    int32_t right = (int32_t)x + width, bottom = (int32_t)y + height;
+    if (right > BOSUN_DISPLAY_WIDTH) right = BOSUN_DISPLAY_WIDTH;
+    if (bottom > BOSUN_DISPLAY_HEIGHT) bottom = BOSUN_DISPLAY_HEIGHT;
+    for (int32_t row = top; row < bottom; ++row)
+        for (int32_t column = left; column < right; ++column) framebuffer[row][column] = rgb565;
+    return true;
+}
 bool bosun_board_watchdog_enable(uint32_t timeout) { return timeout && timeout <= 8000; }
 void bosun_board_watchdog_feed(void) {}
 void bosun_board_reboot(bool bootloader) { (void)bootloader; stopping = 1; }

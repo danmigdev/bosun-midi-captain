@@ -242,6 +242,50 @@ describe("App firmware capabilities", () => {
   });
 });
 
+describe("App screensaver settings", () => {
+  async function settings(screensaver?: boolean) {
+    // Over USB, so the Settings page asks no hub for its startup logo.
+    localStorage.setItem("BOSUN_CONNECTION", JSON.stringify({ mode: "usb", host: "", port: "9876" }));
+    const previous = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (command: string, args: unknown) => {
+      if (command === "auto_connect") { backendConnected = true; return "COM9"; }
+      if (command === "usb_update_status" || command === "bundled_update_manifest") return null;
+      return previous(command, args);
+    });
+    render(App);
+    await screen.findByTitle("Connected on COM9");
+    await message({
+      type: "DEVICE_INFO", fw: "0.8.6", device: "MIDI Captain", profile: "kemper",
+      current: { bank: 1, slot: 1 }, ...(screensaver === undefined ? {} : { screensaver }),
+    } as FirmwareMessage);
+    await fireEvent.click(screen.getByRole("button", { name: "Menu", exact: true }));
+    await fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: /Settings$/ }));
+    await message({ type: "GLOBAL", device: {} });
+    await screen.findByRole("button", { name: "Save settings" });
+  }
+
+  it("shows the screensaver fields for firmware that reports DEVICE_INFO.screensaver", async () => {
+    await settings(true);
+    expect(screen.getByLabelText("Screensaver after (minutes)")).toHaveValue(0);
+    expect(screen.getByLabelText("Screensaver effect")).toHaveValue("mix");
+    expect(screen.getByRole("button", { name: "Show now" })).toBeEnabled();
+  });
+
+  it("hides them for older firmware", async () => {
+    await settings();
+    expect(screen.queryByLabelText("Screensaver after (minutes)")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show now" })).not.toBeInTheDocument();
+  });
+
+  it("takes unsolicited SCREENSAVER events without an error or losing the page", async () => {
+    await settings(true);
+    await message({ type: "SCREENSAVER", active: true, effect: "bounce" });
+    await message({ type: "SCREENSAVER", active: false });
+    expect(screen.queryByText(/firmware:/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Screensaver effect")).toHaveValue("mix");
+  });
+});
+
 describe("App install prompt", () => {
   const CIRCUITPY: DeviceState = { bootloader_drive: null, circuitpy_drive: "E:\\", usb_pedal_present: true };
   const BOOTLOADER: DeviceState = { bootloader_drive: "F:\\", circuitpy_drive: null, usb_pedal_present: false };

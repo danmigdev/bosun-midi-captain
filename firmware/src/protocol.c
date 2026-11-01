@@ -75,7 +75,7 @@ static bool unique_arguments(const bosun_json_doc_t *d) {
     static const char *const names[] = {"type", "id", "profile", "bank", "slot",
         "profile_id", "name", "kind", "color", "device", "patch", "binding",
         "on", "request", "mode", "switch", "model", "offset", "data", "size", "fnv1a",
-        "seconds"};
+        "seconds", "effect"};
     _Static_assert(sizeof names / sizeof *names <= 32, "one bit per argument name");
     uint32_t seen = 0;
     for (unsigned i = 1; i < d->tokens[0].next; i = d->tokens[i + 1].next)
@@ -259,6 +259,31 @@ static bool emit_ui_event(bosun_protocol_t *p) {
     }
     finish(p); return true;
 }
+static void screensaver_state(bosun_protocol_t *p) {
+    field(&p->writer, "active"); bosun_json_puts(&p->writer, p->screensaver ? "true" : "false");
+    if (p->screensaver) string(&p->writer, "effect", bosun_screensaver_name(p->screensaver));
+}
+/* Announces every change of the shown effect, Mix rotations included. */
+static bool emit_screensaver(bosun_protocol_t *p) {
+    if (p->screensaver == p->screensaver_sent) return false;
+    p->screensaver_sent = p->screensaver;
+    strcpy(p->id, "null"); p->type[0] = 0;
+    begin(p, "SCREENSAVER"); screensaver_state(p);
+    finish(p); return true;
+}
+/* Requests that change what the pedal does or stores. Reads, PING, UPDATE_LOCK
+ * and the screensaver's own requests are polled or automated by hosts, so
+ * they must never count as activity, nor may an unknown type. */
+static bool changes_state(const char *type) {
+    static const char *const types[] = {"PUT_GLOBAL", "PUT_PATCH", "PUT_BINDING",
+        "SWITCH_PATCH", "DELETE_PATCH", "SAVE_NOW", "DISCARD", "CREATE_PROFILE",
+        "RENAME_PROFILE", "SWITCH_PROFILE", "DELETE_PROFILE", "ACTIVATE_SWITCH",
+        "MORPH_CONTROL", "SET_MIDI_MONITOR", "SET_HARDWARE", "PUT_LOGO", "COMMIT_LOGO",
+        "DELETE_LOGO"};
+    for (unsigned i = 0; i < sizeof types / sizeof *types; ++i)
+        if (!strcmp(type, types[i])) return true;
+    return false;
+}
 static void tft_projection(bosun_protocol_t *p, const bosun_json_doc_t *d) {
     int tft = bosun_json_get(d, 0, "tft");
     int layout = bosun_json_get(d, tft, "layout");
@@ -352,7 +377,8 @@ static void device_info(bosun_protocol_t *p) {
     /* Kiosk treats preset_navigation as the fast-bootstrap capability marker
      * and skips GET_GLOBAL, so it also needs bank_count and the Screen projection. */
     tft_projection(p, d);
-    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"stage_input\":true,\"reboot_modes\":[\"normal\",\"bootloader\"]");
+    bosun_json_puts(&p->writer, ",\"native_experimental\":true,\"stage_input\":true,\"screensaver\":true,"
+                    "\"reboot_modes\":[\"normal\",\"bootloader\"]");
     size_t none;
     string(&p->writer, "boot_logo",
            bosun_store_read_at(BOSUN_BOOT_LOGO_PATH, 0, NULL, 0, &none) == BOSUN_STORE_OK ? "custom" : "default");
@@ -724,6 +750,14 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
             r = BOSUN_STORE_INVALID;
         else { p->update_lock_ms = now_ms; p->update_lock_seconds = (uint8_t)seconds; }
     }
+    else if (!strcmp(p->type, "GET_SCREENSAVER")) { begin(p, "SCREENSAVER"); screensaver_state(p); }
+    else if (!strcmp(p->type, "SCREENSAVER_START")) {
+        if (bosun_protocol_update_locked(p, now_ms)) { error(p, "update_lock"); goto done; }
+        int token = get(p, "effect");
+        unsigned effect = token < 0 ? bosun_screensaver_effect(c) : bosun_screensaver_parse(&p->request, token);
+        if (!effect) r = BOSUN_STORE_INVALID;
+        else p->screensaver_start = (uint8_t)effect;
+    }
     else if (!strcmp(p->type, "REBOOT")) {
         int mode = get(p, "mode");
         bool bootloader = mode >= 0 && bosun_json_equal(&p->request, mode, "bootloader");
@@ -737,6 +771,8 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
     else error(p, "unknown_type");
     if (r != BOSUN_STORE_OK) error(p, store_error(r));
 done:
+    /* Accepted or refused, a state-changing request is someone at the editor or Stage. */
+    if (changes_state(p->type)) p->activity = true;
     observe_changes(p, !strcmp(p->type, "DISCARD") || !strcmp(p->type, "DELETE_PATCH"), 1);
     finish(p);
 }
@@ -755,6 +791,7 @@ void bosun_protocol_session(bosun_protocol_t *p, bool connected) {
     p->runtime->midi_monitor = false;
     bosun_kemper_morph_clear(&p->runtime->kemper);
     p->ui_pending = 0; p->ui_observed = false;
+    p->screensaver_sent = BOSUN_SCREENSAVER_OFF; /* A new host learns an active screensaver. */
     memset(p->binding_pending, 0, sizeof p->binding_pending);
     memset(p->saved_pending, 0, sizeof p->saved_pending);
     memset(p->discarded_pending, 0, sizeof p->discarded_pending);
@@ -801,7 +838,7 @@ void bosun_protocol_tick(bosun_protocol_t *p, uint32_t now_ms) {
         strcpy(p->id, "null"); p->type[0] = 0; error(p, "receive_timeout"); finish(p); return;
     }
     if (p->rx_length || p->discarding) return;
-    if (emit_ui_event(p)) return;
+    if (emit_screensaver(p) || emit_ui_event(p)) return;
     if ((uint32_t)(now_ms - p->last_context_ms) < 50 ||
         (p->context_revision == p->runtime->revision && p->kemper_revision == p->runtime->kemper.state.revision)) {
         (void)emit_midi_event(p); return;

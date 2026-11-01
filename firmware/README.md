@@ -77,6 +77,50 @@ unlocking never produces a press. Expression pedals are not affected. The TFT
 shows the startup logo frame with "Updating" in place of the version until the
 lock ends (switch presses do not dismiss it), then redraws the layout.
 
+## Screensaver
+
+After `tft.screensaver_minutes` (device.json, 0..120, default 0 = off,
+clamped) without activity the TFT shows the startup logo (custom or built-in,
+no version) on black with `tft.screensaver_effect`: `bounce` (half-size logo
+moving and bouncing off the edges), `breathe` (full logo, backlight fading
+between an eighth and all of `tft.brightness`, never off), `drift` (half-size
+logo fading in at a random place, holding, fading out and moving) or `mix`
+(the default, and what any other value reads as: the three in turn, one minute
+each). Both settings apply as soon as they are saved. The LEDs are unchanged.
+Drawing is incremental: at most eight rows, one storage read each, per loop.
+
+Activity restarts the idle time and wakes it, with a full redraw and the
+configured backlight:
+
+- a physical switch press, which only wakes it: no action, no MIDI, no long
+  press or hold, and the switch stays ignored until it is let go (as with the
+  update lock); a switch already held when it engaged keeps working;
+- the current selection changing value (bank, slot, or the rig a Kemper
+  follows), from any source; repeated identical state does not count;
+- a state-changing request: `PUT_GLOBAL`, `PUT_PATCH`, `PUT_BINDING`,
+  `SWITCH_PATCH`, `DELETE_PATCH`, `SAVE_NOW`, `DISCARD`, `CREATE_PROFILE`,
+  `RENAME_PROFILE`, `SWITCH_PROFILE`, `DELETE_PROFILE`, `ACTIVATE_SWITCH` (which
+  also acts), `MORPH_CONTROL`, `SET_MIDI_MONITOR`, `SET_HARDWARE`, `PUT_LOGO`,
+  `COMMIT_LOGO` and `DELETE_LOGO`, accepted or refused.
+
+Reads and polling (`GET_*`, `LIST_*`, `STATS`, `LED_DUMP`, `PING`),
+`UPDATE_LOCK`, the screensaver requests, unknown types and expression pedals
+never count. It never engages during the update lock or a startup logo or
+preview, and the idle time restarts when they end; the update lock takes over
+an active screensaver and leaves it off.
+
+- `DEVICE_INFO.screensaver` is `true`.
+- `{"type":"SCREENSAVER","id":null,"active":true,"effect":"bounce"}` (or
+  `breathe`, `drift`; `effect` is always the one on screen) and
+  `{"type":"SCREENSAVER","id":null,"active":false}` are sent unsolicited when
+  the state or the effect changes, Mix rotations included, and once to a new
+  session while it is active.
+- `GET_SCREENSAVER` replies the same frame with the request `id`.
+- `SCREENSAVER_START {effect?}` (`bounce`, `breathe`, `drift` or `mix`;
+  default the configured one) shows it now, even with minutes 0, replacing a
+  startup logo; `invalid_request` for another effect, `update_lock` while
+  locked.
+
 ## Build requirements
 
 Build on Linux, or on Windows through WSL with an Ubuntu distribution. On

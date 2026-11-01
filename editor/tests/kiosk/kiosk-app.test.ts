@@ -1131,6 +1131,156 @@ describe("kiosk integration", () => {
     await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
   });
 
+  /** jsdom has no layout: a 1920 x 440 bar panel and the logo's rendered size. */
+  function stubScreensaverLayout() {
+    const screen = (element: Element, size: number) =>
+      element.classList.contains("kiosk-screensaver") ? size : 0;
+    vi.spyOn(Element.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: Element) { return screen(this, 1920); });
+    vi.spyOn(Element.prototype, "clientHeight", "get")
+      .mockImplementation(function (this: Element) { return screen(this, 440); });
+    const logo = (element: HTMLElement, full: number, small: number) => {
+      if (element.tagName !== "IMG" || !element.closest(".kiosk-screensaver")) return 0;
+      return element.closest(".kiosk-screensaver--small") ? small : full;
+    };
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) { return logo(this, 400, 200); });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) { return logo(this, 222, 111); });
+  }
+
+  it("covers Stage with the animated screensaver and follows each effect the Captain shows", async () => {
+    vi.useFakeTimers();
+    stubScreensaverLayout();
+    const view = mountKiosk();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      sock()._open();
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      answerBootstrap(1, 1);
+      await vi.advanceTimersByTimeAsync(0);
+      const overlay = () => view.container.querySelector<HTMLElement>(".kiosk-screensaver");
+      const logo = () => overlay()!.querySelector("img")!;
+      expect(view.container.querySelector(".stage")).not.toBeNull();
+      expect(overlay()).toBeNull();
+      const deviceInfos = sentCount("GET_DEVICE_INFO");
+
+      reply({ type: "HUB", link: "up", screensaver: { effect: "bounce" } });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(overlay()).toHaveAttribute("data-effect", "bounce");
+      expect(overlay()).toHaveAttribute("aria-hidden", "true");
+      expect(overlay()).toHaveClass("kiosk-screensaver--small");
+      expect(logo()).toHaveAttribute("src", "/boot-logo.png");
+      const start = logo().style.transform;
+      expect(start).toMatch(/^translate3d\(/);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(logo().style.transform).not.toBe(start);
+      expect(Number(logo().style.opacity)).toBe(1);
+
+      // Mix moves on to Breathe: the same element, full size and centered.
+      const element = logo();
+      reply({ type: "HUB", link: "up", screensaver: { effect: "breathe" } });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(overlay()).toHaveAttribute("data-effect", "breathe");
+      expect(overlay()).not.toHaveClass("kiosk-screensaver--small");
+      expect(logo()).toBe(element);
+      expect(logo().style.transform).toBe("translate3d(760.0px, 109.0px, 0)");
+      expect(Number(logo().style.opacity)).toBe(1);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(Number(logo().style.opacity)).toBeLessThan(0.15);
+
+      // Then Drift: dark first, then the logo fades in somewhere and holds.
+      reply({ type: "HUB", link: "up", screensaver: { effect: "drift" } });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(overlay()).toHaveAttribute("data-effect", "drift");
+      expect(Number(logo().style.opacity)).toBeLessThan(0.05);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(Number(logo().style.opacity)).toBe(1);
+      const spot = logo().style.transform;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(logo().style.transform).toBe(spot);
+
+      // None of this is a reconnect, and Stage stays mounted underneath.
+      expect(sentCount("GET_DEVICE_INFO")).toBe(deviceInfos);
+      expect(view.container.querySelector(".stage")).not.toBeNull();
+      expect(view.container.textContent).not.toContain("reconnecting");
+
+      reply({ type: "HUB", link: "up" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(overlay()).toBeNull();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the Updating screen win over the screensaver, which returns after the update", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+    const screensaver = () => container.querySelector(".kiosk-screensaver");
+    const updating = () => container.querySelector(".kiosk-updating");
+
+    reply({ type: "HUB", link: "up", screensaver: { effect: "drift" } });
+    await waitFor(() => expect(screensaver()).not.toBeNull());
+
+    reply({ type: "HUB", link: "up", update: { phase: "validating", detail: "" },
+      screensaver: { effect: "drift" } });
+    await waitFor(() => expect(updating()).not.toBeNull());
+    expect(screensaver()).toBeNull();
+    reply({ type: "HUB", link: "up", update: { phase: "verifying", detail: "" },
+      screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(updating()).toHaveTextContent("Checking firmware and settings"));
+    expect(screensaver()).toBeNull();
+
+    reply({ type: "HUB", link: "up", screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(updating()).toBeNull());
+    expect(screensaver()).toHaveAttribute("data-effect", "bounce");
+  });
+
+  it("hides the screensaver when the Captain or the hub is lost, and shows it to a Stage opened meanwhile", async () => {
+    const { container } = mountKiosk();
+    const screensaver = () => container.querySelector(".kiosk-screensaver");
+    sock()._open();
+    reply({ type: "HUB", link: "up", screensaver: { effect: "breathe" } });
+    await waitFor(() => expect(screensaver()).toHaveAttribute("data-effect", "breathe"));
+    await waitFor(() => expect(lastSent("GET_DEVICE_INFO")).toBeTruthy());
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(container.querySelector(".stage")).not.toBeNull());
+    expect(screensaver()).not.toBeNull();
+
+    reply({ type: "HUB", link: "down" });
+    await waitFor(() => expect(screensaver()).toBeNull());
+    expect(container.textContent).toContain("reconnecting");
+
+    reply({ type: "HUB", link: "up", screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(screensaver()).toHaveAttribute("data-effect", "bounce"));
+    sock().close();
+    await waitFor(() => expect(screensaver()).toBeNull());
+  });
+
+  it("falls back to the bundled Bosun icon for the screensaver and tries the custom logo again next time", async () => {
+    const { container } = mountKiosk();
+    await bringLinkUp();
+    const logo = () => container.querySelector<HTMLImageElement>(".kiosk-screensaver img");
+
+    reply({ type: "HUB", link: "up", screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(logo()).toHaveAttribute("src", "/boot-logo.png"));
+    expect(logo()).toHaveClass("kiosk-screensaver__logo");
+    const element = logo()!;
+    await fireEvent.error(element); // the hub answers 404 without a custom logo
+    await waitFor(() => expect(logo()).toHaveAttribute("src", expect.stringContaining("128x128@2x.png")));
+    expect(logo()).toBe(element); // the animated element stays in place
+    expect(logo()).toHaveClass("kiosk-screensaver__icon");
+
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(logo()).toBeNull());
+    reply({ type: "HUB", link: "up", screensaver: { effect: "drift" } });
+    await waitFor(() => expect(logo()).toHaveAttribute("src", "/boot-logo.png"));
+  });
+
   it("never requests the heavy manifest at all", async () => {
     // On the RP2040 the manifest streams as a background generator for
     // ~7 s and a GET_PATCH mid-stream (every rig change) can wedge it,

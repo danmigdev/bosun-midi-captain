@@ -9,7 +9,8 @@ stream:
   - ``ws``    the same protocol lines as WebSocket text messages (one
               line per message) for the Stage kiosk browser, plus
               ``{"type":"HUB","link":...}`` status frames (with ``update``
-              while a firmware update runs).
+              while a firmware update runs, ``screensaver`` while the
+              Captain's screensaver is on).
   - ``http``  static file server for the built Stage kiosk bundle. A custom
               startup logo is substituted into ``index.html`` as it is sent
               and served as ``/boot-logo.png`` (404 without one).
