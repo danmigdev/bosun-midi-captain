@@ -3,10 +3,10 @@
   Bump the project version everywhere it needs to match, in one call.
 
 .DESCRIPTION
-  Bosun keeps the C firmware and the editor on the same semver.
+  Bosun keeps the C firmware, the editor and the Pi hub on the same semver.
 
   This script:
-    1. Aligns the editor and firmware version fields,
+    1. Aligns the editor, firmware and Pi hub version fields,
        including the npm/Cargo lockfiles and RP2040 program metadata.
     2. Advances the tracked Android versionCode.
     3. Prints each file it changed so you can eyeball what moved.
@@ -123,6 +123,14 @@ Set-VersionLine `
     -Path (Join-Path $native "platform\rp2040\CMakeLists.txt") `
     -Pattern '(?m)^(\s*pico_set_program_version\(\$\{target\} )"\d+\.\d+\.\d+"(\))' `
     -Replacement "`${1}`"$Version`"`${2}" `
+    -ExpectedMatches 1
+
+# The Pi hub reports this in HUB_INFO. Desktop updates a Pi whose version is
+# older than the bundled release and then requires exactly this release.
+Set-VersionLine `
+    -Path (Join-Path $repoRoot "tools\rpi-hub\bosun_hub\__init__.py") `
+    -Pattern '(?m)^(__version__\s*=\s*)(["''])\d+\.\d+\.\d+\2' `
+    -Replacement "`${1}`"$Version`"" `
     -ExpectedMatches 1
 
 # Android's versionName is READ AT GRADLE BUILD TIME from gen/android's own

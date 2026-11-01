@@ -29,6 +29,8 @@ def verify(root=ROOT, *, tag=None, package=None):
         "firmware/include/bosun/protocol.h": (r'^#define BOSUN_FIRMWARE_VERSION\s+"([^"]+)"\s*$', firmware_version, 1),
         "firmware/CMakeLists.txt": (r'project\(BosunNative\s+VERSION\s+(\S+)\s+LANGUAGES\b', release, 2),
         "firmware/platform/rp2040/CMakeLists.txt": (r'pico_set_program_version\(\$\{target\}\s+"([^"]+)"\)', firmware_version, 1),
+        # HUB_INFO reports it; Desktop requires the release after a Pi update.
+        "tools/rpi-hub/bosun_hub/__init__.py": (r'^__version__\s*=\s*"([^"]+)"\s*$', release, 1),
     }
     for path, (pattern, wanted, count) in patterns.items():
         versions = re.findall(pattern, (root / path).read_text(encoding="utf-8"), re.MULTILINE)

@@ -186,6 +186,24 @@ jobs:
             --package editor/src-tauri/resources/update/bosun-update.zip \
             --output editor/src-tauri/resources/installer
 
+      # Desktop updates a Raspberry Pi only with a package signed by the
+      # release key in tools/rpi-hub/allowed_signers. Never ship it unsigned.
+      - name: Sign the Raspberry Pi package
+        shell: bash
+        env:
+          PI_SIGNING_KEY: ${{ secrets.BOSUN_PI_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PI_SIGNING_KEY" ]; then
+            echo "::error::The BOSUN_PI_SIGNING_KEY secret is not set: refusing to release an unsigned Raspberry Pi package."
+            exit 1
+          fi
+          key=$(umask 077 && mktemp "$RUNNER_TEMP/bosun-pi-key.XXXXXX")
+          trap 'rm -f "$key"' EXIT
+          chmod 600 "$key"
+          printf '%s\n' "$PI_SIGNING_KEY" > "$key"
+          python tools/sign-pi-package.py --key "$key" --require-allowed-signers
+
       - name: Verify the native package before building Tauri
         shell: bash
         env:
@@ -209,7 +227,9 @@ jobs:
         working-directory: editor
         # npm's script launches Windows PowerShell 5 through cmd.exe, which
         # inherits incompatible PowerShell 7 module paths from the runner.
-        run: ../tools/package-portable.ps1
+        # It rebuilds the Pi package and refuses it unless the signature from
+        # the signing step still matches (no key is available here).
+        run: ../tools/package-portable.ps1 -RequirePiSignature
 
       - name: Build - macOS dmg
         if: matrix.name == 'macos'

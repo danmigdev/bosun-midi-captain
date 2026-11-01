@@ -16,6 +16,8 @@ mod installer;
 #[cfg(not(target_os = "android"))]
 mod firmware_update;
 #[cfg(not(target_os = "android"))]
+mod pi_update;
+#[cfg(not(target_os = "android"))]
 mod firmware_package;
 #[cfg(not(target_os = "android"))]
 mod picoboot;
@@ -66,6 +68,8 @@ pub fn run() {
             installer::detect_pedal,
             firmware_update::bundled_update_manifest,
             firmware_update::read_bundled_update,
+            pi_update::bundled_pi_update,
+            pi_update::read_bundled_pi_update,
             usb_update::usb_update_start,
             usb_update::factory_install_start,
             factory_install::factory_install_discover,

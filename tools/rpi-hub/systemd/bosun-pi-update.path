@@ -1,0 +1,10 @@
+[Unit]
+Description=Install a signed Bosun Pi package staged by the hub
+
+[Path]
+# The hub rewrites this request with the job id after a complete upload.
+PathChanged=/var/lib/bosun-hub/pi-update/request
+Unit=bosun-pi-update.service
+
+[Install]
+WantedBy=paths.target

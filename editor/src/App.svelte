@@ -37,9 +37,9 @@
   import StageView from "./components/StageView.svelte";
   import { IS_ANDROID } from "./lib/platform";
   import {
-    bundledUpdateManifest, hubSupportsUnifiedUpdate, isTerminalUpdate, readPendingUpdate,
-    unifiedUpdateAvailable, unifiedUpdateStatus,
-    type BundledUpdateManifest, type PendingUpdate,
+    bundledPiUpdate, bundledUpdateManifest, hubInfo, hubSupportsUnifiedUpdate, isTerminalUpdate,
+    planUnifiedUpdate, readPendingUpdate, unifiedUpdateAvailable, unifiedUpdateStatus,
+    type BundledPiUpdate, type BundledUpdateManifest, type HubInfo, type PendingUpdate,
   } from "./lib/unified-update";
   import { supportsBootloader, type FirmwareIdentity } from "./lib/firmware-capabilities";
   import { CAPTAIN_10, parseHardware, type HardwareLayout } from "./lib/hardware";
@@ -270,11 +270,16 @@
     finally { busy = false; }
   }
   let hubCanUpdate = $state(false);
+  // HUB_INFO of the connected hub and the signed Pi package bundled with this
+  // build: together they decide whether "Update Bosun" updates the Pi first.
+  let connectedHub = $state<HubInfo | null>(null);
+  let piPackage = $state<BundledPiUpdate | null>(null);
+  let updatePlan = $derived(planUnifiedUpdate(deviceInfo?.fw, bundledUpdate, connectedHub, piPackage));
   let unifiedJob = $state<PendingUpdate | null>(readPendingUpdate());
   let showUnifiedUpdate = $state(false);
   let unifiedEndpoint = $state("");
-  let canUseUnifiedUpdate = $derived(!IS_ANDROID && connected && !hubUpdateOnly && networkSession && hubCanUpdate && !!bundledUpdate);
-  let hasUnifiedUpdate = $derived(canUseUnifiedUpdate && unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate));
+  let canUseUnifiedUpdate = $derived(!IS_ANDROID && connected && !hubUpdateOnly && networkSession && (hubCanUpdate || updatePlan.pi) && !!bundledUpdate);
+  let hasUnifiedUpdate = $derived(canUseUnifiedUpdate && (unifiedUpdateAvailable(deviceInfo?.fw, bundledUpdate) || updatePlan.pi));
   let canResumeUnifiedUpdate = $derived(!IS_ANDROID && connected && networkSession && unifiedJob?.endpoint === connectedPortName);
   function openUnifiedUpdate() {
     if ((!canUseUnifiedUpdate && !canResumeUnifiedUpdate) || showUnifiedUpdate) return;
@@ -296,7 +301,11 @@
     if (!IS_ANDROID) void bundledUpdateManifest().then(value => { bundledUpdate = value; });
   });
   $effect(() => {
+    if (!IS_ANDROID) void bundledPiUpdate().then(value => { piPackage = value; });
+  });
+  $effect(() => {
     hubCanUpdate = false;
+    connectedHub = null;
     if (IS_ANDROID || !connected || !networkSession) return;
     const endpoint = connectedPortName;
     const pending = unifiedJob;
@@ -310,6 +319,9 @@
     let cancelled = false;
     void hubSupportsUnifiedUpdate().then(supported => {
       if (!cancelled) hubCanUpdate = supported;
+    });
+    void hubInfo().then(info => {
+      if (!cancelled) connectedHub = info;
     });
     return () => { cancelled = true; };
   });
@@ -355,6 +367,8 @@
   let appEventAbort: AbortController | null = null;
   let appDestroyed = false;
   let networkRecoveryPending = false;
+  // Reconnect budget while a Pi update reinstalls and restarts the hub.
+  const PI_UPDATE_RECONNECT_MS = 180_000;
 
   onMount(async () => {
     appEventAbort = new AbortController();
@@ -636,7 +650,9 @@
     }
     try {
       error = "";
-      const reopened = await tryReconnect(20_000, signal);
+      // A Pi update restarts the hub, possibly twice when it rolls back.
+      const piRestart = unifiedJob?.kind === "pi" && unifiedJob.endpoint === connectedPortName;
+      const reopened = await tryReconnect(piRestart ? PI_UPDATE_RECONNECT_MS : 20_000, signal);
       if (signal?.aborted) return;
       if (reopened) await refetchAll();
       if (signal?.aborted) return;
@@ -1482,7 +1498,11 @@
         {:else if hasUnifiedUpdate}
           <button class="topbtn primary" onclick={openUnifiedUpdate}
                   title="Updates Bosun through the Raspberry Pi and preserves your profiles automatically.">
-            Update Bosun ({firmwareLabel(deviceInfo?.fw)} -> {bundledUpdate?.release})
+            {#if updatePlan.captain}
+              Update Bosun ({firmwareLabel(deviceInfo?.fw)} -> {bundledUpdate?.release})
+            {:else}
+              Update Raspberry Pi ({connectedHub?.version} -> {bundledUpdate?.release})
+            {/if}
           </button>
         {:else if hasUsbUpdate}
           <button class="topbtn primary" onclick={openUsbUpdate} title="Install the bundled Bosun firmware over USB with a full recovery backup.">Update firmware (USB)</button>
@@ -1851,6 +1871,7 @@
                             onUsbUpdate={openUsbUpdate}
                             unifiedRelease={canUseUnifiedUpdate ? bundledUpdate?.release : null}
                             resumeUnifiedUpdate={canResumeUnifiedUpdate}
+                            piUpdate={canUseUnifiedUpdate ? (updatePlan.pi ? "self" : updatePlan.piManual ? "manual" : null) : null}
                             onUnifiedUpdate={openUnifiedUpdate} />
 
         {:else if page === "monitor"}
@@ -1914,6 +1935,7 @@
   {/if}
   {#if showUnifiedUpdate && !IS_ANDROID}
     <UnifiedFirmwareUpdate manifest={bundledUpdate} installed={deviceInfo?.fw} endpoint={unifiedEndpoint}
+                           hub={connectedHub} {piPackage}
                            isCurrentConnection={() => connected && networkSession && connectedPortName === unifiedEndpoint}
                            onJob={rememberUnifiedJob}
                            onComplete={unifiedUpdateCompleted}

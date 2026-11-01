@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -29,6 +30,9 @@ safe_destination() {
 }
 case "$name" in
 apt-get|usermod|chown|udevadm) ;;
+dpkg-query)
+    if [[ "${PACKAGES_PRESENT:-0}" == 1 && "${!#}" != "${MISSING_PACKAGE:-}" ]]; then printf installed; fi
+    ;;
 id) [[ "${EXISTING_USER:-1}" == 1 || -f "$APPLIANCE_TEST_ROOT/user-created" ]];;
 useradd) touch "$APPLIANCE_TEST_ROOT/user-created";;
 getent) [[ "${2:-}" != seat ]];;
@@ -110,12 +114,15 @@ def appliance(tmp_path):
             f'set -euo pipefail\nexport PATH="{shell_path(tmp_path / "fake-bin")}:$PATH"\n',
             1,
         )
-        for prefix in ("/opt/bosun-hub", "/etc/systemd/system", "/etc/udev/rules.d", "/var/lib/bosun-hub"):
+        for prefix in ("/opt/bosun-hub", "/etc/systemd/system", "/etc/udev/rules.d", "/var/lib/bosun-hub",
+                       "/usr/local/libexec", "/etc/bosun"):
             script = script.replace(prefix, shell_path(system) + prefix)
         (source / filename).write_text(script, encoding="utf-8", newline="\n")
     shutil.copytree(SOURCE / "systemd", source / "systemd")
     shutil.copytree(SOURCE / "udev", source / "udev")
     shutil.copytree(SOURCE / "kiosk", source / "kiosk")
+    shutil.copytree(SOURCE / "pi-update", source / "pi-update", ignore=shutil.ignore_patterns("__pycache__"))
+    (source / "allowed_signers").write_text('bosun-release namespaces="bosun-pi-package" ssh-ed25519 AAAA test\n')
     (source / "bosun_hub").mkdir()
     (source / "bosun_hub/__main__.py").write_text("# installed module fixture\n")
     (source / "requirements.txt").write_text("# offline fixture\n")
@@ -124,7 +131,7 @@ def appliance(tmp_path):
     binary.mkdir()
     for name in (
         "apt-get", "id", "useradd", "getent", "usermod", "rsync", "install",
-        "chown", "picotool", "udevadm", "systemctl", "stat", "runuser",
+        "chown", "picotool", "udevadm", "systemctl", "stat", "runuser", "dpkg-query",
     ):
         command = binary / name
         command.write_text(FAKE_TOOL, encoding="utf-8", newline="\n")
@@ -163,7 +170,8 @@ def appliance(tmp_path):
     return instance
 
 
-@pytest.mark.parametrize("missing", ["stage", "kiosk/bosun-hdmi-recovery.py", "udev/60-bosun-update.rules"])
+@pytest.mark.parametrize("missing", ["stage", "kiosk/bosun-hdmi-recovery.py", "udev/60-bosun-update.rules",
+                                     "pi-update/install_package.py", "systemd/bosun-pi-update.path"])
 def test_missing_build_or_checkout_fails_before_any_appliance_mutation(appliance, missing):
     if missing != "stage":
         appliance.build_stage()
@@ -232,6 +240,65 @@ def test_install_hands_only_stage_to_the_hub_account(appliance):
     unit = (appliance.system / "etc/systemd/system/bosun-hub.service").read_text()
     assert "StateDirectory=bosun-hub/boot-logo" in unit
     assert "--boot-logo-dir /var/lib/bosun-hub/boot-logo" in unit
+
+
+def test_present_packages_need_no_network(appliance):
+    appliance.build_stage()
+    result, events = appliance.run(PACKAGES_PRESENT="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "skipping apt-get" in result.stdout
+    assert not any(line.startswith("apt-get") for line in events)
+    assert any(line.startswith("dpkg-query -W ") and line.endswith(" openssh-client") for line in events)
+
+
+def test_a_missing_package_installs_the_full_list(appliance):
+    appliance.build_stage()
+    result, events = appliance.run(PACKAGES_PRESENT="1", MISSING_PACKAGE="openssh-client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "installing: openssh-client" in result.stdout
+    apt = [line for line in events if line.startswith("apt-get")]
+    assert apt[0] == "apt-get update -qq"
+    assert apt[1].startswith("apt-get install -y -qq ") and "picotool" in apt[1] and "openssh-client" in apt[1]
+
+
+def test_install_sets_up_the_signed_pi_self_update(appliance):
+    appliance.build_stage()
+    result, events = appliance.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    system, root = appliance.system, shell_path(appliance.system)
+    assert (system / "etc/bosun/allowed_signers").read_bytes() == (appliance.source / "allowed_signers").read_bytes()
+    assert (system / "usr/local/libexec/bosun-pi-update").read_bytes() == (
+        SOURCE / "pi-update/install_package.py").read_bytes()
+    for name in ("bosun-pi-update.path", "bosun-pi-update.service"):
+        assert (system / "etc/systemd/system" / name).read_bytes() == (SOURCE / "systemd" / name).read_bytes()
+    assert any(line.startswith("install -o root -g root -m 0644 ") and
+               line.endswith(f"{root}/etc/bosun/allowed_signers") for line in events)
+    assert any(line.startswith("install -o root -g root -m 0755 ") and
+               line.endswith(f"{root}/usr/local/libexec/bosun-pi-update") for line in events)
+    assert events.index("systemctl daemon-reload") < events.index("systemctl enable --now bosun-pi-update.path")
+    # The installer may run inside bosun-pi-update.service: only enable that unit.
+    assert [line for line in events if "bosun-pi-update.service" in line and line.startswith("systemctl")] == [
+        "systemctl enable bosun-pi-update.service"]
+    unit = (system / "etc/systemd/system/bosun-hub.service").read_text()
+    assert "StateDirectory=bosun-hub/pi-update" in unit
+
+
+def test_checkout_without_a_release_key_installs_without_self_update(appliance):
+    appliance.build_stage()
+    (appliance.source / "allowed_signers").unlink()
+    result, _ = appliance.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Desktop cannot update this Pi" in result.stderr
+    assert not (appliance.system / "etc/bosun/allowed_signers").exists()
+
+
+def test_no_installer_script_stops_or_restarts_the_running_self_update():
+    for name in ("install.sh", "quick-install.sh", "install-native-updater.sh", "install-boot-splash.sh"):
+        lines = [line.strip() for line in (SOURCE / name).read_text(encoding="utf-8").splitlines()
+                 if re.search(r"\bsystemctl\b", line) and "bosun-pi-update" in line
+                 and not line.strip().startswith("#")]
+        assert lines in ([], ["systemctl enable bosun-pi-update.service",
+                              "systemctl enable --now bosun-pi-update.path"]), name
 
 
 @pytest.fixture

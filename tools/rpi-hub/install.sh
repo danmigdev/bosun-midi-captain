@@ -32,7 +32,9 @@ fi
 for required in \
     tools/rpi-hub/kiosk/bosun-hdmi-recovery.py \
     tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
-    tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules; do
+    tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
+    tools/rpi-hub/pi-update/install_package.py \
+    tools/rpi-hub/systemd/bosun-pi-update.path tools/rpi-hub/systemd/bosun-pi-update.service; do
     if [[ ! -f "$REPO_ROOT/$required" ]]; then
         echo "Run the installer from a complete Bosun checkout; missing $required." >&2
         exit 1
@@ -40,11 +42,24 @@ for required in \
 done
 
 echo "== packages =="
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    python3-serial python3-websockets alsa-utils rsync \
-    cage chromium seatd wlr-randr wayvnc kanshi novnc websockify \
-    picotool
+# openssh-client provides ssh-keygen, which checks Desktop self-update packages.
+packages=(python3-serial python3-websockets alsa-utils rsync
+    cage chromium seatd wlr-randr wayvnc kanshi novnc websockify
+    picotool openssh-client)
+missing=()
+for package in "${packages[@]}"; do
+    if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]]; then
+        missing+=("$package")
+    fi
+done
+# A Pi without Internet access can still update when nothing is missing.
+if ((${#missing[@]})); then
+    echo "installing: ${missing[*]}"
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${packages[@]}"
+else
+    echo "all required packages are installed; skipping apt-get"
+fi
 
 if ! id "$HUB_USER" >/dev/null 2>&1; then
     useradd --system --create-home "$HUB_USER"
@@ -101,6 +116,21 @@ install -m 644 "$SRC"/systemd/bosun-stage-vnc-web.service /etc/systemd/system/
 install -m 644 "$SRC"/udev/33-bosun-midi.rules    /etc/udev/rules.d/
 install -m 644 "$SRC"/udev/99-bosun-kiosk-input.rules /etc/udev/rules.d/
 
+echo "== Pi self-update =="
+# Desktop sends signed packages through the hub; root installs only those that
+# verify against this key. A package may replace it (key rotation) only because
+# it was itself signed with the current one.
+if [[ -f "$SRC/allowed_signers" ]]; then
+    install -d -o root -g root -m 0755 /etc/bosun
+    install -o root -g root -m 0644 "$SRC/allowed_signers" /etc/bosun/allowed_signers
+else
+    echo "warning: no allowed_signers in this checkout; Desktop cannot update this Pi" >&2
+fi
+install -d -o root -g root -m 0755 /usr/local/libexec
+install -o root -g root -m 0755 "$SRC/pi-update/install_package.py" /usr/local/libexec/bosun-pi-update
+install -o root -g root -m 0644 "$SRC/systemd/bosun-pi-update.service" /etc/systemd/system/bosun-pi-update.service
+install -o root -g root -m 0644 "$SRC/systemd/bosun-pi-update.path" /etc/systemd/system/bosun-pi-update.path
+
 bash "$SRC/install-native-updater.sh"
 systemctl daemon-reload
 udevadm control --reload
@@ -110,6 +140,10 @@ udevadm settle --timeout=10
 systemctl enable --now seatd.service
 systemctl enable bosun-hub.service bosun-midi.timer bosun-kiosk.service
 systemctl enable bosun-outputs.service bosun-wayvnc.service bosun-stage-vnc-web.service
+# bosun-pi-update.service may be the caller of this script: only enable it (it
+# checks for an interrupted update at startup), never stop, start or restart it.
+systemctl enable bosun-pi-update.service
+systemctl enable --now bosun-pi-update.path
 systemctl restart bosun-hub.service
 systemctl restart bosun-midi.timer
 systemctl restart bosun-kiosk.service

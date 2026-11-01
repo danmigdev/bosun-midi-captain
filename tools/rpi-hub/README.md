@@ -247,6 +247,56 @@ The separate `http://YOUR_PI_HOSTNAME:8080/display-preview.html` page simulates 
 
 For Captain firmware, follow [Update firmware](../../README.md#update-firmware) in the main guide.
 
+### Update the Pi from Bosun Desktop
+
+From release 0.8.6 on, **Maintenance → Update Bosun** in Bosun Desktop, connected
+to the Pi over the network, first updates the Pi software to the release bundled
+with Desktop, then the Captain firmware. No SSH or password is needed. A Pi with
+0.8.5 or older is updated once with the Setup guide command; Desktop shows that
+command when the Pi cannot update itself. Android does not update the Pi.
+
+Desktop uploads the release's Pi package and its signature to the hub. The hub
+only stores them and asks the root service `bosun-pi-update.path` to install
+them. That service:
+
+1. refuses the package unless its signature verifies against the trust anchor
+   below, before reading anything inside it, and while a Captain firmware update
+   is running;
+2. unpacks a private copy, accepting only plain files and directories within
+   size limits;
+3. saves the installed release (`/opt/bosun-hub`, the Bosun units and udev rules,
+   `/usr/local/libexec/bosun-*` and the trust anchor), runs `quick-install.sh`
+   and checks that the hub, kiosk and MIDI timer are active and that the hub
+   reports the new version;
+4. restores the saved release and restarts the services when any step fails.
+
+The hub, Stage and MIDI wiring restart once during the update; Desktop
+reconnects by itself. System packages are downloaded only when one is missing,
+so a Pi without Internet access can be updated too. If the Pi loses power during
+an update, the saved release is restored at the next startup. A job's result is
+in `/var/lib/bosun-pi-update/<job>.json`; the details are in
+`journalctl -u bosun-pi-update.service`.
+
+### Trust anchor
+
+The hub's network port has no password, so the Pi only installs packages signed
+with the Bosun release key. `install.sh` copies the release's public key from
+`tools/rpi-hub/allowed_signers` to `/etc/bosun/allowed_signers` (owned by root,
+mode 0644); the first installation over SSH is the trusted channel that sets it.
+It is an OpenSSH allowed-signers file, and packages are checked with:
+
+```bash
+ssh-keygen -Y verify -f /etc/bosun/allowed_signers -I bosun-release \
+    -n bosun-pi-package -s bosun-pi-setup.tar.gz.sig < bosun-pi-setup.tar.gz
+```
+
+A signed package can replace the key, which allows a later key change: the new
+key is accepted only because the package carrying it was signed with the
+current one. To turn off updates from Desktop, remove `/etc/bosun/allowed_signers`;
+the next installation over SSH sets it again.
+
+### Update with a checkout
+
 To update the complete Pi installation, first finish any running firmware update. In its existing repository copy, run:
 
 ```bash

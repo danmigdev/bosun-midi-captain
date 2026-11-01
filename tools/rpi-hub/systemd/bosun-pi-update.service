@@ -1,0 +1,24 @@
+[Unit]
+Description=Bosun Pi self-update from a signed package
+# Started by bosun-pi-update.path. Root copies the hub's staged package, checks
+# its signature against /etc/bosun/allowed_signers, saves the installed release
+# and runs quick-install.sh; a failed install or health check restores it.
+# Also run once at startup: an update cut off by a power loss is rolled back
+# even when the half-installed hub cannot start. Deliberately independent of
+# bosun-hub.service, which the install restarts.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/bosun-pi-update
+# Job results (<job>.json, world-readable) and the root-only rollback snapshot.
+StateDirectory=bosun-pi-update
+StateDirectoryMode=0755
+UMask=0022
+PrivateTmp=yes
+# A full appliance install (apt-get only when a package is missing, unit and
+# service changes) needs ordinary root access. The installer bounds it at 30
+# minutes and rolls back; this is the backstop.
+TimeoutStartSec=60min
+
+[Install]
+WantedBy=multi-user.target

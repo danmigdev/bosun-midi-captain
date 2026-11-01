@@ -348,7 +348,10 @@ export type FirmwareMessage =
   | { type: "HUB_UPDATE"; id?: string; job?: string; phase: string;
       received?: number; size?: number; error?: string; detail?: string;
       backup?: string; release?: string; firmware_version?: string;
-      sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string }
+      sha256?: string; supported?: boolean; recovery_verified?: boolean; recovery_error?: string;
+      kind?: string; version?: string | null }
+  // Hub release and Pi self-update support (hub 0.8.6+, see lib/unified-update.ts).
+  | { type: "HUB_INFO"; id?: string; version?: unknown; pi_update?: unknown }
   // Raspberry Pi startup logo (hub-local, see lib/boot-logo.ts).
   | { type: "HUB_BOOT_LOGO"; id?: string; supported?: boolean; custom?: boolean;
       early?: "applied" | "pending" | "unavailable" | "error"; error?: string; png?: string;

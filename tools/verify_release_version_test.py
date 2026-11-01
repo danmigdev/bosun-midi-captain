@@ -29,8 +29,9 @@ class ReleaseVersionTests(unittest.TestCase):
             "firmware/include/bosun/protocol.h": '#define BOSUN_FIRMWARE_VERSION "1.2.3"\n',
             "firmware/CMakeLists.txt": 'project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nproject(BosunNative VERSION 1.2.3 LANGUAGES C)\n',
             "firmware/platform/rp2040/CMakeLists.txt": 'pico_set_program_version(${target} "1.2.3")\n',
+            "tools/rpi-hub/bosun_hub/__init__.py": '"""Hub."""\n\n__version__ = "1.2.3"\n',
         }
-        sdk = self.root / "firmware/cmake/pico_sdk.cmake"
+        sdk =self.root / "firmware/cmake/pico_sdk.cmake"
         sdk.parent.mkdir(parents=True, exist_ok=True)
         sdk.write_text('set(PICO_SDK_PATH "" CACHE PATH "Pico SDK 2.3.0 checkout")\n', encoding="utf-8")
         for path, contents in self.sources.items():
@@ -133,12 +134,12 @@ class BumpVersionSmokeTests(unittest.TestCase):
             "firmware/CMakeLists.txt": 'cmake_minimum_required(VERSION 3.20)\nif(BOSUN_PLATFORM STREQUAL "rp2040")\n    project(BosunNative VERSION 1.2.3 LANGUAGES C CXX ASM)\nelse()\n    project(BosunNative VERSION 1.2.3 LANGUAGES C)\nendif()\n',
             "firmware/include/bosun/protocol.h": '#define BOSUN_FIRMWARE_VERSION "1.2.3"\n#define BOSUN_PROTOCOL_RX_BYTES 26624u\n',
             "firmware/platform/rp2040/CMakeLists.txt": '    pico_set_program_name(${target} "Bosun MIDI Captain")\n    pico_set_program_version(${target} "1.2.3")\n',
+            "tools/rpi-hub/bosun_hub/__init__.py": '"""Hub."""\n\n__version__ = "1.2.3"\n',
         }
         for name, contents in fixtures.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(contents, encoding="utf-8")
-        (self.root / "tools").mkdir()
         shutil.copyfile(Path(__file__).with_name("bump-version.ps1"), self.root / "tools/bump-version.ps1")
 
     def run_bump(self, version):
@@ -168,6 +169,8 @@ class BumpVersionSmokeTests(unittest.TestCase):
         cargo_lock = (self.root / "editor/src-tauri/Cargo.lock").read_text()
         self.assertIn(f'name = "bosun-editor"\nversion = "{version}"', cargo_lock)
         self.assertIn('name = "keep"\nversion = "4.5.6"', cargo_lock)
+        self.assertIn(f'__version__ = "{version}"\n',
+                      (self.root / "tools/rpi-hub/bosun_hub/__init__.py").read_text())
 
     def test_bump_advances_firmware_editor_and_android_version_code(self):
         result = self.run_bump("9.8.7")

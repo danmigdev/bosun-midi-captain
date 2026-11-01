@@ -25,6 +25,11 @@
 .PARAMETER OutputSuffix
   Optional suffix for the portable folder and ZIP, to keep builds side by side.
 
+.PARAMETER RequirePiSignature
+  Refuse an unsigned Raspberry Pi package. With the key path in
+  BOSUN_PI_SIGNING_KEY the package is signed (tools\sign-pi-package.py);
+  without it an existing bosun-pi-setup.tar.gz.sig must match the package.
+
 .EXAMPLE
   pwsh -File tools\package-portable.ps1
   pwsh -File tools\package-portable.ps1 -SkipBuild
@@ -36,7 +41,8 @@ param(
     [ValidateSet("release", "debug")]
     [string] $Configuration = "release",
     [ValidatePattern('^[a-zA-Z0-9-]*$')]
-    [string] $OutputSuffix = ""
+    [string] $OutputSuffix = "",
+    [switch] $RequirePiSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +97,22 @@ Invoke-NativeTool { npm.cmd --prefix $editor run build:guide }
 if ($LASTEXITCODE -ne 0) { throw 'Setup guide build failed' }
 Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-pi-setup.py') }
 if ($LASTEXITCODE -ne 0) { throw 'Pi setup packaging failed' }
+# The Pi installs a Desktop upload only with a valid release signature. Sign
+# here when a key is configured; otherwise an existing .sig must still match
+# the package just built, and a build without one never offers the Pi update.
+$piPackage = Join-Path $resources 'pi/bosun-pi-setup.tar.gz'
+$piSigner = Join-Path $repoRoot 'tools/sign-pi-package.py'
+if ($env:BOSUN_PI_SIGNING_KEY) {
+    Invoke-NativeTool { & $pythonExe $piSigner --package $piPackage }
+    if ($LASTEXITCODE -ne 0) { throw 'Signing the Raspberry Pi package failed' }
+} elseif (Test-Path -LiteralPath "$piPackage.sig") {
+    Invoke-NativeTool { & $pythonExe $piSigner --check --package $piPackage }
+    if ($LASTEXITCODE -ne 0) { throw "The Raspberry Pi package signature does not match the package. Set BOSUN_PI_SIGNING_KEY to sign it again, or delete $piPackage.sig" }
+} elseif ($RequirePiSignature) {
+    throw 'The Raspberry Pi package is not signed. Set BOSUN_PI_SIGNING_KEY to the release signing key.'
+} else {
+    Write-Warning 'The Raspberry Pi package is not signed (BOSUN_PI_SIGNING_KEY is not set): this build cannot update a Raspberry Pi from Desktop.'
+}
 $nativePackage = Join-Path $resources 'update/bosun-update.zip'
 Invoke-NativeTool { & $pythonExe (Join-Path $repoRoot 'tools/package-factory-installer.py') --verify --package $nativePackage --output (Join-Path $resources 'installer') }
 if ($LASTEXITCODE -ne 0) { throw 'Build current native installer assets first: bash tools/build-factory-installer.sh' }

@@ -16,12 +16,14 @@
   type Props = {
     connected: boolean; activeProfile?: ProfileInfo | null; firmwareInfo?: FirmwareIdentity | null;
     unifiedRelease?: string | null; resumeUnifiedUpdate?: boolean; onUnifiedUpdate?: () => void;
+    /** "self": Update Bosun updates the Pi first; "manual": the Pi needs the Setup guide command once. */
+    piUpdate?: "self" | "manual" | null;
     usbRelease?: string | null; onUsbUpdate?: () => void;
     onBootloader?: () => Promise<void>;
     hardware?: HardwareLayout;
   };
   let { connected, activeProfile = null, firmwareInfo = null,
-    unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate,
+    unifiedRelease = null, resumeUnifiedUpdate = false, onUnifiedUpdate, piUpdate = null,
     usbRelease = null, onUsbUpdate, onBootloader, hardware = CAPTAIN_10 }: Props = $props();
 
   let stats = $state<DeviceStats | null>(null);
@@ -625,6 +627,11 @@
       <section class="block">
         <h3>Update Bosun</h3>
         <p class="muted small">The Raspberry Pi installs the update and backs up and preserves your profiles automatically.</p>
+        {#if piUpdate === "self" && !resumeUnifiedUpdate}
+          <p class="muted small">The Raspberry Pi software is updated first; the Pi restarts during the update.</p>
+        {:else if piUpdate === "manual" && !resumeUnifiedUpdate}
+          <p class="muted small">Bosun cannot update this Raspberry Pi from here yet: update it once with the Setup guide command, shown in the update window.</p>
+        {/if}
         <button class="primary" disabled={!connected} onclick={onUnifiedUpdate}>
           {resumeUnifiedUpdate ? "Check Bosun update" : `Update Bosun to ${unifiedRelease}`}
         </button>

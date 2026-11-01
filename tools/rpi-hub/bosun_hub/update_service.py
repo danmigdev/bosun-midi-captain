@@ -3,6 +3,11 @@
 The existing line transport carries an archive to the Pi. Only a fully received,
 validated package can acquire the USB link. Disconnecting an editor never
 cancels a flash operation or deletes its verified recovery image.
+
+A ``kind: "pi"`` job carries a signed Pi package instead. The hub (user bosun)
+only stages it and rewrites a request file; root's bosun-pi-update.path checks
+the signature, installs it and reports in its own world-readable status file,
+which STATUS follows across the hub restart the installation causes.
 """
 from __future__ import annotations
 
@@ -19,24 +24,44 @@ import shutil
 import sys
 import time
 
+from . import __version__
+
 MAX_ARCHIVE = 4 * 1024 * 1024
 MAX_CHUNK = 16 * 1024
 TERMINAL = {"done", "error", "rolled-back", "recovery-required", "aborted"}
 log = logging.getLogger("bosun_hub.updates")
+PI_PACKAGE, PI_SIGNATURE = "package.tar.gz", "package.sig"
+MAX_SIGNATURE = 4 * 1024
+PI_PHASES = {"installing", "done", "rolled-back", "error"}
+# The hub's StateDirectory holds the request; root writes <job>.json results.
+PI_REQUEST_DIR = Path("/var/lib/bosun-hub/pi-update")
+PI_STATUS_DIR = Path("/var/lib/bosun-pi-update")
+# Self-update needs the root installer, its trigger and the trust anchor.
+PI_INSTALLER = (Path("/etc/systemd/system/bosun-pi-update.path"),
+                Path("/etc/systemd/system/bosun-pi-update.service"),
+                Path("/usr/local/libexec/bosun-pi-update"), Path("/etc/bosun/allowed_signers"))
+# Root records its first status within seconds of the request.
+PI_START_TIMEOUT = 300
 
 
 class UpdateService:
-    def __init__(self, hub, *, root=None, installer=None, recovery_verifier=None):
+    def __init__(self, hub, *, root=None, installer=None, recovery_verifier=None,
+                 pi_request_dir=PI_REQUEST_DIR, pi_status_dir=PI_STATUS_DIR, pi_installer=PI_INSTALLER):
         self.hub = hub
         self.root = Path(root or Path.home() / ".local/state/bosun/updates")
         self.installer = installer
         self.recovery_verifier = recovery_verifier
+        self.pi_request_dir = Path(pi_request_dir)
+        self.pi_status_dir = Path(pi_status_dir)
+        self.pi_installer = tuple(Path(path) for path in pi_installer)
         self.active = None
         self.task = None
         self.maintenance = False
         self._stopping = False
         self._volatile_status = None
         self._recovery_jobs = set()
+        # Unfinished Pi jobs (job -> created): Desktop follows them with PING.
+        self._pi_jobs = {}
         self._recovery_scan_complete = False
         # {"phase", "detail"} of the running job for Stage's HUB frames.
         self.progress = None
@@ -61,13 +86,31 @@ class UpdateService:
             self._recovery_jobs.add(state["job"])
         else:
             self._recovery_jobs.discard(state["job"])
+        if state.get("kind") == "pi" and state["phase"] in {"uploading", "installing"}:
+            self._pi_jobs[state["job"]] = state.get("created", 0)
+        else:
+            self._pi_jobs.pop(state["job"], None)
+
+    def _pi_pending(self):
+        """Whether a Pi job is still running; an abandoned upload expires like BEGIN's."""
+        for job, created in list(self._pi_jobs.items()):
+            try:
+                state = self._load(job)  # follows root's status and updates the cache
+            except (OSError, ValueError, KeyError, TypeError):
+                self._pi_jobs.pop(job, None)
+                continue
+            if state["phase"] == "installing" or (
+                    state["phase"] == "uploading" and time.time() - created < 900):
+                return True
+        return False
 
     def allows_local_ping(self):
         """Keep recovery reachable without disguising normal Captain outages.
 
         A restarted desktop needs its initial PING before it can ask for the
         saved job. BOOTSEL cannot answer that PING, so unresolved jobs permit
-        a hub ACK. Scan disk once, then maintain the cache with job transitions.
+        a hub ACK; so does a Pi update, which restarts the hub and needs no
+        Captain. Scan disk once, then maintain the cache with job transitions.
         """
         if self.maintenance:
             return True
@@ -88,11 +131,48 @@ class UpdateService:
                 pass  # A hub that has never updated has no recovery state.
             except OSError:
                 log.exception("Cannot inspect update directory")
-        return bool(self._recovery_jobs)
+        return bool(self._recovery_jobs) or self._pi_pending()
 
     def supported(self):
         return (sys.platform == "linux" and shutil.which("picotool") is not None
                 and (self.hub.link.port_name or "").startswith("/dev/"))
+
+    def pi_supported(self):
+        """The root installer and its trust anchor exist, and the request is writable."""
+        return (all(path.is_file() for path in self.pi_installer)
+                and self.pi_request_dir.is_dir() and os.access(self.pi_request_dir, os.W_OK))
+
+    def hub_info(self):
+        return {"type": "HUB_INFO", "version": __version__, "pi_update": self.pi_supported()}
+
+    def start(self):
+        """Ask root again for a Pi job left installing by a reboot or a hub restart.
+
+        Root rolls back an interrupted run; while a run is active the repeated
+        request is a no-op, and a finished job is never installed twice.
+        """
+        pending = []
+        try:
+            for directory in self.root.iterdir():
+                if directory.is_symlink() or not re.fullmatch(r"[a-f0-9]{32}", directory.name):
+                    continue
+                try:
+                    saved = json.loads((directory / "status.json").read_text(encoding="utf-8"))
+                    if saved.get("kind") != "pi" or saved.get("phase") != "installing":
+                        continue  # Captain jobs are inspected on demand
+                    state = self._load(directory.name)
+                except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                    continue
+                if state["phase"] == "installing":
+                    pending.append(state)
+        except OSError:
+            return
+        if pending and self.pi_supported():
+            newest = max(pending, key=lambda state: state.get("committed", state["created"]))
+            try:
+                self._request_pi(newest["job"])
+            except OSError:
+                log.exception("Cannot ask the Pi installer about job %s", newest["job"])
 
     def _directory(self, job):
         if not isinstance(job, str) or not re.fullmatch(r"[a-f0-9]{32}", job):
@@ -134,7 +214,7 @@ class UpdateService:
             # all future updates. Retain the orphan for inspection; unknown
             # files or any installation directory require recovery instead.
             pre_upload_only = all(
-                entry.name in {"package.zip", "status.tmp"}
+                entry.name in {"package.zip", PI_PACKAGE, PI_SIGNATURE, "status.tmp"}
                 and entry.is_file() and not entry.is_symlink()
                 for entry in directory.iterdir()
             )
@@ -146,12 +226,51 @@ class UpdateService:
             return state
         if state.get("job") != job:
             raise ValueError("Invalid update journal")
+        if state.get("kind") == "pi":
+            state = self._pi_state(state)
+            self._remember_recovery(state)
+            return state
         if state["phase"] not in TERMINAL | {"uploading"} and self.active != job:
             state.update(phase="recovery-required", error="The hub restarted during an update. The saved recovery image must be checked before another update.")
             self._remember_recovery(state)
             self._save(state)
         self._remember_recovery(state)
         return state
+
+    def _pi_state(self, state):
+        """A committed Pi job follows root's status; the hub keeps its final result."""
+        if state["phase"] != "installing":
+            return state
+        try:
+            result = json.loads((self.pi_status_dir / f"{state['job']}.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            result = None
+        except (OSError, ValueError):
+            return state  # root replaces the file atomically; ask again later
+        if (isinstance(result, dict) and result.get("job") == state["job"]
+                and result.get("phase") in PI_PHASES):
+            state.update(phase=result["phase"], version=result.get("version"),
+                         error=str(result.get("error") or ""))
+            if isinstance(result.get("detail"), str):
+                state["detail"] = result["detail"]
+        elif result is None and time.time() - state.get("committed", state["created"]) > PI_START_TIMEOUT:
+            state.update(phase="error", error="The Pi installer did not start. "
+                         "Check bosun-pi-update.path on the Pi, then start the update again.")
+        if state["phase"] != "installing":
+            self._save(state)
+        return state
+
+    def _request_pi(self, job):
+        # Rewritten in place like the boot logo trigger: closing the written
+        # file is the change bosun-pi-update.path reacts to.
+        with (self.pi_request_dir / "request").open("w", encoding="ascii", newline="\n") as out:
+            out.write(job + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+
+    @staticmethod
+    def _payload(state):
+        return PI_PACKAGE if state.get("kind") == "pi" else "package.zip"
 
     def _reply(self, sub, request, state):
         self.hub._offer_correlated(sub, "id" in request, request.get("id"),
@@ -198,7 +317,19 @@ class UpdateService:
         return True
 
     def _begin(self, sub, request):
-        if not self.supported():
+        pi = request.get("kind") == "pi"
+        if "kind" in request and not pi:
+            raise ValueError("Unknown update kind")
+        if pi:
+            if not self.pi_supported():
+                raise ValueError("This hub cannot update itself; update the Pi with the Setup guide command")
+            signature = request.get("signature")
+            signature = signature.strip() if isinstance(signature, str) else ""
+            if (not signature.isascii() or len(signature) > MAX_SIGNATURE
+                    or not signature.startswith("-----BEGIN SSH SIGNATURE-----")
+                    or not signature.endswith("-----END SSH SIGNATURE-----")):
+                raise ValueError("Invalid Pi package signature")
+        elif not self.supported():
             raise ValueError("This hub is not ready to update the Captain")
         if self.active:
             state = self._load(self.active)
@@ -215,21 +346,35 @@ class UpdateService:
         for directory in self.root.iterdir():
             if directory.is_dir() and re.fullmatch(r"[a-f0-9]{32}", directory.name):
                 previous = self._load(directory.name)
-                if previous["phase"] == "recovery-required":
+                # A Pi update keeps Captain recovery evidence and may bring its fix.
+                if previous["phase"] == "recovery-required" and not pi:
                     raise ValueError("An interrupted update requires recovery first")
                 if previous["phase"] == "uploading":
                     if time.time() - previous["created"] < 900:
                         raise ValueError("An upload is pending; resume or cancel that job")
                     previous["phase"] = "aborted"
                     self._save(previous)
-        if shutil.disk_usage(self.root).free < 4 * 8 * 1024 * 1024 + size:
+                elif previous["phase"] not in TERMINAL | {"recovery-required"}:
+                    raise ValueError("An update is already in progress")
+        if pi:
+            # Root's private copy, the extracted tree and the rollback snapshot.
+            if shutil.disk_usage(self.root).free < 128 * 1024 * 1024 + size:
+                raise ValueError("Insufficient disk space for the Pi update")
+        elif shutil.disk_usage(self.root).free < 4 * 8 * 1024 * 1024 + size:
             raise ValueError("Insufficient disk space for a verified full recovery image")
         job = secrets.token_hex(16)
         (self.root / job).mkdir(mode=0o700)
         state = {"job": job, "phase": "uploading", "size": size, "sha256": digest,
                  "received": 0, "created": time.time()}
-        with (self.root / job / "package.zip").open("xb"):
+        if pi:
+            state["kind"] = "pi"
+        with (self.root / job / self._payload(state)).open("xb"):
             pass
+        if pi:
+            with (self.root / job / PI_SIGNATURE).open("xb") as out:
+                out.write(signature.encode("ascii") + b"\n")
+                out.flush()
+                os.fsync(out.fileno())
         self._save(state)
         self.active = job
         self._reply(sub, request, state)
@@ -245,7 +390,7 @@ class UpdateService:
         data = base64.b64decode(encoded, validate=True)
         if not data or len(data) > MAX_CHUNK or offset + len(data) > state["size"]:
             raise ValueError("Update chunk exceeds the archive bounds")
-        path = self._directory(state["job"]) / "package.zip"
+        path = self._directory(state["job"]) / self._payload(state)
         with path.open("r+b") as out:
             if offset < state["received"]:
                 # A lost reply can safely retry exactly the same bytes.
@@ -272,12 +417,19 @@ class UpdateService:
             return
         if self.active not in (None, state["job"]):
             raise ValueError("Another update owns the device")
+        pi = state.get("kind") == "pi"
         for directory in self.root.iterdir():
             if directory.name != state["job"] and directory.is_dir() and re.fullmatch(r"[a-f0-9]{32}", directory.name):
-                if self._load(directory.name)["phase"] == "recovery-required":
+                phase = self._load(directory.name)["phase"]
+                if phase == "recovery-required" and not pi:
                     raise ValueError("An interrupted update requires recovery first")
+                if phase == "installing":
+                    raise ValueError("A Pi update is in progress")
         if state["received"] != state["size"]:
             raise ValueError("Update archive is incomplete")
+        if pi:
+            self._commit_pi(sub, request, state)
+            return
         if not self.hub.link.connected or not self.hub._update_device_info:
             raise ValueError("Read the connected Captain firmware before updating")
         port = self.hub.link.port_name
@@ -291,6 +443,28 @@ class UpdateService:
         self.active = state["job"]
         self._announce(state)
         self.task = asyncio.create_task(self._run(state, dict(self.hub._update_device_info), port, identity))
+        self._reply(sub, request, state)
+
+    def _commit_pi(self, sub, request, state):
+        """Hand a complete Pi package to root; the Captain is not involved."""
+        if not self.pi_supported():
+            raise ValueError("This hub cannot update itself; update the Pi with the Setup guide command")
+        directory = self._directory(state["job"])
+        data = (directory / PI_PACKAGE).read_bytes()
+        if len(data) != state["size"] or hashlib.sha256(data).hexdigest() != state["sha256"]:
+            state.update(phase="error", error="The Pi package failed its SHA-256 check")
+        elif not (directory / PI_SIGNATURE).is_file():
+            state.update(phase="error", error="The Pi package signature is missing")
+        else:
+            state.update(phase="installing", committed=time.time(), detail="Waiting for the Pi installer")
+        self._save(state)
+        self.active = None
+        if state["phase"] == "installing":
+            try:
+                self._request_pi(state["job"])
+            except OSError as error:
+                state.update(phase="error", error=f"Cannot start the Pi installer: {error}")
+                self._save(state)
         self._reply(sub, request, state)
 
     def _recover(self, sub, request, state):

@@ -14,3 +14,5 @@ that is the Linux ALSA sequencer's job (a udev + ``aconnect`` rule), in
 kernel, with no userspace process in the path. This service only carries
 the protocol/state channel that feeds the display and the editor.
 """
+
+__version__ = "0.8.5"

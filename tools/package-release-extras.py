@@ -23,6 +23,8 @@ def main():
     sources = {
         f'Bosun-{version}-setup-guide.html': ROOT / 'dist/setup-guide/setup-guide.html',
         f'Bosun-{version}-pi-setup.tar.gz': resources / 'pi/bosun-pi-setup.tar.gz',
+        # Release signature the Pi checks before Desktop can update it.
+        f'Bosun-{version}-pi-setup.tar.gz.sig': resources / 'pi/bosun-pi-setup.tar.gz.sig',
         f'Bosun-{version}-firmware-update.zip': package,
     }
     stage = ROOT / 'editor/dist-stage'

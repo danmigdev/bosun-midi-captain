@@ -258,6 +258,7 @@ class Hub:
     def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         self.boot_logo.start()
+        self.updates.start()
         self.link.start()
 
     def stop(self) -> None:
@@ -391,6 +392,10 @@ class Hub:
 
         kind = msg.get("type")
         if self.updates.handle(sub, msg):
+            return
+        if kind == "HUB_INFO":
+            # The hub release and self-update support, for Desktop's Pi update.
+            self._offer_correlated(sub, "id" in msg, msg.get("id"), self.updates.hub_info())
             return
         # Pi-local like the update jobs: never forwarded, so maintenance cannot block it.
         if self.boot_logo.handle(sub, msg):

@@ -13,7 +13,9 @@ def setup_files():
     """Sorted repository paths the setup package ships (Stage only once built)."""
     files = set()
     for directory in ('editor/dist-stage', 'tools/rpi-hub/bosun_hub', 'tools/rpi-hub/kiosk',
-                      'tools/rpi-hub/systemd', 'tools/rpi-hub/udev', 'tools/rpi-hub/boot-splash'):
+                      'tools/rpi-hub/systemd', 'tools/rpi-hub/udev', 'tools/rpi-hub/boot-splash',
+                      # Root installer for signed Desktop self-updates.
+                      'tools/rpi-hub/pi-update'):
         for p in (ROOT / directory).rglob('*'):
             if p.is_symlink():
                 raise ValueError(f'Symlink in setup input: {p}')
@@ -23,6 +25,9 @@ def setup_files():
                   'tools/rpi-hub/install.sh', 'tools/rpi-hub/install-native-updater.sh',
                   'tools/rpi-hub/quick-install.sh', 'tools/rpi-hub/install-boot-splash.sh',
                   'tools/rpi-hub/prepare-framebuffer-splash.sh',
+                  # install.sh installs it as /etc/bosun/allowed_signers, the
+                  # key that Desktop self-updates must be signed with.
+                  'tools/rpi-hub/allowed_signers',
                   # install-boot-splash.sh brands Stage from its source template.
                   'editor/stage-kiosk.html',
                   'editor/package.json', 'editor/src-tauri/icons/icon.png', 'LICENSE'))
@@ -39,7 +44,7 @@ def package(output):
         with tarfile.open(fileobj=gz, mode='w') as tar:
             for name in files:
                 data = (ROOT / name).read_bytes()
-                if name.endswith(('.sh', '.py', '.service', '.timer', '.path', '.rules')):
+                if name.endswith(('.sh', '.py', '.service', '.timer', '.path', '.rules', 'allowed_signers')):
                     data = data.replace(b'\r\n', b'\n')
                 info = tarfile.TarInfo(name)
                 info.size, info.mtime, info.mode = len(data), 0, 0o644

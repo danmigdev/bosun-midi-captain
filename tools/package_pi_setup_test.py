@@ -37,6 +37,19 @@ class PiSetupPackageTest(unittest.TestCase):
         self.assertIn("tools/rpi-hub/systemd/bosun-boot-logo.path", read)
         self.assertFalse(read - files, f"missing from the Pi package: {sorted(read - files)}")
 
+    def test_release_trust_file_is_packaged(self):
+        """install.sh writes /etc/bosun/allowed_signers from the package."""
+        self.assertIn("tools/rpi-hub/allowed_signers", set(PACKAGE.setup_files()))
+
+    def test_install_sh_required_files_are_packaged(self):
+        """install.sh refuses to run without these, also from a Desktop self-update."""
+        installer = (TOOLS / "rpi-hub/install.sh").read_text(encoding="utf-8")
+        block = re.search(r"for required in \\\n(.*?); do", installer, re.S)
+        self.assertIsNotNone(block, "install.sh no longer lists its required files this way")
+        required = set(re.findall(r"tools/rpi-hub/\S+", block[1]))
+        self.assertIn("tools/rpi-hub/pi-update/install_package.py", required)
+        self.assertFalse(required - set(PACKAGE.setup_files()))
+
     def test_entry_points_are_packaged(self):
         files = set(PACKAGE.setup_files())
         for name in ("tools/rpi-hub/quick-install.sh", "tools/rpi-hub/install.sh",

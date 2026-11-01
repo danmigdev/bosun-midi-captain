@@ -8,6 +8,8 @@ User=bosun
 WorkingDirectory=/opt/bosun-hub
 # Custom startup logo store; root's bosun-boot-logo.path applies it.
 StateDirectory=bosun-hub/boot-logo
+# Self-update request; root's bosun-pi-update.path installs the signed package.
+StateDirectory=bosun-hub/pi-update
 ExecStart=/usr/bin/python3 -m bosun_hub --stage-dir /opt/bosun-hub/stage --boot-logo-dir /var/lib/bosun-hub/boot-logo
 Restart=always
 RestartSec=2

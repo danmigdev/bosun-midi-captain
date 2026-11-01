@@ -9,6 +9,9 @@
        version in editor\package.json in WSL (tools\build-factory-installer.sh).
     2. Desktop: tools\package-portable.ps1, which refuses a bundled firmware
        from any other release -> dist\Bosun-<version>-portable-x64 (+ .zip).
+       It signs the Pi package with the release key (see -PiSigningKey), so
+       this build can update the Pi from Desktop. Without a key the build
+       continues unsigned and Desktop does not offer the Pi update.
     3. Raspberry Pi: when the SSH host answers, copies the Pi package built in
        step 2 and runs its quick-install.sh (hub, MIDI bridge, Stage). Refused
        while a Captain update is running on the Pi.
@@ -37,6 +40,10 @@
 .PARAMETER OutputSuffix
   Passed to package-portable.ps1 to keep a build beside another one.
 
+.PARAMETER PiSigningKey
+  Private key that signs the Pi package (default: BOSUN_PI_SIGNING_KEY, else
+  %USERPROFILE%\.bosun\pi-signing\bosun-release). Only its path is used.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\build-dist.ps1
 #>
@@ -49,7 +56,8 @@ param(
     [string] $PiHost = "bosun-hub",
     [string] $Distro = "Ubuntu",
     [ValidatePattern('^[a-zA-Z0-9-]*$')]
-    [string] $OutputSuffix = ""
+    [string] $OutputSuffix = "",
+    [string] $PiSigningKey = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,16 +103,39 @@ if ($SkipFirmware) {
 }
 
 # ---------- 2. Desktop ----------
+# An explicitly configured key must exist; the default location is optional.
+$explicitKey = if ($PiSigningKey) { $PiSigningKey } else { $env:BOSUN_PI_SIGNING_KEY }
+$signingKey = if ($explicitKey) { $explicitKey } else { Join-Path $env:USERPROFILE ".bosun\pi-signing\bosun-release" }
+$piSignature = Join-Path $repoRoot "editor\src-tauri\resources\pi\bosun-pi-setup.tar.gz.sig"
+if (Test-Path -LiteralPath $signingKey -PathType Leaf) {
+    $signingKey = (Resolve-Path -LiteralPath $signingKey).Path
+    $piSigned = "Raspberry Pi package: signed, Desktop can update the Pi"
+} elseif ($explicitKey) {
+    throw "Pi signing key not found: $explicitKey"
+} else {
+    $signingKey = ""
+    # A signature left from an earlier build would not match the new package.
+    Remove-Item -LiteralPath $piSignature -Force -ErrorAction SilentlyContinue
+    Write-Warning "No Pi signing key (BOSUN_PI_SIGNING_KEY or $env:USERPROFILE\.bosun\pi-signing\bosun-release): the Pi package stays unsigned and this build will not offer the Raspberry Pi update."
+    $piSigned = "Raspberry Pi package: UNSIGNED, Desktop will not offer the Pi update"
+}
 Write-Host "[desktop] Packaging the portable build ..."
 $packager = Join-Path $repoRoot "tools\package-portable.ps1"
-if ($OutputSuffix) {
-    Invoke-NativeTool { & powershell -NoProfile -ExecutionPolicy Bypass -File $packager -OutputSuffix $OutputSuffix }
-} else {
-    Invoke-NativeTool { & powershell -NoProfile -ExecutionPolicy Bypass -File $packager }
+$previousKey = $env:BOSUN_PI_SIGNING_KEY
+$env:BOSUN_PI_SIGNING_KEY = $signingKey
+try {
+    if ($OutputSuffix) {
+        Invoke-NativeTool { & powershell -NoProfile -ExecutionPolicy Bypass -File $packager -OutputSuffix $OutputSuffix }
+    } else {
+        Invoke-NativeTool { & powershell -NoProfile -ExecutionPolicy Bypass -File $packager }
+    }
+} finally {
+    $env:BOSUN_PI_SIGNING_KEY = $previousKey
 }
 if ($LASTEXITCODE -ne 0) { throw "Portable packaging failed (exit $LASTEXITCODE)" }
 $name = "Bosun-$version-portable-x64" + $(if ($OutputSuffix) { "-$OutputSuffix" } else { "" })
 $summary.Add("Desktop: $(Join-Path $repoRoot "dist\$name")")
+$summary.Add($piSigned)
 
 # ---------- 3. Raspberry Pi ----------
 if ($SkipPi) {
