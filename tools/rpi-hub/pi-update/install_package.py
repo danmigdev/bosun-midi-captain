@@ -51,6 +51,7 @@ TERMINAL = {"done", "rolled-back", "error"}
 STAGING = ".bosun-"  # restore's temporary names, never part of a snapshot
 JOB = re.compile(r"[a-f0-9]{32}")
 VERSION = re.compile(r'^__version__ = "([0-9A-Za-z.+-]{1,64})"\s*$', re.MULTILINE)
+RELEASE = re.compile(r"(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:[-+][0-9A-Za-z.+-]*)?$")
 ATTEMPTS = 3
 # Shorter than the hub's PI_START_TIMEOUT, so root decides before the hub
 # reports a job that never started.
@@ -248,6 +249,29 @@ def package_version(tree):
     if match is None or not (tree / "tools/rpi-hub/quick-install.sh").is_file():
         raise ValueError("This is not a Bosun Pi package")
     return match.group(1)
+
+
+def release_number(version):
+    match = RELEASE.match(version or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def refuse_downgrade(root, version):
+    """Every release stays signed, so the signature alone would let anyone on
+    the LAN put an older release back. The same release may be reinstalled."""
+    try:
+        match = VERSION.search((root / "opt/bosun-hub/bosun_hub/__init__.py").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        match = None
+    current = release_number(match.group(1)) if match else None
+    if current is None:
+        return  # nothing readable installed: a repair may install any release
+    new = release_number(version)
+    if new is None:
+        raise ValueError(f"This package has no release number ({version})")
+    if new < current:
+        raise ValueError(f"This package is Bosun {version}, older than the installed "
+                         f"{match.group(1)}; the Pi only installs the same or a newer release")
 
 
 # -- snapshot and restore --------------------------------------------------
@@ -557,6 +581,7 @@ def install(ctx, status):
         step(ctx, status, "Unpacking the package")
         extract(work / PACKAGE, work / "tree")
         status["version"] = package_version(work / "tree")
+        refuse_downgrade(ctx.root, status["version"])
         entries = installed(ctx.root)
         needed = 2 * tree_size(ctx.root, entries) + 32 * 1024 * 1024
         if shutil.disk_usage(ctx.state).free < needed:

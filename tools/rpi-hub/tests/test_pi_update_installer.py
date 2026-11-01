@@ -370,6 +370,31 @@ def test_package_without_a_hub_version_is_not_a_bosun_package(pi):
     refused(pi, job, "not a Bosun Pi package")
 
 
+@pytest.mark.parametrize("version, message", [
+    ("0.8.4", "older than the installed 0.8.5"),
+    ("0.7.99", "older than the installed 0.8.5"),
+    ("latest", "no release number"),
+])
+def test_signed_older_release_is_refused(pi, version, message):
+    before = tree_state(pi.root)
+    job = stage(pi, package(pi, version=version))
+    refused(pi, job, message)
+    assert tree_state(pi.root) == before
+
+
+def test_same_release_can_be_reinstalled(pi):
+    stage(pi, package(pi, version="0.8.5"))
+    [result] = run(pi)
+    assert result["phase"] == "done", result
+
+
+def test_any_release_repairs_an_installation_without_a_version(pi):
+    (pi.root / "opt/bosun-hub/bosun_hub/__init__.py").unlink()
+    stage(pi, package(pi, version="0.8.4"))
+    [result] = run(pi)
+    assert result["phase"] == "done", result
+
+
 @pytest.mark.parametrize("staged", ["symlinked-package", "symlinked-job", "fifo-signature", "oversize"])
 def test_hub_files_are_read_without_following_links(pi, staged):
     data = package(pi)
