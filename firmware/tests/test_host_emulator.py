@@ -225,6 +225,16 @@ class HostApplicationTests(unittest.TestCase):
         client.request("SET_MIDI_MONITOR", "ACK", on=False)
         self.assertEqual(client.screensaver_event(), {"type": "SCREENSAVER", "id": None, "active": False})
         self.assertFalse(client.request("GET_SCREENSAVER", "SCREENSAVER")["active"])
+        # The Stage's tap: SCREENSAVER_STOP ends it, and is a plain ACK when it is off.
+        client.request("SCREENSAVER_START", "ACK", effect="drift")
+        self.assertEqual(client.screensaver_event(),
+                         {"type": "SCREENSAVER", "id": None, "active": True, "effect": "drift"})
+        stopped = client.request("SCREENSAVER_STOP", "ACK")
+        self.assertEqual(stopped, {"type": "ACK", "id": stopped["id"]})
+        self.assertEqual(client.screensaver_event(), {"type": "SCREENSAVER", "id": None, "active": False})
+        client.request("SCREENSAVER_STOP", "ACK")
+        self.assertFalse(client.request("GET_SCREENSAVER", "SCREENSAVER")["active"])
+        self.assertFalse([m for m in client.events if m.get("type") == "SCREENSAVER"])
 
     def test_startup_logo_upload_commit_and_delete(self):
         _, client = self.start()

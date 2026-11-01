@@ -32,9 +32,9 @@ typedef struct {
     uint32_t midi_rejected, midi_abandoned, din_dropped, ticks;
     uint32_t led_ms, console_ms, reboot_ms, usb_session_generation;
     uint32_t ignored_ms; /* Last change of an ignored switch. */
-    /* Last activity, start of the shown Mix effect, selection at last look,
+    /* Last activity, start of the shown Mix effect, runtime view at last look,
      * configuration revision of saver_minutes. */
-    uint32_t saver_idle_ms, saver_ms, saver_selection, saver_revision;
+    uint32_t saver_idle_ms, saver_ms, saver_view, saver_revision;
     char console[384];
     size_t console_offset, console_length;
     bosun_store_result_t boot_result;
@@ -49,11 +49,12 @@ typedef struct {
  * MIDI is generated or transmitted until the first application tick. A ready
  * non-Kemper initial patch schedules on_enter once; Kemper owns its boot rig.
  * The screensaver engages after tft.screensaver_minutes (read live) without
- * activity: a physical press, a change of the current selection, or a
- * state-changing host request. Never during the update lock, which ends it,
- * or a logo. Expression pedals are not activity, nor is MIDI that leaves the
- * selection as it was. The press that wakes it is swallowed whole and stays
- * ignored until released. */
+ * activity: a physical press, a change of what the runtime presents (the
+ * selection, or the target's tuner turning on or off), or a state-changing
+ * host request. Never during the update lock, which ends it, or a logo.
+ * Expression pedals are not activity, nor is MIDI that leaves the view as it
+ * was. The press that wakes it is swallowed whole and stays ignored until
+ * released. */
 bool bosun_application_init(bosun_application_t *app, const char *host_root);
 void bosun_application_tick(bosun_application_t *app);
 /* Whole-packet admission to every currently connected output; false admits

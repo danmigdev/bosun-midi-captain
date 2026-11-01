@@ -347,6 +347,50 @@ def test_editor_screensaver_commands_are_forwarded_and_their_replies_routed():
     _run(body())
 
 
+def test_a_stage_tap_forwards_screensaver_stop_and_gets_its_own_reply():
+    async def body():
+        hub, sent = _isolated_hub()
+        stage = hub.subscribe(want_status=True)
+        other_stage = hub.subscribe(want_status=True)
+        editor = hub.subscribe()
+        try:
+            hub._dispatch(_event(True, "bounce"))
+            for sub in (stage, other_stage, editor):
+                _queued(sub)
+
+            stage.send('{"type":"SCREENSAVER_STOP","id":"5"}')
+            [stop] = [request for request in sent if request["type"] == "SCREENSAVER_STOP"]
+            assert set(stop) == {"type", "id"}
+            assert stop["id"] != "5"
+            hub._dispatch(json.dumps({"type": "ACK", "id": stop["id"]}))
+            assert _queued(stage) == [{"type": "ACK", "id": "5"}]
+            assert _queued(other_stage) == _queued(editor) == []
+            # ACK only admits it: Stage stays covered until the Captain says off.
+            assert hub._screensaver == {"effect": "bounce"}
+            hub._dispatch(_event(False))
+            assert _hub_frames(stage) == _hub_frames(other_stage) == [UP]
+
+            # Firmware without the command refuses it; nothing changes.
+            hub._dispatch(_event(True, "drift"))
+            for sub in (stage, other_stage, editor):
+                _queued(sub)
+            stage.send('{"type":"SCREENSAVER_STOP","id":"6"}')
+            stop = [request for request in sent if request["type"] == "SCREENSAVER_STOP"][-1]
+            hub._dispatch(json.dumps({
+                "type": "ERROR", "id": stop["id"],
+                "error": "unknown_type", "of": "SCREENSAVER_STOP",
+            }))
+            assert _queued(stage) == [{
+                "type": "ERROR", "id": "6", "error": "unknown_type", "of": "SCREENSAVER_STOP",
+            }]
+            assert _queued(other_stage) == _queued(editor) == []
+            assert hub._screensaver == {"effect": "drift"}
+        finally:
+            hub.stop()
+
+    _run(body())
+
+
 def test_editor_commands_are_refused_while_the_link_is_down():
     async def body():
         hub, sent = _isolated_hub()
@@ -355,10 +399,12 @@ def test_editor_commands_are_refused_while_the_link_is_down():
         try:
             editor.send('{"type":"SCREENSAVER_START","id":1}')
             editor.send('{"type":"GET_SCREENSAVER","id":2}')
+            editor.send('{"type":"SCREENSAVER_STOP","id":3}')
             assert sent == []
             assert _queued(editor) == [
                 {"type": "ERROR", "error": "link_down", "of": "SCREENSAVER_START", "id": 1},
                 {"type": "ERROR", "error": "link_down", "of": "GET_SCREENSAVER", "id": 2},
+                {"type": "ERROR", "error": "link_down", "of": "SCREENSAVER_STOP", "id": 3},
             ]
         finally:
             hub.stop()
@@ -424,6 +470,21 @@ def test_end_to_end_over_tcp_and_websocket_with_a_reconnecting_captain():
                 pedal.push({"type": "SCREENSAVER", "id": None, "active": True, "effect": "breathe"})
                 assert await frame(ws) == {**UP, "screensaver": {"effect": "breathe"}}
                 assert json.loads(await asyncio.wait_for(tcp_reader.readline(), 3))["effect"] == "breathe"
+
+                # A tap on Stage wakes the Captain, which then announces it.
+                await ws.send('{"type":"SCREENSAVER_STOP","id":"1"}')
+                while True:
+                    reply = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                    if reply.get("id") == "1":
+                        break
+                assert reply == {"type": "ACK", "id": "1"}
+                assert any('"SCREENSAVER_STOP"' in line for line in pedal.received)
+                pedal.push({"type": "SCREENSAVER", "id": None, "active": False})
+                assert await frame(ws) == UP
+                assert json.loads(await asyncio.wait_for(tcp_reader.readline(), 3))["active"] is False
+                pedal.push({"type": "SCREENSAVER", "id": None, "active": True, "effect": "breathe"})
+                assert await frame(ws) == {**UP, "screensaver": {"effect": "breathe"}}
+                await asyncio.wait_for(tcp_reader.readline(), 3)
 
                 # The Captain goes away and comes back with its screensaver off.
                 pedal.screensaver = {"active": False}

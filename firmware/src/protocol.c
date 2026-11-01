@@ -271,15 +271,16 @@ static bool emit_screensaver(bosun_protocol_t *p) {
     begin(p, "SCREENSAVER"); screensaver_state(p);
     finish(p); return true;
 }
-/* Requests that change what the pedal does or stores. Reads, PING, UPDATE_LOCK
- * and the screensaver's own requests are polled or automated by hosts, so
- * they must never count as activity, nor may an unknown type. */
+/* Requests that change what the pedal does or stores, and SCREENSAVER_STOP.
+ * Reads, PING, UPDATE_LOCK, GET_SCREENSAVER and SCREENSAVER_START are polled
+ * or automated by hosts, so they must never count as activity, nor may an
+ * unknown type. */
 static bool changes_state(const char *type) {
     static const char *const types[] = {"PUT_GLOBAL", "PUT_PATCH", "PUT_BINDING",
         "SWITCH_PATCH", "DELETE_PATCH", "SAVE_NOW", "DISCARD", "CREATE_PROFILE",
         "RENAME_PROFILE", "SWITCH_PROFILE", "DELETE_PROFILE", "ACTIVATE_SWITCH",
         "MORPH_CONTROL", "SET_MIDI_MONITOR", "SET_HARDWARE", "PUT_LOGO", "COMMIT_LOGO",
-        "DELETE_LOGO"};
+        "DELETE_LOGO", "SCREENSAVER_STOP"};
     for (unsigned i = 0; i < sizeof types / sizeof *types; ++i)
         if (!strcmp(type, types[i])) return true;
     return false;
@@ -751,6 +752,7 @@ static void handle(bosun_protocol_t *p, uint32_t now_ms) {
         else { p->update_lock_ms = now_ms; p->update_lock_seconds = (uint8_t)seconds; }
     }
     else if (!strcmp(p->type, "GET_SCREENSAVER")) { begin(p, "SCREENSAVER"); screensaver_state(p); }
+    else if (!strcmp(p->type, "SCREENSAVER_STOP")) { /* ACK; it only counts as activity. */ }
     else if (!strcmp(p->type, "SCREENSAVER_START")) {
         if (bosun_protocol_update_locked(p, now_ms)) { error(p, "update_lock"); goto done; }
         int token = get(p, "effect");

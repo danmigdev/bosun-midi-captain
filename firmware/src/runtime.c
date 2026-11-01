@@ -863,10 +863,11 @@ void bosun_runtime_hold_effect(const bosun_runtime_t *rt, char *out, size_t capa
     }
 }
 
-uint32_t bosun_runtime_selection(const bosun_runtime_t *rt) {
+uint32_t bosun_runtime_view(const bosun_runtime_t *rt) {
     if (!rt || !rt->config) return 0;
-    uint32_t selection = (uint32_t)rt->config->bank << 20 | (uint32_t)rt->config->slot << 12;
-    return rt->kemper_enabled ? selection | (rt->kemper.state.rig & 0xfffu) : selection;
+    uint32_t view = (uint32_t)rt->config->bank << 20 | (uint32_t)rt->config->slot << 12;
+    if (!rt->kemper_enabled) return view;
+    return view | (rt->kemper.state.rig & 0xfffu) | (uint32_t)rt->kemper.state.tuner_active << 31;
 }
 
 bool bosun_runtime_context(const bosun_runtime_t *rt, bosun_json_writer_t *w) {

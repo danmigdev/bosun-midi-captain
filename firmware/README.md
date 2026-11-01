@@ -95,17 +95,21 @@ configured backlight:
 - a physical switch press, which only wakes it: no action, no MIDI, no long
   press or hold, and the switch stays ignored until it is let go (as with the
   update lock); a switch already held when it engaged keeps working;
-- the current selection changing value (bank, slot, or the rig a Kemper
-  follows), from any source; repeated identical state does not count;
+- what the runtime presents changing value, from any source: the current
+  selection (bank, slot, or the rig a Kemper follows) or the Kemper tuner
+  turning on (or off; a tuner left on is no activity, so the screensaver can
+  still engage over it); repeated identical state does not count;
 - a state-changing request: `PUT_GLOBAL`, `PUT_PATCH`, `PUT_BINDING`,
   `SWITCH_PATCH`, `DELETE_PATCH`, `SAVE_NOW`, `DISCARD`, `CREATE_PROFILE`,
   `RENAME_PROFILE`, `SWITCH_PROFILE`, `DELETE_PROFILE`, `ACTIVATE_SWITCH` (which
   also acts), `MORPH_CONTROL`, `SET_MIDI_MONITOR`, `SET_HARDWARE`, `PUT_LOGO`,
-  `COMMIT_LOGO` and `DELETE_LOGO`, accepted or refused.
+  `COMMIT_LOGO` and `DELETE_LOGO`, accepted or refused;
+- `SCREENSAVER_STOP` (no fields), which the Stage sends on a tap: always `ACK`,
+  also when the screensaver is off, and nothing else.
 
 Reads and polling (`GET_*`, `LIST_*`, `STATS`, `LED_DUMP`, `PING`),
-`UPDATE_LOCK`, the screensaver requests, unknown types and expression pedals
-never count. It never engages during the update lock or a startup logo or
+`UPDATE_LOCK`, `SCREENSAVER_START`, unknown types and expression pedals never
+count. It never engages during the update lock or a startup logo or
 preview, and the idle time restarts when they end; the update lock takes over
 an active screensaver and leaves it off.
 

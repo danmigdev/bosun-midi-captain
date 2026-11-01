@@ -740,6 +740,7 @@ static void host(const char *line, const char *reply) {
 static void at(uint32_t when) { assert(when - now - 1 < UINT32_MAX / 2); now = when - 1; tick(); }
 static void announced(const char *frame) {
     for (unsigned i = 0; i < 20 && !replied(frame); ++i) tick();
+    if (!replied(frame)) fprintf(stderr, "Expected %sat %lu, received:\n%s\n", frame, (unsigned long)now, (char *)output);
     assert(replied(frame)); clear_output();
 }
 static bool saver_frames(void) { return strstr((char *)output, "\"type\":\"SCREENSAVER\"") != NULL; }
@@ -847,7 +848,7 @@ static void test_screensaver_idle_and_wake(void) {
     midi_tail_is(sent + 12, cc, sizeof cc);
 }
 
-static void test_screensaver_selection(void) {
+static void test_screensaver_view(void) {
     /* A Kemper rig change from the unit wakes it; the same rig again does not. */
     saver_fixture("kemper_player", "{\"tft\":{\"boot_logo_seconds\":0,\"screensaver_minutes\":1}}");
     host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\",\"effect\":\"breathe\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
@@ -874,6 +875,30 @@ static void test_screensaver_selection(void) {
     /* A generic selection change (any source) wakes it too. */
     assert(bosun_runtime_switch_patch(&app.runtime, 1, 2, false) == BOSUN_STORE_OK);
     tick(); assert(!app.saver_shown);
+    /* The tuner turned on from the unit wakes it. Left on it is no activity:
+     * the screensaver engages over it, and a repeated tuner-on does not wake. */
+    static const uint8_t tuner_on[] = {0xb0, 31, 1}, tuner_off[] = {0xb0, 31, 0};
+    clear_output();
+    host("{\"type\":\"SCREENSAVER_START\",\"id\":\"go\",\"effect\":\"drift\"}\n", "{\"type\":\"ACK\",\"id\":\"go\"}\n");
+    announced(saver_drift);
+    memcpy(midi_input[0], tuner_on, sizeof tuner_on); midi_input_length[0] = sizeof tuner_on;
+    tick();
+    uint32_t tuned_at = now;
+    assert(app.runtime.kemper.state.tuner_active && !app.saver_shown);
+    announced(saver_off);
+    ticks(40); assert(app.display.tuner && backlight == 204);
+    at(tuned_at + 59999); assert(!app.saver_shown);
+    at(tuned_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    announced(saver_bounce);
+    for (unsigned i = 0; i < 3; ++i) {
+        memcpy(midi_input[0], tuner_on, sizeof tuner_on); midi_input_length[0] = sizeof tuner_on;
+        ticks(50);
+    }
+    assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE && !saver_frames());
+    /* Turning it off changes the screen as well. */
+    memcpy(midi_input[0], tuner_off, sizeof tuner_off); midi_input_length[0] = sizeof tuner_off;
+    tick();
+    assert(!app.runtime.kemper.state.tuner_active && !app.saver_shown);
 }
 
 static void test_screensaver_preview_mix_and_lock(void) {
@@ -913,6 +938,19 @@ static void test_screensaver_preview_mix_and_lock(void) {
     uint32_t unlocked_at = now;
     at(unlocked_at + 59000); assert(!app.saver_shown);
     at(unlocked_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    /* SCREENSAVER_STOP (a Stage tap) wakes it and restarts the idle time;
+     * it is a plain ACK when the screensaver is already off. */
+    announced(saver_bounce);
+    host("{\"type\":\"SCREENSAVER_STOP\",\"id\":\"stop\"}\n", "{\"type\":\"ACK\",\"id\":\"stop\"}\n");
+    assert(!app.saver_shown);
+    announced(saver_off);
+    ticks(40); assert(shows("Clean") && !app.display.saver);
+    host("{\"type\":\"SCREENSAVER_STOP\",\"id\":\"again\"}\n", "{\"type\":\"ACK\",\"id\":\"again\"}\n");
+    uint32_t stopped_at = now;
+    ticks(20); assert(!app.saver_shown && !saver_frames());
+    at(stopped_at + 59999); assert(!app.saver_shown);
+    at(stopped_at + 60000); assert(app.saver_shown == BOSUN_SCREENSAVER_BOUNCE);
+    assert(!midi_length[0] && !midi_length[1]);
 }
 
 static void test_screensaver_startup_logo(void) {
@@ -945,7 +983,7 @@ int main(void) {
     test_startup_logo();
     test_update_lock();
     test_screensaver_idle_and_wake();
-    test_screensaver_selection();
+    test_screensaver_view();
     test_screensaver_preview_mix_and_lock();
     test_screensaver_startup_logo();
     assert(bosun_store_format() == BOSUN_STORE_OK && rmdir(root) == 0);

@@ -1281,6 +1281,110 @@ describe("kiosk integration", () => {
     await waitFor(() => expect(logo()).toHaveAttribute("src", "/boot-logo.png"));
   });
 
+  /** A complete tap on an element, as the touchscreen delivers it. */
+  async function tap(element: Element) {
+    await fireEvent.pointerDown(element);
+    await fireEvent.pointerUp(element);
+    await fireEvent.click(element);
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  /** Stage mounted with the screensaver on; counts clicks reaching anything below it. */
+  async function stageUnderScreensaver() {
+    const view = mountKiosk();
+    await bringLinkUp();
+    answerBootstrap(1, 1);
+    await waitFor(() => expect(view.container.querySelector(".stage")).not.toBeNull());
+    const below = vi.fn();
+    const stage = view.container.querySelector(".stage")!;
+    stage.addEventListener("click", below);
+    reply({ type: "HUB", link: "up", screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(view.container.querySelector(".kiosk-screensaver")).not.toBeNull());
+    return {
+      ...view, below, stage,
+      overlay: () => view.container.querySelector(".kiosk-screensaver"),
+      stops: () => sentCount("SCREENSAVER_STOP"),
+    };
+  }
+
+  it("wakes the Captain with one SCREENSAVER_STOP at a time and swallows the tap", async () => {
+    const { below, stage, overlay, stops } = await stageUnderScreensaver();
+    const switchesBefore = sentCount("ACTIVATE_SWITCH");
+
+    await tap(overlay()!.querySelector("img")!);
+    await waitFor(() => expect(stops()).toBe(1));
+    expect(lastSent("SCREENSAVER_STOP")).toEqual({ type: "SCREENSAVER_STOP", id: expect.any(String) });
+    // Repeated taps while that request is in flight send nothing more.
+    await tap(overlay()!);
+    await tap(overlay()!);
+    await settle();
+    expect(stops()).toBe(1);
+    // ACK only means admitted: the overlay stays until the hub reports it off.
+    reply({ type: "ACK", id: lastSent("SCREENSAVER_STOP")!.id });
+    await settle();
+    expect(overlay()).not.toBeNull();
+    await tap(overlay()!);
+    await waitFor(() => expect(stops()).toBe(2));
+    reply({ type: "ACK", id: lastSent("SCREENSAVER_STOP")!.id });
+
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(overlay()).toBeNull());
+    expect(below).not.toHaveBeenCalled();
+    expect(sentCount("ACTIVATE_SWITCH")).toBe(switchesBefore);
+
+    // A tap that began on the screensaver stays its own when the screensaver
+    // ends before the finger lifts; the next tap reaches Stage again.
+    reply({ type: "HUB", link: "up", screensaver: { effect: "drift" } });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    await fireEvent.pointerDown(overlay()!);
+    reply({ type: "HUB", link: "up" });
+    await waitFor(() => expect(overlay()).toBeNull());
+    await fireEvent.click(stage);
+    expect(below).not.toHaveBeenCalled();
+    await tap(stage);
+    expect(below).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(stops()).toBe(2);
+  });
+
+  it("stops asking firmware without SCREENSAVER_STOP until the Captain reconnects, and keeps the overlay", async () => {
+    const { below, overlay, stops } = await stageUnderScreensaver();
+
+    await tap(overlay()!);
+    await waitFor(() => expect(stops()).toBe(1));
+    reply({ type: "ERROR", id: lastSent("SCREENSAVER_STOP")!.id, error: "unknown_type", of: "SCREENSAVER_STOP" });
+    await settle();
+    expect(overlay()).not.toBeNull();
+    for (let i = 0; i < 3; i++) await tap(overlay()!);
+    await settle();
+    expect(stops()).toBe(1);
+    expect(below).not.toHaveBeenCalled();
+
+    // Other refusals (an update holding the lock) leave the next tap free to try.
+    reply({ type: "HUB", link: "down" });
+    reply({ type: "HUB", link: "up", screensaver: { effect: "breathe" } });
+    await waitFor(() => expect(overlay()).toHaveAttribute("data-effect", "breathe"));
+    await tap(overlay()!);
+    await waitFor(() => expect(stops()).toBe(2));
+    reply({ type: "ERROR", id: lastSent("SCREENSAVER_STOP")!.id, error: "update_lock", of: "SCREENSAVER_STOP" });
+    await settle();
+    await tap(overlay()!);
+    await waitFor(() => expect(stops()).toBe(3));
+    expect(overlay()).not.toBeNull();
+  });
+
+  it("sends no SCREENSAVER_STOP while the Updating screen covers the screensaver", async () => {
+    const { container, below, stops } = await stageUnderScreensaver();
+    reply({ type: "HUB", link: "up", update: { phase: "validating", detail: "" },
+      screensaver: { effect: "bounce" } });
+    await waitFor(() => expect(container.querySelector(".kiosk-updating")).not.toBeNull());
+    expect(container.querySelector(".kiosk-screensaver")).toBeNull();
+    await tap(container.querySelector(".kiosk-updating")!);
+    await settle();
+    expect(stops()).toBe(0);
+    expect(below).not.toHaveBeenCalled();
+  });
+
   it("never requests the heavy manifest at all", async () => {
     // On the RP2040 the manifest streams as a background generator for
     // ~7 s and a GET_PATCH mid-stream (every rig change) can wedge it,

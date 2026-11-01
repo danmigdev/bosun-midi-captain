@@ -816,6 +816,23 @@ static void screensaver_protocol(void) {
     request_at("{\"type\":\"SCREENSAVER_START\",\"effect\":\"bounce\"}", "ACK", 20004);
     assert(protocol.screensaver_start == BOSUN_SCREENSAVER_BOUNCE);
     protocol.screensaver_start = 0;
+    /* SCREENSAVER_STOP: always a bare ACK and activity, and nothing else. */
+    uint32_t revision = config.revision, runtime_revision = runtime.revision;
+    unsigned midi = sent;
+    for (unsigned shown = BOSUN_SCREENSAVER_OFF; shown <= BOSUN_SCREENSAVER_DRIFT; shown += 2) {
+        protocol.screensaver = (uint8_t)shown; protocol.activity = false;
+        request("{\"type\":\"SCREENSAVER_STOP\",\"id\":\"stop\"}", "ACK");
+        assert(!strcmp(output, "{\"type\":\"ACK\",\"id\":\"stop\"}\n") && protocol.activity);
+        assert(protocol.screensaver == shown && !protocol.screensaver_start && !protocol.logo_preview);
+    }
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":30}", "ACK", 20005);
+    protocol.activity = false;
+    request_at("{\"type\":\"SCREENSAVER_STOP\"}", "ACK", 20006); assert(protocol.activity);
+    request_at("{\"type\":\"UPDATE_LOCK\",\"seconds\":0}", "ACK", 20007);
+    assert(config.revision == revision && runtime.revision == runtime_revision && sent == midi);
+    assert(!runtime.queue_count && !protocol.reboot_requested);
+    protocol.screensaver = BOSUN_SCREENSAVER_OFF; protocol.activity = false;
+    quiet(30000);
     /* Reads, polling, the lock and the screensaver's own requests never wake it. */
     static const char *const passive[] = {
         "{\"type\":\"PING\",\"id\":\"__hub_keepalive\"}", "{\"type\":\"GET_CONTEXT\"}",
@@ -846,7 +863,7 @@ static void screensaver_protocol(void) {
         "{\"type\":\"SWITCH_PROFILE\",\"profile_id\":\"test\"}", "{\"type\":\"DELETE_PROFILE\",\"profile_id\":\"BAD ID\"}",
         "{\"type\":\"SET_HARDWARE\",\"model\":\"unknown\"}", "{\"type\":\"PUT_LOGO\"}",
         "{\"type\":\"COMMIT_LOGO\"}", "{\"type\":\"DELETE_LOGO\"}",
-        "{\"type\":\"PUT_GLOBAL\",\"profile\":\"missing\",\"device\":{}}"
+        "{\"type\":\"PUT_GLOBAL\",\"profile\":\"missing\",\"device\":{}}", "{\"type\":\"SCREENSAVER_STOP\"}"
     };
     for (unsigned i = 0; i < sizeof changing / sizeof *changing; ++i) {
         bool woke = wakes(changing[i]);

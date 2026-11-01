@@ -286,11 +286,11 @@ static void switch_input(bosun_application_t *app, uint32_t now, bool locked, ui
     else if (!locked && now - app->ignored_ms >= SWITCH_DEBOUNCE_MS) app->switches_ignored &= pressed;
     app->switches_down = pressed;
     /* Activity restarts the idle time and ends the screensaver; the lock holds both. */
-    uint32_t selection = bosun_runtime_selection(&app->runtime);
-    if (locked || presses || app->protocol.activity || selection != app->saver_selection) {
+    uint32_t view = bosun_runtime_view(&app->runtime);
+    if (locked || presses || app->protocol.activity || view != app->saver_view) {
         app->saver_idle_ms = now; app->saver_shown = BOSUN_SCREENSAVER_OFF;
     }
-    app->protocol.activity = false; app->saver_selection = selection;
+    app->protocol.activity = false; app->saver_view = view;
 }
 
 static void engage(bosun_application_t *app, uint32_t now, unsigned effect) {

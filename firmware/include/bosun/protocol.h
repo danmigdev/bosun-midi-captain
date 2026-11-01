@@ -29,8 +29,9 @@
  * SCREENSAVER_START {effect?: bounce|breathe|drift|mix, default the configured
  * one} sets screensaver_start for the application; update_lock while locked.
  * A state-changing request (configuration, patch or profile changes, switch,
- * morph, logo, hardware, MIDI monitor) sets activity; reads, PING, UPDATE_LOCK
- * and the screensaver requests never do.
+ * morph, logo, hardware, MIDI monitor) sets activity, and so does
+ * SCREENSAVER_STOP (always ACK, nothing else); reads, PING, UPDATE_LOCK,
+ * GET_SCREENSAVER and SCREENSAVER_START never do.
  * No protocol operation formats flash or installs firmware. */
 typedef struct {
     bosun_runtime_t *runtime;

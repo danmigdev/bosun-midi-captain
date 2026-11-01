@@ -100,10 +100,11 @@ void bosun_runtime_config_changed(bosun_runtime_t *runtime);
 bool bosun_runtime_context(const bosun_runtime_t *runtime, bosun_json_writer_t *writer);
 /* The same momentary-hold label is published in CONTEXT and on the TFT. */
 void bosun_runtime_hold_effect(const bosun_runtime_t *runtime, char *out, size_t capacity);
-/* The current selection as one value: the active bank and slot, and the rig a
- * target plugin follows (Kemper browse mode can change it alone). Equal
- * values are the same selection, however often a source repeats it. */
-uint32_t bosun_runtime_selection(const bosun_runtime_t *runtime);
+/* What the pedal presents, as one value: the active bank and slot, the rig a
+ * target plugin follows (Kemper browse mode can change it alone) and whether
+ * the target's tuner is on. Equal values present the same thing, however
+ * often a source repeats it. */
+uint32_t bosun_runtime_view(const bosun_runtime_t *runtime);
 /* Queue one validated message or an action {messages:[...]}; unsupported,
  * malformed or over-limit requests return false before anything is queued. */
 bool bosun_runtime_dispatch(bosun_runtime_t *runtime, const bosun_json_doc_t *doc,

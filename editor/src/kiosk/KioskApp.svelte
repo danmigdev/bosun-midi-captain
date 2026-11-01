@@ -76,6 +76,42 @@
     screensaver = next;
   }
 
+  const WAKE_TIMEOUT_MS = 4_000;
+  // One SCREENSAVER_STOP at a time; the overlay stays until the hub reports
+  // the screensaver off.
+  let waking = false;
+  // Firmware without SCREENSAVER_STOP, until the next Captain link: taps send nothing.
+  let wakeUnsupported = false;
+  // A tap that began on the screensaver belongs to it, even if the screensaver
+  // ends before the finger lifts: its click must never reach a switch below.
+  let tapOnScreensaver = false;
+
+  function onScreensaver(target: EventTarget | null): boolean {
+    return target instanceof Element && target.closest(".kiosk-screensaver") !== null;
+  }
+
+  function wakeScreensaver(): void {
+    if (waking || wakeUnsupported) return;
+    waking = true;
+    void sendAndAwait({ type: "SCREENSAVER_STOP" }, WAKE_TIMEOUT_MS).catch((error: unknown) => {
+      const reply = (error as { response?: { error?: unknown } } | null)?.response;
+      if (reply?.error === "unknown_type") wakeUnsupported = true;
+    }).finally(() => { waking = false; });
+  }
+
+  function screensaverPointerDown(event: PointerEvent): void {
+    tapOnScreensaver = onScreensaver(event.target);
+  }
+
+  function screensaverClick(event: MouseEvent): void {
+    const showing = onScreensaver(event.target);
+    if (!showing && !tapOnScreensaver) return;
+    tapOnScreensaver = false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (showing) wakeScreensaver();
+  }
+
   let hasPatchList = false;
   let deviceInfoRetry: ReturnType<typeof setTimeout> | null = null;
   let deviceInfoRefreshPending = false;
@@ -197,6 +233,14 @@
     showUpdate(wsLink.update);
     offs.push(wsLink.on("hub-screensaver", ({ payload }) => showScreensaver(payload as HubScreensaver | null)));
     showScreensaver(wsLink.screensaver);
+    // Capture on the window: a tap on the screensaver wakes it once the tap
+    // is complete, and nothing underneath sees it.
+    window.addEventListener("pointerdown", screensaverPointerDown, true);
+    window.addEventListener("click", screensaverClick, true);
+    offs.push(() => {
+      window.removeEventListener("pointerdown", screensaverPointerDown, true);
+      window.removeEventListener("click", screensaverClick, true);
+    });
 
     async function sync() {
       const up = await isConnected();
@@ -317,6 +361,8 @@
       }));
       keep(await onDisconnected(() => {
         connected = false;
+        // The Captain may come back with other firmware.
+        wakeUnsupported = false;
         if (deviceInfo) deviceInfo = { ...deviceInfo, stage_input: false };
         // Anything in flight on the old CDC session is gone; allow the next
         // link-up to retry immediately rather than waiting for the watchdog.
@@ -365,7 +411,8 @@
 {/if}
 
 {#if screensaver && !update}
-  <!-- Bounce and Drift move a half-size logo; Breathe keeps the full one centered. -->
+  <!-- Bounce and Drift move a half-size logo; Breathe keeps the full one centered.
+       A tap wakes the Captain (screensaverClick). -->
   <div
     class="kiosk-screensaver"
     class:kiosk-screensaver--small={screensaver.effect !== "breathe"}

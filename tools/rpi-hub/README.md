@@ -224,10 +224,10 @@ Without an HDMI screen, the Pi keeps a virtual 1920 × 440 display available for
 
 While the Captain's screensaver runs, Stage is black and shows the startup logo
 with the same effect as the Captain's screen; only position and transparency
-change, so it moves despite reduced motion. A switch press on the Captain wakes
-both; touching Stage does not. The hub asks the Captain for its screensaver
-whenever it connects, so a Stage opened meanwhile shows it at once. The
-"Updating" screen takes priority.
+change, so it moves despite reduced motion. A switch press on the Captain or a
+tap on Stage wakes both, and does nothing else. The hub asks the Captain for its
+screensaver whenever it connects, so a Stage opened meanwhile shows it at once.
+The "Updating" screen takes priority.
 
 The Pi hides its cursor when no mouse is connected and restores it when a mouse
 is plugged in. Touchscreen input remains available without a mouse cursor.
