@@ -219,6 +219,13 @@ Recovery runs once per connection event, with up to three attempts if a display
 command fails. It does not repeatedly blank a healthy display. It also checks
 connector status in case a hotplug notification is missed. After powering or
 reconnecting the display, allow about ten seconds for the picture to settle.
+The VNC viewer disconnects during recovery and can be reopened a few seconds later.
+
+Stage restarts by itself when its page stops running: the page reports to the hub
+every five seconds, and `bosun-stage-watchdog.service` restarts the kiosk after 20
+seconds without a report, or two minutes after a start that never showed Stage (then
+ever less often, up to every 15 minutes). The hub, MIDI and the Captain are not
+affected. Until Stage is back, the display is dark.
 
 Without an HDMI screen, the Pi keeps a virtual 1920 × 440 display available for the viewer below. The kiosk uses reduced motion to keep its light bars steady.
 
@@ -330,5 +337,7 @@ The commands require Python and Node.js/npm on Windows. The Stage helper builds 
 - **Pi connects but the pedal is missing:** check the Captain's power and USB data cable, then reconnect it.
 - **Stage page is missing:** repeat the Stage build and installation steps.
 - **Display stays black:** check its separate USB power and HDMI connection, then inspect `journalctl -u bosun-outputs.service -n 30 --no-pager`. To retry the HDMI handshake, run `sudo systemctl restart bosun-outputs.service`; this leaves the kiosk, hub and MIDI routing running. A working VNC picture verifies Stage rendering but cannot confirm that the physical panel is showing it.
+- **Stage shows a browser error or stays empty:** it should come back by itself in about two minutes at most. `journalctl -u bosun-stage-watchdog.service -u bosun-kiosk.service -n 60 --no-pager` shows whether the page stopped running or did not start. To restart only Stage, run `sudo systemctl restart bosun-kiosk.service`.
+- **"Aw, Snap!" on a Raspberry Pi 3:** check `dpkg-query -W chromium`. Chromium 156.0.8078.73 from Raspberry Pi can crash at random on the Pi 3's processor (Cortex-A53 erratum 843419), typically when the Captain connects; Raspberry Pi's 156.0.8078.108 is linked with the workaround. Installing or updating Bosun on such a Pi updates an older Chromium when the Pi is online, which takes several minutes more; offline it keeps it and says so. By hand: `sudo apt update && sudo apt install --only-upgrade chromium chromium-common chromium-l10n chromium-sandbox`, then restart the Pi.
 - **Viewer will not open:** verify the SSH alias and rerun the Windows helper. The viewer's localhost URL works only while that helper's tunnel is running.
 - **A service is inactive:** inspect its recent log, for example `journalctl -u bosun-hub.service -n 30 --no-pager`.

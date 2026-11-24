@@ -1,0 +1,16 @@
+[Unit]
+Description=Restart the Stage kiosk when its page stops running
+After=bosun-hub.service bosun-kiosk.service
+
+[Service]
+Type=simple
+# The same account as the kiosk: it may end cage and nothing else.
+User=bosun
+ExecStart=/usr/bin/python3 /opt/bosun-hub/kiosk/bosun-stage-watchdog.py
+Restart=always
+RestartSec=5
+# Not PartOf the kiosk: it must outlive the restarts it causes, which it makes
+# ever rarer when they do not help.
+
+[Install]
+WantedBy=multi-user.target

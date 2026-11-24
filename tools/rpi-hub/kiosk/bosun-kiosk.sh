@@ -59,9 +59,28 @@ if [[ -z "$CHROMIUM" ]] || ! command -v cage >/dev/null 2>&1; then
     exit 1
 fi
 
-exec cage -- "$CHROMIUM" \
+# The hub starts first but listens a few seconds later. Chromium does not retry
+# a refused page while the Pi has no network, so its error screen would stay.
+if [[ "$BOSUN_KIOSK_URL" =~ ^http://([^/:]+):([0-9]+) ]]; then
+    for ((attempt = 0; attempt < 150; attempt++)); do
+        (exec 3<>"/dev/tcp/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}") 2>/dev/null && break
+        sleep 0.2
+    done
+fi
+
+# Chromium exits when an output is gone before it binds it, and on a Pi 3 that
+# takes it seconds. The HDMI recovery of a start switches the outputs, so let
+# bosun-outputs.service finish it first; without that service start anyway.
+# --force-dark-mode: without a page to show, Chromium is dark instead of white.
+exec cage -- bash -c '
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        [[ -e "$XDG_RUNTIME_DIR/outputs-settled" ]] && break
+        sleep 0.2
+    done
+    exec "$@"' bosun-chromium "$CHROMIUM" \
     --kiosk \
     --ozone-platform=wayland \
+    --force-dark-mode \
     --force-prefers-reduced-motion \
     --enable-gpu-rasterization --use-angle=gles \
     --disable-dev-shm-usage --disable-background-networking \

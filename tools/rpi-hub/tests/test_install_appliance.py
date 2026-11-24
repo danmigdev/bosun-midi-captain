@@ -29,8 +29,30 @@ safe_destination() {
     case "$1" in "$APPLIANCE_TEST_ROOT"/*) ;; *) echo 'unsafe test destination' >&2; exit 90;; esac
 }
 case "$name" in
-apt-get|usermod|chown|udevadm) ;;
+usermod|chown|udevadm) ;;
+apt-get)
+    # An offline Pi: the lists stay as they are and the download fails.
+    if [[ "${OFFLINE:-0}" == 1 && " $* " == *" --download-only "* ]]; then exit 100; fi
+    if [[ "${BROKEN_DPKG:-0}" == 1 && " $* " == *" --no-download "* ]]; then exit 100; fi
+    if [[ " $* " == *" --only-upgrade --no-download "* ]]; then
+        printf '%s' "${CHROMIUM_CANDIDATE:-}" > "$APPLIANCE_TEST_ROOT/chromium-version"
+    fi
+    ;;
+timeout) shift; exec "$@";;
+dpkg)
+    # Only `--compare-versions A lt B`; both are dotted numbers after the epoch.
+    [[ "$1" == --compare-versions && "$3" == lt ]] || exit 97
+    [[ "$2" != "$4" && "$(printf '%s\n%s\n' "$2" "$4" | sort -V | head -1)" == "$2" ]]
+    ;;
 dpkg-query)
+    if [[ "$2" == '-f=${Version}' ]]; then
+        if [[ -f "$APPLIANCE_TEST_ROOT/chromium-version" ]]; then
+            cat "$APPLIANCE_TEST_ROOT/chromium-version"
+        else
+            printf '%s' "${CHROMIUM_VERSION:-}"
+        fi
+        exit 0
+    fi
     if [[ "${PACKAGES_PRESENT:-0}" == 1 && "${!#}" != "${MISSING_PACKAGE:-}" ]]; then printf installed; fi
     ;;
 id) [[ "${EXISTING_USER:-1}" == 1 || -f "$APPLIANCE_TEST_ROOT/user-created" ]];;
@@ -115,7 +137,7 @@ def appliance(tmp_path):
             1,
         )
         for prefix in ("/opt/bosun-hub", "/etc/systemd/system", "/etc/udev/rules.d", "/var/lib/bosun-hub",
-                       "/usr/local/libexec", "/etc/bosun"):
+                       "/usr/local/libexec", "/etc/bosun", "/proc/cpuinfo"):
             script = script.replace(prefix, shell_path(system) + prefix)
         (source / filename).write_text(script, encoding="utf-8", newline="\n")
     shutil.copytree(SOURCE / "systemd", source / "systemd")
@@ -131,7 +153,7 @@ def appliance(tmp_path):
     binary.mkdir()
     for name in (
         "apt-get", "id", "useradd", "getent", "usermod", "rsync", "install",
-        "chown", "picotool", "udevadm", "systemctl", "stat", "runuser", "dpkg-query",
+        "chown", "picotool", "udevadm", "systemctl", "stat", "runuser", "dpkg-query", "dpkg", "timeout",
     ):
         command = binary / name
         command.write_text(FAKE_TOOL, encoding="utf-8", newline="\n")
@@ -170,7 +192,8 @@ def appliance(tmp_path):
     return instance
 
 
-@pytest.mark.parametrize("missing", ["stage", "kiosk/bosun-hdmi-recovery.py", "udev/60-bosun-update.rules",
+@pytest.mark.parametrize("missing", ["stage", "kiosk/bosun-hdmi-recovery.py", "kiosk/bosun-stage-watchdog.py",
+                                     "udev/60-bosun-update.rules",
                                      "pi-update/install_package.py", "systemd/bosun-pi-update.path"])
 def test_missing_build_or_checkout_fails_before_any_appliance_mutation(appliance, missing):
     if missing != "stage":
@@ -202,6 +225,18 @@ def test_fresh_install_sets_access_and_native_support_before_starting_services(a
         assert f"usermod --append --groups {group} bosun" in before_start
     assert "systemctl enable --now seatd.service" in before_start
     assert any(line.startswith("systemctl enable ") and "bosun-wayvnc.service" in line for line in events)
+
+
+def test_install_enables_the_stage_watchdog_after_the_kiosk(appliance):
+    appliance.build_stage()
+    result, events = appliance.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    name = "bosun-stage-watchdog.service"
+    assert (appliance.system / "etc/systemd/system" / name).read_bytes() == (
+        SOURCE / "systemd" / name).read_bytes()
+    assert (appliance.system / "opt/bosun-hub/kiosk/bosun-stage-watchdog.py").is_file()
+    assert f"systemctl enable {name}" in events
+    assert events.index("systemctl restart bosun-kiosk.service") < events.index(f"systemctl restart {name}")
 
 
 def test_existing_stage_is_preserved_without_replacement_build(appliance):
@@ -259,6 +294,65 @@ def test_a_missing_package_installs_the_full_list(appliance):
     apt = [line for line in events if line.startswith("apt-get")]
     assert apt[0] == "apt-get update -qq"
     assert apt[1].startswith("apt-get install -y -qq ") and "picotool" in apt[1] and "openssh-client" in apt[1]
+
+
+OLD_CHROMIUM, GOOD_CHROMIUM = "1:156.0.8078.73", "1:156.0.8078.108"
+
+
+def cpu(appliance, part):
+    (appliance.system / "proc").mkdir(exist_ok=True)
+    (appliance.system / "proc/cpuinfo").write_text(
+        f"processor\t: 0\nCPU implementer\t: 0x41\nCPU part\t: {part}\n", newline="\n")
+
+
+def test_a_chromium_that_crashes_on_a_cortex_a53_is_updated_before_any_service(appliance):
+    appliance.build_stage()
+    cpu(appliance, "0xd03")
+    result, events = appliance.run(PACKAGES_PRESENT="1", CHROMIUM_VERSION=OLD_CHROMIUM,
+                                   CHROMIUM_CANDIDATE=GOOD_CHROMIUM)
+    assert result.returncode == 0, result.stdout + result.stderr
+    packages = "chromium chromium-common chromium-l10n chromium-sandbox"
+    assert [line for line in events if line.startswith(("apt-get", "timeout"))] == [
+        "timeout 120 apt-get update -qq",
+        "apt-get update -qq",
+        f"timeout 900 apt-get install -y -qq --only-upgrade --download-only {packages}",
+        f"apt-get install -y -qq --only-upgrade --download-only {packages}",
+        # dpkg is never under a time limit.
+        f"apt-get install -y -qq --only-upgrade --no-download {packages}",
+    ]
+    # The hub keeps answering Desktop meanwhile.
+    assert events.index(f"apt-get install -y -qq --only-upgrade --no-download {packages}") < next(
+        i for i, line in enumerate(events) if line.startswith("systemctl restart "))
+    assert "was not updated" not in result.stderr
+
+
+@pytest.mark.parametrize("failure", [{"OFFLINE": "1"}, {"BROKEN_DPKG": "1"}, {"CHROMIUM_CANDIDATE": OLD_CHROMIUM}])
+def test_a_chromium_that_cannot_be_updated_never_fails_the_installation(appliance, failure):
+    appliance.build_stage()
+    cpu(appliance, "0xd03")
+    result, events = appliance.run(PACKAGES_PRESENT="1", CHROMIUM_VERSION=OLD_CHROMIUM, **failure)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "warning: Chromium was not updated" in result.stderr
+    assert "systemctl restart bosun-kiosk.service" in events
+    if "OFFLINE" in failure:
+        assert not any("--no-download" in line for line in events)
+
+
+@pytest.mark.parametrize("part, version", [
+    ("0xd03", GOOD_CHROMIUM),          # already fixed
+    ("0xd03", "1:157.0.8100.20"),      # newer: the installer does not chase releases
+    ("0xd08", OLD_CHROMIUM),           # Pi 4
+    ("0xd0b", OLD_CHROMIUM),           # Pi 5
+    ("0xd03", ""),                     # no Chromium package to read
+])
+def test_other_pis_and_fixed_chromium_need_no_network(appliance, part, version):
+    appliance.build_stage()
+    cpu(appliance, part)
+    result, events = appliance.run(PACKAGES_PRESENT="1", CHROMIUM_VERSION=version)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if version:
+        assert not any(line.startswith("apt-get") for line in events)
+        assert "Chromium update" not in result.stdout
 
 
 def test_install_sets_up_the_signed_pi_self_update(appliance):

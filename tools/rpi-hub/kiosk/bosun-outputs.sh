@@ -18,7 +18,7 @@ fi
 # The kiosk owns the runtime directory. Wait only during startup. The supervisor
 # keeps kanshi as the policy owner and briefly suspends it during HDMI recovery.
 shopt -s nullglob
-for ((attempt = 0; attempt < 30; attempt++)); do
+for ((attempt = 0; attempt < 100; attempt++)); do
     for socket_path in "$XDG_RUNTIME_DIR"/wayland-*; do
         [[ -S "$socket_path" ]] || continue
         export WAYLAND_DISPLAY="${socket_path##*/}"

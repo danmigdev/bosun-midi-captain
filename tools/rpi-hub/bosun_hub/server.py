@@ -13,7 +13,9 @@ stream:
               Captain's screensaver is on).
   - ``http``  static file server for the built Stage kiosk bundle. A custom
               startup logo is substituted into ``index.html`` as it is sent
-              and served as ``/boot-logo.png`` (404 without one).
+              and served as ``/boot-logo.png`` (404 without one). The kiosk
+              page on the Pi posts ``/kiosk-alive`` while it runs; the Stage
+              watchdog reads its age there. Only local clients may use it.
 
 UDP discovery on :9877 advertises the TCP endpoint without contacting the
 Captain or subscribing to its protocol stream.
@@ -24,8 +26,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import io
+import ipaddress
+import json
 import logging
 import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -150,16 +155,52 @@ async def _serve_ws(hub: Hub, host: str, port: int):
 # --------------------------------------------------------------------------
 
 
+class KioskHeartbeat:
+    """When the kiosk page last reported that it runs."""
+
+    def __init__(self) -> None:
+        self._last: Optional[float] = None
+
+    def beat(self) -> None:
+        self._last = time.monotonic()
+
+    def age(self) -> Optional[float]:
+        last = self._last
+        return None if last is None else time.monotonic() - last
+
+
 class _QuietHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, boot_logo=None, **kwargs) -> None:
-        self.boot_logo = boot_logo  # the base constructor handles the request
+    def __init__(self, *args, boot_logo=None, kiosk=None, **kwargs) -> None:
+        # The base constructor handles the request.
+        self.boot_logo = boot_logo
+        self.kiosk = kiosk
         super().__init__(*args, **kwargs)
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         log.debug("http %s - %s", self.address_string(), fmt % args)
 
+    def _kiosk_request(self) -> bool:
+        """A browser elsewhere on the network must not answer for the Pi's own."""
+        return (self.kiosk is not None and urlsplit(self.path).path == "/kiosk-alive"
+                and ipaddress.ip_address(self.client_address[0]).is_loopback)
+
+    def do_POST(self) -> None:  # noqa: N802
+        if not self._kiosk_request():
+            self.send_error(404)
+            return
+        self.kiosk.beat()
+        self.send_response(204)
+        self.end_headers()
+
     def send_head(self):
         path = urlsplit(self.path).path
+        if self._kiosk_request():
+            body = json.dumps({"age": self.kiosk.age()}).encode("ascii")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
         if path == "/boot-logo.png":
             # Stage's "Updating" screen; on 404 it shows the bundled Bosun icon.
             png = self.boot_logo.custom_png() if self.boot_logo is not None else None
@@ -198,7 +239,8 @@ class _QuietHandler(SimpleHTTPRequestHandler):
 
 
 def _start_http(stage_dir: Path, host: str, port: int, boot_logo=None) -> ThreadingHTTPServer:
-    handler = functools.partial(_QuietHandler, directory=str(stage_dir), boot_logo=boot_logo)
+    handler = functools.partial(_QuietHandler, directory=str(stage_dir), boot_logo=boot_logo,
+                                kiosk=KioskHeartbeat())
     httpd = ThreadingHTTPServer((host, port), handler)
     threading.Thread(
         target=httpd.serve_forever, name="bosun-hub-http", daemon=True

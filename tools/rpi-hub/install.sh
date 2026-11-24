@@ -30,7 +30,7 @@ fi
 # Validate native updater inputs and the kiosk files before package/code changes.
 # A partially copied checkout must fail here, not after services were changed.
 for required in \
-    tools/rpi-hub/kiosk/bosun-hdmi-recovery.py \
+    tools/rpi-hub/kiosk/bosun-hdmi-recovery.py tools/rpi-hub/kiosk/bosun-stage-watchdog.py \
     tools/rpi-hub/udev/99-bosun-kiosk-input.rules \
     tools/rpi-hub/install-native-updater.sh tools/rpi-hub/udev/60-bosun-update.rules \
     tools/rpi-hub/pi-update/install_package.py \
@@ -59,6 +59,31 @@ if ((${#missing[@]})); then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${packages[@]}"
 else
     echo "all required packages are installed; skipping apt-get"
+fi
+
+# On a Cortex-A53 (Raspberry Pi 3, Zero 2 W) Chromium must be linked around CPU
+# erratum 843419, or Stage's page crashes at random ("Aw, Snap!"). Raspberry
+# Pi's builds are from this version on; any later one stays as it is.
+CHROMIUM_A53_FIXED=1:156.0.8078.108
+chromium_crashes_here() {
+    local installed
+    grep -q '^CPU part.*0xd03' /proc/cpuinfo || return 1
+    installed="$(dpkg-query -W -f='${Version}' chromium 2>/dev/null)" || return 1
+    dpkg --compare-versions "$installed" lt "$CHROMIUM_A53_FIXED"
+}
+if chromium_crashes_here; then
+    echo "== Chromium update =="
+    echo "the installed Chromium can crash Stage on this Pi; this takes several minutes"
+    # Never a reason to fail: the Pi may be offline, and the watchdog restarts a
+    # crashed Stage. Only the network steps are bounded, dpkg must not be killed.
+    chromium=(chromium chromium-common chromium-l10n chromium-sandbox)
+    export DEBIAN_FRONTEND=noninteractive
+    timeout 120 apt-get update -qq &&
+        timeout 900 apt-get install -y -qq --only-upgrade --download-only "${chromium[@]}" &&
+        apt-get install -y -qq --only-upgrade --no-download "${chromium[@]}" || true
+    if chromium_crashes_here; then
+        echo "warning: Chromium was not updated; Stage may restart at times. Rerun this installer when the Pi is online." >&2
+    fi
 fi
 
 if ! id "$HUB_USER" >/dev/null 2>&1; then
@@ -112,6 +137,7 @@ install -m 644 "$SRC"/systemd/bosun-midi.timer    /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-kiosk.service /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-wayvnc.service /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-outputs.service /etc/systemd/system/
+install -m 644 "$SRC"/systemd/bosun-stage-watchdog.service /etc/systemd/system/
 install -m 644 "$SRC"/systemd/bosun-stage-vnc-web.service /etc/systemd/system/
 install -m 644 "$SRC"/udev/33-bosun-midi.rules    /etc/udev/rules.d/
 install -m 644 "$SRC"/udev/99-bosun-kiosk-input.rules /etc/udev/rules.d/
@@ -140,6 +166,7 @@ udevadm settle --timeout=10
 systemctl enable --now seatd.service
 systemctl enable bosun-hub.service bosun-midi.timer bosun-kiosk.service
 systemctl enable bosun-outputs.service bosun-wayvnc.service bosun-stage-vnc-web.service
+systemctl enable bosun-stage-watchdog.service
 # bosun-pi-update.service may be the caller of this script: only enable it (it
 # checks for an interrupted update at startup), never stop, start or restart it.
 systemctl enable bosun-pi-update.service
@@ -147,6 +174,7 @@ systemctl enable --now bosun-pi-update.path
 systemctl restart bosun-hub.service
 systemctl restart bosun-midi.timer
 systemctl restart bosun-kiosk.service
+systemctl restart bosun-stage-watchdog.service
 systemctl start bosun-stage-vnc-web.service
 
 # `restart` returning successfully only means systemd accepted and completed

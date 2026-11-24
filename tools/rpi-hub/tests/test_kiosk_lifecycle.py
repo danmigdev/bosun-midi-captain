@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 import re
 import shutil
+import socket
 import subprocess
 
 import pytest
@@ -116,6 +117,72 @@ def test_kiosk_bypasses_rpi_desktop_chromium_flags():
     assert "--disable-extensions" in launcher
     assert "--enable-gpu-rasterization" in launcher
     assert "--use-angle=gles" in launcher
+
+
+def test_launcher_waits_for_the_hub_before_chromium_can_show_an_error_page():
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+
+    # Chromium pauses its retries of a refused page while the Pi is offline.
+    wait, start = _positions(launcher, "/dev/tcp/", "exec cage -- ")
+    assert wait < start
+    # Whatever Chromium still shows without a page must not light up a stage.
+    assert "--force-dark-mode" in launcher[start:]
+
+
+def _run_hub_wait(url: str) -> subprocess.CompletedProcess:
+    """The launcher's wait for the hub, with two short attempts."""
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is required for the kiosk launcher contract test")
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+    block = re.search(r'(?ms)^if \[\[ "\$BOSUN_KIOSK_URL" =~ .*?^fi$', launcher)
+    assert block, "the launcher must wait for the hub"
+    script = block.group().replace("attempt < 150", "attempt < 2").replace(
+        "&& break", "&& { echo ready; break; }")
+    return subprocess.run([bash, "-c", f'set -u; BOSUN_KIOSK_URL="{url}"; {script}; echo started'],
+                          capture_output=True, text=True, timeout=30, check=False)
+
+
+def test_launcher_starts_as_soon_as_the_hub_listens_and_without_it_in_the_end():
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        port = listener.getsockname()[1]
+        found = _run_hub_wait(f"http://127.0.0.1:{port}/")
+    assert found.stdout.split() == ["ready", "started"], found.stderr
+    missing = _run_hub_wait(f"http://127.0.0.1:{port}/")
+    assert missing.stdout.split() == ["started"] and not missing.stderr
+    other = _run_hub_wait("about:blank")
+    assert other.stdout.split() == ["started"], other.stderr
+
+
+def _run_outputs_wait(runtime: Path) -> subprocess.CompletedProcess:
+    """What cage runs: the wait for stable outputs, then Chromium's command line."""
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is required for the kiosk launcher contract test")
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+    block = re.search(r"(?s)^exec cage -- bash -c '(?P<script>.*?)' bosun-chromium \"\$CHROMIUM\" ", launcher, re.M)
+    assert block, "Chromium must wait for the HDMI recovery of the start"
+    script = block.group("script").replace("attempt < 100", "attempt < 3").replace(
+        "&& break", "&& { echo settled; break; }")
+    return subprocess.run([bash, "-c", script, "bosun-chromium", "echo", "chromium", "--kiosk", "two words"],
+                          env={**os.environ, "XDG_RUNTIME_DIR": runtime.as_posix()},
+                          capture_output=True, text=True, timeout=30, check=False)
+
+
+def test_chromium_starts_when_the_outputs_are_stable_and_without_that_service_in_the_end(tmp_path):
+    waited = _run_outputs_wait(tmp_path)
+    assert waited.stdout.splitlines() == ["chromium --kiosk two words"], waited.stderr
+    (tmp_path / "outputs-settled").touch()
+    ready = _run_outputs_wait(tmp_path)
+    assert ready.stdout.splitlines() == ["settled", "chromium --kiosk two words"], ready.stderr
+
+
+def test_launcher_and_recovery_agree_on_the_marker():
+    recovery = (ROOT / "kiosk/bosun-hdmi-recovery.py").read_text(encoding="utf-8")
+    assert '"XDG_RUNTIME_DIR", "/run/bosun-kiosk")) / "outputs-settled"' in recovery
+    assert '"$XDG_RUNTIME_DIR/outputs-settled"' in LAUNCHER.read_text(encoding="utf-8")
 
 
 def test_launcher_fails_closed_when_systemd_state_is_absent():

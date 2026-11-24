@@ -26,6 +26,9 @@ SETTLE_SECONDS = 3.0
 OFF_SECONDS = 2.0
 RETRY_SECONDS = 5.0
 MAX_ATTEMPTS = 3
+# The launcher starts Chromium once this exists. In the kiosk's runtime
+# directory, so every kiosk start begins without it.
+SETTLED = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/bosun-kiosk")) / "outputs-settled"
 
 
 class RecoverySchedule:
@@ -70,6 +73,33 @@ def randr(*arguments):
     return json.loads(result.stdout) if arguments == ("--json",) else None
 
 
+def stop_mirror():
+    """Disconnect Bosun's wayvnc from cage; systemd starts it again in 3 s.
+
+    wlroots (0.18 to 0.20) aborts cage when HEADLESS-1 is enabled while some
+    clients hold its virtual mode and others do not (head_send_state: Assertion
+    `found'). A wayvnc that connected while the fallback was on holds it; the
+    wlr-randr that enables it here does not.
+    """
+    try:
+        # Not by name: Raspberry Pi OS may run a wayvnc of its own.
+        pid = int(subprocess.run(
+            ["systemctl", "show", "--property=MainPID", "--value", "bosun-wayvnc.service"],
+            capture_output=True, text=True, check=True, timeout=5,
+        ).stdout.strip() or 0)
+        if not pid:
+            return
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.1)
+            os.kill(pid, 0)
+        LOG.warning("wayvnc is still running; continuing HDMI recovery")
+    except ProcessLookupError:
+        return
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        LOG.warning("Cannot stop wayvnc for HDMI recovery: %s", exc)
+
+
 class Policy:
     def __init__(self, config):
         self.config = config
@@ -90,7 +120,8 @@ class Policy:
         self.process = None
 
 
-def rearm_hdmi(policy, *, query=randr, connected=connected_hdmi, pause=time.sleep):
+def rearm_hdmi(policy, *, query=randr, connected=connected_hdmi, pause=time.sleep,
+               mirror=stop_mirror):
     """Always return output ownership to kanshi, including on unplug/failure."""
     outputs = query("--json")
     present = connected()
@@ -104,6 +135,7 @@ def rearm_hdmi(policy, *, query=randr, connected=connected_hdmi, pause=time.slee
 
     policy.stop()
     try:
+        mirror()
         query("--output", "HEADLESS-1", "--on", "--custom-mode", "1920x440@60Hz",
               "--pos", "0,0", "--output", hdmi, "--off")
         pause(OFF_SECONDS)
@@ -115,6 +147,9 @@ def rearm_hdmi(policy, *, query=randr, connected=connected_hdmi, pause=time.slee
         LOG.info("HDMI rearmed on %s using the panel's preferred mode", hdmi)
         return True
     finally:
+        # A wayvnc that came back during the off interval holds the mode again,
+        # and the kanshi started here would not.
+        mirror()
         # Restores the ordinary HDMI/fallback policy even after a failed modeset.
         policy.start()
 
@@ -136,6 +171,7 @@ def main(config):
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
     policy = Policy(config)
     schedule = RecoverySchedule()
+    settled = False
     monitor = None
 
     def stop(_signum, _frame):
@@ -171,6 +207,9 @@ def main(config):
                 if not success and schedule.due is None:
                     LOG.error("HDMI recovery exhausted %d attempts; normal output policy remains active",
                               MAX_ATTEMPTS)
+            if schedule.due is None and not settled:
+                SETTLED.touch()
+                settled = True
             # The fallback reads a small sysfs status file, not the framebuffer
             # or wlr-randr. Healthy idle operation never cycles the HDMI signal.
             delay = 2.0
